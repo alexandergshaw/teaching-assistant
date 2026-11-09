@@ -36,7 +36,7 @@
 // and whether the model stays on-Frame / the review findings are genuinely
 // adversarial. See docs/pres-2-s6-plan.md section 8 / RES-S6-B/C/F.
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Alert, Button, Card, CardContent, Divider, MenuItem, TextField, Typography } from "@mui/material";
 import TabHeader from "../../TabHeader";
 import SourcesEditor from "../SourcesEditor";
@@ -50,6 +50,7 @@ import { recordSessionDiagnosticEntry } from "@/lib/session-diagnostic-log";
 import type { DeckContent, PresentationSource } from "@/lib/presentations/types";
 import {
   ALL_STAGE_IDS,
+  canRunStage,
   createInitialPipelineState,
   type PipelineOp,
   type PipelineState,
@@ -60,6 +61,9 @@ import {
   buildPipelineRequest,
   countObjectiveDependents,
   invalidateObjectiveDependents,
+  invalidateContextDependents,
+  sourcesHaveUncommittedChanges,
+  shouldWakeAutoDownload,
   reducePipelineResponse,
   runToEnd,
   shouldAutoDownloadDeck,
@@ -97,7 +101,7 @@ function subscribeNoop(): () => void {
 // (slide-count fit report) - that refusal is RETURNED as a worded string, never
 // thrown or swallowed. Returns null on success. The auto path only ever calls
 // this with no template (Fork B1).
-async function downloadDeckPptx(deck: DeckContent, templateFileId: string): Promise<string | null> {
+async function downloadDeckPptx(deck: DeckContent, templateFileId: string, isCurrent: () => boolean = () => true): Promise<string | null> {
   let buffer: ArrayBuffer;
   if (chooseDeckDownloadPlan(templateFileId) === "template") {
     const result = await fillDeckTemplateFileAction(templateFileId, {
@@ -110,6 +114,7 @@ async function downloadDeckPptx(deck: DeckContent, templateFileId: string): Prom
     const { serializeDeckToPptx } = await import("@/lib/presentations/deck-file");
     buffer = await serializeDeckToPptx(deck);
   }
+  if (!isCurrent()) return "The deck or its inputs changed while preparing the download. Review and try again.";
   const blob = new Blob([buffer], {
     type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   });
@@ -227,10 +232,17 @@ async function runStage(stage: StageId, state: PipelineState, contextText: strin
 }
 
 export default function PipelineTab() {
-  const [pipelineState, setPipelineState] = usePersistedJSON<PipelineState>(
+  const [pipelineState, setRawPipelineState] = usePersistedJSON<PipelineState>(
     PIPELINE_STATE_KEY,
     createInitialPipelineState()
   );
+  const pipelineRevision = useRef(0);
+  const setPipelineState = useCallback((value: PipelineState | ((previous: PipelineState) => PipelineState)) => {
+    pipelineRevision.current += 1;
+    setRawPipelineState(value);
+  }, [setRawPipelineState]);
+  const operationLock = useRef(false);
+  const [pipelineError, setPipelineError] = useState("");
   const [contextText, setContextText] = usePersistedJSON<string>(PIPELINE_CONTEXT_KEY, "");
   const [homework, setHomework] = usePersistedJSON<string>("ta-pres-pipeline-homework", "");
   const homeworkRef = useRef(homework);
@@ -241,6 +253,7 @@ export default function PipelineTab() {
   const [objectiveBusy, setObjectiveBusy] = useState(false);
   const [objectiveError, setObjectiveError] = useState("");
   const [sourcesDraft, setSourcesDraft] = usePersistedJSON<PresentationSource[]>(PIPELINE_SOURCES_KEY, []);
+  const sourcesDirty = sourcesHaveUncommittedChanges(sourcesDraft, pipelineState);
   const [activeStage, setActiveStage] = useState<StageId>("sources");
   const [runningStage, setRunningStage] = useState<StageId | null>(null);
   const [runningToEnd, setRunningToEnd] = useState(false);
@@ -250,7 +263,10 @@ export default function PipelineTab() {
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [templateResolutionPending, setTemplateResolutionPending] = useState(false);
+  const templatePendingRef = useRef(false);
   const [autoDlFingerprint, setAutoDlFingerprint] = usePersistedJSON<string>(PIPELINE_AUTODL_FINGERPRINT_KEY, "");
+  const autoDownloadInFlight = useRef(false);
+  const [autoDownloadWake, setAutoDownloadWake] = useState(0);
   const [templateFileId, setTemplateFileId] = useSelectedDeckTemplateFileId();
   const [templateChoice, setTemplateChoice] = useState<PipelineTemplateChoice>(() => chooseRawTemplate(templateFileId, "Uploaded PowerPoint"));
   const templateChoiceRef = useRef(templateChoice);
@@ -261,36 +277,52 @@ export default function PipelineTab() {
   const mounted = useSyncExternalStore(subscribeNoop, () => true, () => false);
 
   // Auto-download once when the pipeline completes. The fingerprint is
-  // persisted BEFORE the download so a re-render or reload of the same
+  // persisted AFTER a successful download so a re-render or reload of the same
   // completed deck never fires again; a new run (different deck) does.
   // FORK B1: with a template selected the auto-download is SUPPRESSED - a
   // templated download is a server action that can refuse (slide-count), so it
   // is never auto-fired; the user downloads manually.
   useEffect(() => {
-    if (templateChoice.kind !== "own") return;
+    if (templateChoice.kind !== "own" || sourcesDirty || templateResolutionPending || autoDownloadInFlight.current) return;
     const decision = shouldAutoDownloadDeck(pipelineState, autoDlFingerprint);
     const deck = pipelineState.deck.artifact;
     if (!decision.download || decision.fingerprint === null || !deck) return;
-    setAutoDlFingerprint(decision.fingerprint);
-    downloadDeckPptx(deck, "").catch(() => setDownloadError("Could not build the .pptx"));
-  }, [pipelineState, autoDlFingerprint, setAutoDlFingerprint, templateChoice]);
+    autoDownloadInFlight.current = true;
+    const fingerprint = decision.fingerprint;
+    const revision = pipelineRevision.current;
+    const selectionGeneration = templateChoiceGeneration.current;
+    downloadDeckPptx(deck, "", () => revision === pipelineRevision.current && selectionGeneration === templateChoiceGeneration.current && !templatePendingRef.current && templateChoiceRef.current.kind === "own").then((reason) => { if (reason) setDownloadError(reason); else setAutoDlFingerprint(fingerprint); }).catch(() => setDownloadError("Could not build the .pptx")).finally(() => { autoDownloadInFlight.current = false; if (shouldWakeAutoDownload(revision, pipelineRevision.current) || selectionGeneration !== templateChoiceGeneration.current) setAutoDownloadWake((value) => value + 1); });
+  }, [pipelineState, autoDlFingerprint, setAutoDlFingerprint, templateChoice, sourcesDirty, templateResolutionPending, autoDownloadWake]);
 
   async function runOneStage(stage: StageId) {
+    if (operationLock.current) return;
+    if (sourcesDirty) { setPipelineError("Commit your source changes before running the pipeline."); return; }
+    if (!canRunStage(pipelineState, stage)) { setPipelineError("Complete the required earlier stages before running this stage."); return; }
+    operationLock.current = true; setPipelineError("");
     setRegenOpen(false); // a stale open flag must not re-open the sub-view later
     setRunningStage(stage);
     const objectiveRevisionAtStart = objectiveRevision.current;
+    const revision = pipelineRevision.current;
     try {
       const next = await runStage(stage, pipelineState, contextText, appliedObjectives);
-      if (isObjectiveRevisionCurrent(objectiveRevisionAtStart, objectiveRevision.current)) setPipelineState(next);
+      if (revision !== pipelineRevision.current || !isObjectiveRevisionCurrent(objectiveRevisionAtStart, objectiveRevision.current)) { setPipelineError("Inputs changed while this stage was running. Your edits were kept; run the stage again."); return; }
+      setPipelineState(next);
+    } catch {
+      setPipelineError("Could not run this stage. Check its inputs and try again.");
     } finally {
+      operationLock.current = false;
       setRunningStage(null);
     }
   }
 
   async function handleRunToEnd() {
+    if (operationLock.current) return;
+    if (sourcesDirty) { setPipelineError("Commit your source changes before running the pipeline."); return; }
+    operationLock.current = true; setPipelineError("");
     setRegenOpen(false);
     setRunningToEnd(true);
     const objectiveRevisionAtStart = objectiveRevision.current;
+    let revision = pipelineRevision.current;
     try {
       let current = pipelineState;
       // Bounded by the stage count - the invalidation graph is a DAG
@@ -303,18 +335,24 @@ export default function PipelineTab() {
         // only thing left, everything downstream is blocked on the
         // instructor's own action, so stop rather than spin.
         const runnable = frontier.filter((stage) => stage !== "sources");
-        if (runnable.length === 0) break;
+        if (runnable.length === 0) { if (frontier.includes("sources")) setPipelineError("Commit sources before running the pipeline."); break; }
         for (const stage of runnable) {
           setRunningStage(stage);
           current = await runStage(stage, current, contextText, appliedObjectives);
-          if (!isObjectiveRevisionCurrent(objectiveRevisionAtStart, objectiveRevision.current)) return;
+          if (revision !== pipelineRevision.current || !isObjectiveRevisionCurrent(objectiveRevisionAtStart, objectiveRevision.current)) { setPipelineError("Inputs changed while the pipeline was running. Your edits were kept; run it again."); return; }
           setPipelineState(current);
+          revision = pipelineRevision.current;
           if (current[stage].status === "error") {
+            setActiveStage(stage);
+            setPipelineError(`${STAGE_LABELS[stage]} failed. Review the stage and try again.`);
             return; // stop the fan-out on a failure (finally below still fires)
           }
         }
       }
+    } catch {
+      setPipelineError("Could not continue the pipeline. Check the current stage and try again.");
     } finally {
+      operationLock.current = false;
       setRunningStage(null);
       setRunningToEnd(false);
     }
@@ -376,7 +414,10 @@ export default function PipelineTab() {
 
   async function handleApplyToDeck() {
     const deck = pipelineState.deck.artifact;
-    if (!deck || askInstruction.trim() === "") return;
+    if (sourcesDirty) { setAskOutcome({ severity: "warning", text: "Commit your source changes before applying changes to the deck." }); return; }
+    if (!deck || pipelineState.deck.status !== "done" || askInstruction.trim() === "" || operationLock.current) return;
+    operationLock.current = true;
+    const revision = pipelineRevision.current;
     setAskBusy(true);
     setAskOutcome(null);
     try {
@@ -387,6 +428,7 @@ export default function PipelineTab() {
       });
       const body: unknown = await res.json().catch(() => undefined);
       const outcome = reduceAskResponse(res.status, body);
+      if (revision !== pipelineRevision.current) { setAskOutcome({ severity: "warning", text: "The deck or its inputs changed. Your edits were kept; apply the instruction again." }); return; }
       if (outcome.phase === "ok") {
         setPipelineState((prev) =>
           applyStageEdit(prev, "deck", { presentationTitle: deck.presentationTitle, slides: outcome.slides })
@@ -398,26 +440,33 @@ export default function PipelineTab() {
       } else {
         setAskOutcome({ severity: "error", text: outcome.message });
       }
+    } catch {
+      setAskOutcome({ severity: "error", text: "Could not apply the instruction. Try again." });
     } finally {
+      operationLock.current = false;
       setAskBusy(false);
     }
   }
 
   async function handleDownload() {
     const deck = pipelineState.deck.artifact;
+    if (sourcesDirty) { setDownloadError("Commit your source changes before downloading the deck."); return; }
     if (!deck) return;
+    if (pipelineState.deck.status !== "done") { setDownloadError("The deck is out of date. Regenerate it before downloading."); return; }
     if (templateResolutionPending) {
       setDownloadError("Wait for the template selection to finish before downloading.");
       return;
     }
     setDownloading(true);
     setDownloadError(null);
+    const revision = pipelineRevision.current;
     const selectionGeneration = templateChoiceGeneration.current;
     const choiceAtStart = templateChoiceRef.current;
     const started = Date.now();
     let phase: "resolve" | "fill" = "resolve";
     try {
       const resolution = await resolveTemplateForDownload(choiceAtStart, pipelineLibraryActions);
+      if (revision !== pipelineRevision.current) { setDownloadError("The deck or its inputs changed while preparing the download. Review and try again."); return; }
       if (templateChoiceGeneration.current !== selectionGeneration) {
         recordTemplateDownload(choiceAtStart.kind, phase, started, "PPT_SELECTION");
         setDownloadError("The template selection changed while preparing the download. Choose the effective template again and retry.");
@@ -430,7 +479,7 @@ export default function PipelineTab() {
       }
       recordTemplateDownload(choiceAtStart.kind, phase, started);
       phase = "fill";
-      const refusal = await downloadDeckPptx(deck, resolution.source.sourceFileId);
+      const refusal = await downloadDeckPptx(deck, resolution.source.sourceFileId, () => revision === pipelineRevision.current && selectionGeneration === templateChoiceGeneration.current && !templatePendingRef.current);
       recordTemplateDownload(choiceAtStart.kind, phase, started, refusal === null ? undefined : pipelineTemplateFailureCategory(refusal));
       if (refusal !== null) setDownloadError(refusal);
     } catch {
@@ -465,7 +514,7 @@ export default function PipelineTab() {
     );
   }
 
-  const busy = runningStage !== null || runningToEnd;
+  const busy = runningStage !== null || runningToEnd || askBusy;
 
   if (mounted && regenOpen && pipelineState.deck.status === "done") {
     return (
@@ -495,6 +544,8 @@ export default function PipelineTab() {
       </div>
 
       <PipelineStepper state={pipelineState} activeStage={activeStage} onSelectStage={setActiveStage} />
+      {pipelineError && <Alert severity="warning" role="status">{pipelineError}</Alert>}
+      {sourcesDirty && <Alert severity="warning">Source changes are not committed. Commit sources before running or downloading the deck.</Alert>}
 
       <Card variant="outlined">
         <CardContent style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
@@ -505,9 +556,9 @@ export default function PipelineTab() {
             <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
               <SourcesEditor
                 text={contextText}
-                onTextChange={setContextText}
+                onTextChange={(value) => { if (value !== contextText) setPipelineState(invalidateContextDependents); setContextText(value); }}
                 sources={sourcesDraft}
-                onSourcesChange={setSourcesDraft}
+                onSourcesChange={(value) => { pipelineRevision.current += 1; setSourcesDraft(value); }}
               />
               <Divider />
               <Typography variant="subtitle1">Student learning objectives</Typography>
@@ -687,7 +738,7 @@ export default function PipelineTab() {
                   templateChoiceGeneration.current += 1;
                   setTemplateChoice(choice);
                 }}
-                onResolutionPendingChange={setTemplateResolutionPending}
+                onResolutionPendingChange={(pending) => { templatePendingRef.current = pending; if (pending) templateChoiceGeneration.current += 1; setTemplateResolutionPending(pending); }}
                 disabled={downloading}
               />
               {templateChoice.kind !== "own" && (
@@ -702,13 +753,14 @@ export default function PipelineTab() {
                 <Button
                   variant="outlined"
                   onClick={handleDownload}
-                  disabled={downloading || templateResolutionPending || !pipelineState.deck.artifact}
+                  disabled={downloading || templateResolutionPending || !pipelineState.deck.artifact || pipelineState.deck.status !== "done"}
                   sx={{ textTransform: "none" }}
                 >
                   {downloading ? "Preparing .pptx..." : "Download .pptx"}
                 </Button>
               </div>
               {downloadError && <Alert severity="error">{downloadError}</Alert>}
+              {pipelineState.deck.status === "stale" && <Alert severity="warning">Inputs changed. Existing slides are kept for review; regenerate the deck before downloading.</Alert>}
 
               <SlideDeckPreview slides={pipelineState.deck.artifact?.slides ?? []} />
               <PipelineRepositoryPanel
@@ -750,7 +802,7 @@ export default function PipelineTab() {
                     <Button
                       variant="outlined"
                       onClick={handleApplyToDeck}
-                      disabled={askBusy || askInstruction.trim() === ""}
+                      disabled={busy || askInstruction.trim() === ""}
                       sx={{ textTransform: "none" }}
                     >
                       {askBusy ? "Applying..." : "Apply"}

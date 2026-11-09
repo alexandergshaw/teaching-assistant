@@ -22,7 +22,7 @@ describe("pipeline saved-template caller wiring", () => {
     const caller = readFileSync("src/app/components/presentations/pipeline/PipelineTab.tsx", "utf8");
     const picker = readFileSync("src/app/components/presentations/pipeline/PipelineTemplatePicker.tsx", "utf8");
     expect(caller).toContain("resolveTemplateForDownload(choiceAtStart, pipelineLibraryActions)");
-    expect(caller).toContain("downloadDeckPptx(deck, resolution.source.sourceFileId)");
+    expect(caller).toContain("downloadDeckPptx(deck, resolution.source.sourceFileId, () => revision === pipelineRevision.current && selectionGeneration === templateChoiceGeneration.current && !templatePendingRef.current)");
     expect(caller).toContain("fillDeckTemplateFileAction(templateFileId");
     expect(caller).toContain("onChoiceChange={(choice) => {");
     expect(caller).toContain("setTemplateChoice(choice)");
@@ -68,14 +68,14 @@ describe("pipeline saved-template caller wiring", () => {
       const downloadDeckPptx = result instanceof Error ? vi.fn().mockRejectedValue(result) : vi.fn().mockResolvedValue(result);
       const choice = { kind, libraryId: "private-library-id", sourceFileId: "private-source-id", name: "private library name" };
       const handle = callerFunction("handleDownload", {
-        pipelineState: { deck: { artifact: { presentationTitle: "private title", slides: [] } } },
+        pipelineState: { deck: { status: "done", artifact: { presentationTitle: "private title", slides: [] } } }, pipelineRevision: { current: 0 }, sourcesDirty: false,
         templateResolutionPending: false, templateChoiceGeneration: { current: 0 }, templateChoiceRef: { current: choice },
         setDownloading: vi.fn(), setDownloadError: vi.fn(), recordTemplateDownload, pipelineTemplateFailureCategory,
         pipelineLibraryActions: { getLibrary: vi.fn().mockResolvedValue({ library: { id: "private-library-id", sourceFileId: "private-source-id", name: "private library name" } }), reuseLibrary: vi.fn().mockResolvedValue({ sourceFileId: "private-source-id" }) },
         resolveTemplateForDownload, downloadDeckPptx,
       });
       await handle();
-      expect(downloadDeckPptx).toHaveBeenCalledWith(expect.anything(), "private-source-id");
+      expect(downloadDeckPptx).toHaveBeenCalledWith(expect.anything(), "private-source-id", expect.any(Function));
       const expectedCode = result === null ? undefined : result instanceof Error ? "PPT_DOWNLOAD_ERROR" : result.startsWith("Your template") ? "PPT_FIT_REFUSED" : "PPT_UNAVAILABLE";
       expect(entries).toEqual([
         expect.objectContaining({ operation: `pipeline_template_${kind}_resolve`, outcome: "success" }),
@@ -91,7 +91,7 @@ describe("pipeline saved-template caller wiring", () => {
     const downloadDeckPptx = vi.fn();
     const setDownloadError = vi.fn();
     const handle = callerFunction("handleDownload", {
-      pipelineState: { deck: { artifact: { presentationTitle: "private title", slides: [] } } },
+      pipelineState: { deck: { status: "done", artifact: { presentationTitle: "private title", slides: [] } } }, pipelineRevision: { current: 0 }, sourcesDirty: false,
       templateResolutionPending: false, templateChoiceGeneration: { current: 0 },
       templateChoiceRef: { current: { kind: "library", libraryId: "private-library-id", sourceFileId: "private-source-id", name: "private library name" } },
       setDownloading: vi.fn(), setDownloadError, recordTemplateDownload, pipelineTemplateFailureCategory,
@@ -104,5 +104,78 @@ describe("pipeline saved-template caller wiring", () => {
     const safeCode = code === "PPT_NOT_FOUND" ? "PPT_UNAVAILABLE" : code === "PPT_SELECTION" ? "PPT_SELECTION" : "PPT_RESOLVE_REFUSED";
     expect(entries).toEqual([expect.objectContaining({ operation: "pipeline_template_library_resolve", outcome: "failure", error: safeCode, code: safeCode })]);
     expect(JSON.stringify(entries)).not.toContain("private");
+  });
+
+  it("does not download when inputs change while template resolution is pending", async () => {
+    let finish!: (value: unknown) => void;
+    const resolveTemplateForDownload = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+    const downloadDeckPptx = vi.fn(), setDownloadError = vi.fn(), pipelineRevision = { current: 0 };
+    const handle = callerFunction("handleDownload", {
+      pipelineState: { deck: { status: "done", artifact: { presentationTitle: "Deck", slides: [] } } }, pipelineRevision, sourcesDirty: false,
+      templateResolutionPending: false, templateChoiceGeneration: { current: 0 }, templateChoiceRef: { current: { kind: "own" } },
+      setDownloading: vi.fn(), setDownloadError, recordTemplateDownload: vi.fn(), pipelineTemplateFailureCategory,
+      pipelineLibraryActions: {}, resolveTemplateForDownload, downloadDeckPptx,
+    });
+    const pending = handle(); pipelineRevision.current++; finish({ source: { sourceFileId: "" } }); await pending;
+    expect(downloadDeckPptx).not.toHaveBeenCalled();
+    expect(setDownloadError).toHaveBeenCalledWith(expect.stringContaining("changed while preparing"));
+  });
+  it("does not create a download when selection changes during deck preparation", async () => {
+    let finish!: (value: unknown) => void;
+    const fillDeckTemplateFileAction = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+    const createObjectURL = vi.fn(), selection = { current: 0 };
+    const download = callerFunction("downloadDeckPptx", {
+      chooseDeckDownloadPlan: () => "template", fillDeckTemplateFileAction,
+      base64ToArrayBuffer: () => new ArrayBuffer(0), URL: { createObjectURL },
+    });
+    const pending = download({ presentationTitle: "Deck", slides: [] }, "template", () => selection.current === 0);
+    selection.current++; finish({ base64: "" });
+    expect(await pending).toContain("changed while preparing");
+    expect(createObjectURL).not.toHaveBeenCalled();
+  });
+  it("invalidates the active download as soon as library selection becomes pending", async () => {
+    let finish!: () => void;
+    const templatePendingRef = { current: false }, generation = { current: 0 };
+    const downloadDeckPptx = vi.fn((_deck, _id, isCurrent: () => boolean) => new Promise<string | null>((resolve) => { finish = () => resolve(isCurrent() ? null : "selection changed"); }));
+    const setDownloadError = vi.fn();
+    const handle = callerFunction("handleDownload", {
+      pipelineState: { deck: { status: "done", artifact: { slides: [] } } }, sourcesDirty: false, pipelineRevision: { current: 0 },
+      templateResolutionPending: false, templatePendingRef, templateChoiceGeneration: generation, templateChoiceRef: { current: { kind: "own" } },
+      setDownloading: vi.fn(), setDownloadError, recordTemplateDownload: vi.fn(), pipelineTemplateFailureCategory,
+      pipelineLibraryActions: {}, resolveTemplateForDownload: async () => ({ source: { sourceFileId: "" } }), downloadDeckPptx,
+    });
+    const pending = handle(); await Promise.resolve();
+    templatePendingRef.current = true; generation.current++;
+    finish(); await pending;
+    expect(setDownloadError).toHaveBeenCalledWith("selection changed");
+    const source = readFileSync("src/app/components/presentations/pipeline/PipelineTab.tsx", "utf8");
+    expect(source).toContain("templatePendingRef.current = pending; if (pending) templateChoiceGeneration.current += 1");
+  });
+  it("does not send a whole-deck instruction for stale slides", async () => {
+    const fetch = vi.fn();
+    const handle = callerFunction("handleApplyToDeck", { pipelineState: { deck: { status: "stale", artifact: { slides: [] } } }, sourcesDirty: false, askInstruction: "Change", operationLock: { current: false }, fetch });
+    await handle();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it("names and opens the stage that fails during run-to-end", async () => {
+    const setActiveStage = vi.fn(), setPipelineError = vi.fn();
+    const handle = callerFunction("handleRunToEnd", {
+      operationLock: { current: false }, sourcesDirty: false, setPipelineError, setRegenOpen: vi.fn(), setRunningToEnd: vi.fn(), setRunningStage: vi.fn(),
+      objectiveRevision: { current: 0 }, pipelineRevision: { current: 0 }, pipelineState: {}, ALL_STAGE_IDS: ["outline"],
+      runToEnd: () => ["outline"], runStage: async () => ({ outline: { status: "error" } }), contextText: "", appliedObjectives: [],
+      isObjectiveRevisionCurrent: () => true, setPipelineState: vi.fn(), setActiveStage, STAGE_LABELS: { outline: "Outline" },
+    });
+    await handle();
+    expect(setActiveStage).toHaveBeenCalledWith("outline");
+    expect(setPipelineError).toHaveBeenCalledWith(expect.stringContaining("Outline failed"));
+  });
+  it("refuses run and download while source changes are uncommitted", async () => {
+    const setPipelineError = vi.fn(), setDownloadError = vi.fn(), runStage = vi.fn(), downloadDeckPptx = vi.fn();
+    const run = callerFunction("runOneStage", { operationLock: { current: false }, sourcesDirty: true, setPipelineError, runStage });
+    const download = callerFunction("handleDownload", { pipelineState: { deck: { status: "done", artifact: { slides: [] } } }, sourcesDirty: true, setDownloadError, downloadDeckPptx });
+    await run("outline"); await download();
+    expect(runStage).not.toHaveBeenCalled(); expect(downloadDeckPptx).not.toHaveBeenCalled();
+    expect(setPipelineError).toHaveBeenCalledWith(expect.stringContaining("Commit"));
+    expect(setDownloadError).toHaveBeenCalledWith(expect.stringContaining("Commit"));
   });
 });

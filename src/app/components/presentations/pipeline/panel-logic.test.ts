@@ -11,6 +11,8 @@ import {
   buildPipelineRequest,
   editPipelineSlide,
   invalidateObjectiveDependents,
+  invalidateContextDependents,
+  shouldWakeAutoDownload,
   deckFingerprint,
   extractRegenCandidate,
   isPipelineComplete,
@@ -19,6 +21,19 @@ import {
   runToEnd,
   shouldAutoDownloadDeck,
 } from "./panel-logic";
+
+it("marks generated context-dependent stages stale without discarding edits", () => {
+  const original = withStages({ sources: stage("done", makeSources()), outline: stage("done", { markdown: "Keep my outline" }) });
+  const next = invalidateContextDependents(original);
+  expect(next.sources).toEqual(original.sources);
+  expect(next.outline).toEqual({ status: "stale", artifact: { markdown: "Keep my outline" } });
+  expect(next.deck).toEqual(original.deck);
+});
+
+it("only wakes auto-download when inputs changed during the previous attempt", () => {
+  expect(shouldWakeAutoDownload(3, 4)).toBe(true);
+  expect(shouldWakeAutoDownload(3, 3)).toBe(false);
+});
 import {
   createInitialPipelineState,
   type PipelineState,
@@ -645,15 +660,18 @@ describe("PipelineTab template wiring (PPT-TEMPLATE-UPLOAD-PLACE W3, source-text
   });
 
   it("gates the completion auto-download on the own plan and lists templateFileId in its deps", () => {
-    const effect = src.slice(src.indexOf("if (templateChoice.kind !== \"own\")"));
+    const effect = src.slice(src.indexOf("if (templateChoice.kind !== \"own\" || sourcesDirty || templateResolutionPending || autoDownloadInFlight.current)"));
     const gate = effect.indexOf('templateChoice.kind !== "own"');
     const decision = effect.indexOf("shouldAutoDownloadDeck(");
     expect(gate).toBeGreaterThan(-1);
     expect(decision).toBeGreaterThan(gate);
-    expect(effect).toMatch(/\[pipelineState, autoDlFingerprint, setAutoDlFingerprint, templateChoice\]/);
+    expect(effect).toMatch(/\[pipelineState, autoDlFingerprint, setAutoDlFingerprint, templateChoice, sourcesDirty, templateResolutionPending, autoDownloadWake\]/);
   });
 
   it("never auto-downloads with a template id (auto call passes the empty id)", () => {
-    expect(src).toContain('downloadDeckPptx(deck, "")');
+    expect(src).toContain('downloadDeckPptx(deck, "", () => revision === pipelineRevision.current && selectionGeneration === templateChoiceGeneration.current && !templatePendingRef.current && templateChoiceRef.current.kind === "own")');
+    expect(src).toContain("else setAutoDlFingerprint(fingerprint)");
+    expect(src).toContain("autoDownloadInFlight.current = false");
+    expect(src).toContain("if (shouldWakeAutoDownload(revision, pipelineRevision.current) || selectionGeneration !== templateChoiceGeneration.current) setAutoDownloadWake");
   });
 });

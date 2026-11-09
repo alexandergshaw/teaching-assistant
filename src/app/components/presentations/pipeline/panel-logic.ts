@@ -25,15 +25,36 @@ import {
   ALL_STAGE_IDS,
   applyStageEdit,
   canRunStage,
+  computeStale,
   type PipelineOp,
   type PipelineRequest,
   type PipelineState,
   type PipelineSuccessResponse,
   type StageId,
 } from "@/lib/presentations/pipeline";
+
 import type { DeckContent, PresentationContext } from "@/lib/presentations/types";
 import type { PptxSlide } from "@/lib/pptx";
 import { SLIDE_TITLE_MAX_CHARS } from "@/lib/slide-prompt";
+
+/** Context is used by every source-dependent stage; retain artifacts for review. */
+export function invalidateContextDependents(state: PipelineState): PipelineState {
+  let next = state;
+  for (const stage of computeStale(state, "sources")) {
+    if (next[stage].artifact !== null) next = { ...next, [stage]: { ...next[stage], status: "stale" } };
+  }
+  return next;
+}
+
+/** Source drafts are not pipeline inputs until explicitly committed. */
+export function sourcesHaveUncommittedChanges(draft: PresentationContext["sources"], state: PipelineState): boolean {
+  return JSON.stringify(draft) !== JSON.stringify(state.sources.artifact ?? []);
+}
+
+/** Retry scheduling only when new input arrived, never repeatedly on failure. */
+export function shouldWakeAutoDownload(startRevision: number, currentRevision: number): boolean {
+  return startRevision !== currentRevision;
+}
 
 // Re-exported so a consumer of this module (PipelineTab.tsx, S6.7) can apply a
 // direct user edit to a stage's artifact (e.g. the Frame editor, or a

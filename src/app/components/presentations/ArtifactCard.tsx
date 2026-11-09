@@ -4,10 +4,10 @@
 // produced artifact (content + optional critique + Regenerate), or an error
 // (PRES-1 wave 3).
 
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Button, CircularProgress } from "@mui/material";
 import type { ContentArtifactKind, ProducedArtifact } from "@/lib/presentations/types";
-import { fillDeckTemplateFileAction } from "@/app/actions/deck-template-files";
+import { useTemplateFillReview } from "./TemplateFillReview";
 import {
   KIND_LABELS,
   base64ToArrayBuffer,
@@ -197,6 +197,9 @@ function DeckArtifact({
 }) {
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const { fill, dialog } = useTemplateFillReview();
+  const current = useRef({ deck, templateFileId });
+  useLayoutEffect(() => { current.current = { deck, templateFileId }; }, [deck, templateFileId]);
 
   async function handleDownload() {
     setDownloading(true);
@@ -206,10 +209,10 @@ function DeckArtifact({
       if (chooseDeckDownloadPlan(templateFileId) === "template") {
         // A deck with more slides than the template is REFUSED by the fill
         // action with a worded fit-report; surface it, never drop slides.
-        const result = await fillDeckTemplateFileAction(templateFileId, {
+        const result = await fill(templateFileId, {
           presentationTitle: deck.presentationTitle,
           slides: deck.slides,
-        });
+        }, () => current.current.deck === deck && current.current.templateFileId === templateFileId);
         if ("error" in result) {
           setDownloadError(result.error);
           return;
@@ -239,6 +242,7 @@ function DeckArtifact({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+      {dialog}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <strong>{deck.presentationTitle}</strong>
         <Button

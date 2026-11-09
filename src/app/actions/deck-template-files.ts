@@ -183,8 +183,9 @@ export async function deleteDeckTemplateFileAction(id: string): Promise<{ ok: tr
  */
 export async function fillDeckTemplateFileAction(
   templateFileId: string,
-  deck: { presentationTitle: string; slides: Array<{ title: string; bullets: string[] }> }
-): Promise<{ base64: string; name: string } | { error: string }> {
+  deck: { presentationTitle: string; slides: Array<{ title: string; bullets: string[] }> },
+  reviewedPreview?: string
+): Promise<{ base64: string; name: string } | { error: string; preview?: { token: string; paragraphs: { slide: number; text: string }[] } }> {
   try {
     const user = await requireUser();
     if (!templateFileId.trim()) return { error: "Choose an uploaded template." };
@@ -206,7 +207,12 @@ export async function fillDeckTemplateFileAction(
       return { error: "Could not read any slides from that template." };
     }
 
-    const plan = planSlideTemplateFill(groups, deck.slides);
+    const proposed = planSlideTemplateFill(groups, deck.slides, true);
+    if (!proposed.ok) return { error: describeFitReport(proposed.fitReport).join(" ") };
+    const paragraphs = groups.flatMap((group, index) => group.paragraphs.slice(1 + (deck.slides[index]?.bullets.length ?? 0)).map((paragraph) => ({ slide: group.slide, text: paragraph.text })));
+    const token = createHash("sha256").update(JSON.stringify({ userId: user.id, templateFileId, source: row.content, deck, paragraphs })).digest("hex");
+    if (paragraphs.length && reviewedPreview !== token) return { error: "Review the editable template text proposed for clearing before filling.", preview: { token, paragraphs } };
+    const plan = planSlideTemplateFill(groups, deck.slides, paragraphs.length > 0);
     if (!plan.ok) {
       return { error: describeFitReport(plan.fitReport).join(" ") };
     }

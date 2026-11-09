@@ -176,12 +176,13 @@ export type SlideTemplateFillPlan =
  * `groups.length` generated slides and discarding the rest - that silent
  * discard is the exact defect wave T2 exists to close (section 11.4).
  *
- * Refuse surplus slides and paragraphs as well: leaving original text in an
- * exported generated deck would silently carry unrelated template content.
+ * Refuse surplus slides. Clearing unmatched editable paragraphs requires an
+ * explicit caller choice after the instructor reviews the proposed removals.
  */
 export function planSlideTemplateFill(
   groups: Array<{ slide: number; paragraphs: OfficeParagraph[] }>,
-  deckSlides: GeneratedSlideContent[]
+  deckSlides: GeneratedSlideContent[],
+  clearSurplus = false,
 ): SlideTemplateFillPlan {
   const refusal = buildSlideCountAdjustment(groups.length, deckSlides.length);
   if (refusal) {
@@ -196,11 +197,11 @@ export function planSlideTemplateFill(
     const genSlide = deckSlides[i];
     if (templateParas.length === 0) return { ok: false, fitReport: { adjustments: [buildOperationRefusedAdjustment(`Slide ${i + 1} has no editable text slots for the generated title and ${genSlide.bullets.length} bullets.`)] } };
     if (genSlide.bullets.length > templateParas.length - 1) return { ok: false, fitReport: { adjustments: [buildOperationRefusedAdjustment(`Slide ${i + 1} has ${templateParas.length - 1} editable bullet slots but needs ${genSlide.bullets.length}.`)] } };
-    if (genSlide.bullets.length < templateParas.length - 1) return { ok: false, fitReport: { adjustments: [buildOperationRefusedAdjustment(`Slide ${i + 1} has ${templateParas.length - 1} editable bullet slots but this deck supplies ${genSlide.bullets.length}; original text would remain.`)] } };
+    if (!clearSurplus && genSlide.bullets.length < templateParas.length - 1) return { ok: false, fitReport: { adjustments: [buildOperationRefusedAdjustment(`Slide ${i + 1} has ${templateParas.length - 1} editable bullet slots but this deck supplies ${genSlide.bullets.length}; original text would remain.`)] } };
     replacements.push({ id: templateParas[0].id, text: genSlide.title });
     for (let b = 1; b < templateParas.length; b += 1) {
       const bulletText = genSlide.bullets[b - 1];
-      if (bulletText !== undefined) replacements.push({ id: templateParas[b].id, text: bulletText });
+      replacements.push({ id: templateParas[b].id, text: bulletText ?? "" });
     }
   }
   return { ok: true, replacements, fitReport: { adjustments: [] } };

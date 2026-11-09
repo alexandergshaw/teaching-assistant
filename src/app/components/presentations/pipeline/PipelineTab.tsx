@@ -79,6 +79,7 @@ import FrameEditor from "./FrameEditor";
 import ReviewFindings from "./ReviewFindings";
 import SlideRegenView from "./SlideRegenView";
 import PipelineTemplatePicker from "./PipelineTemplatePicker";
+import { useTemplateFillReview } from "../TemplateFillReview";
 import { chooseRawTemplate, pipelineTemplateFailureCategory, resolveTemplateForDownload, type PipelineLibraryActions, type PipelineTemplateChoice, type PipelineTemplateFailureCategory } from "./template-choice";
 import { PipelineSlideEditor } from "./pipeline-slide-editor";
 import PipelineRepositoryPanel from "./PipelineRepositoryPanel";
@@ -101,13 +102,14 @@ function subscribeNoop(): () => void {
 // (slide-count fit report) - that refusal is RETURNED as a worded string, never
 // thrown or swallowed. Returns null on success. The auto path only ever calls
 // this with no template (Fork B1).
-async function downloadDeckPptx(deck: DeckContent, templateFileId: string, isCurrent: () => boolean = () => true): Promise<string | null> {
+async function downloadDeckPptx(deck: DeckContent, templateFileId: string, isCurrent: () => boolean = () => true, reviewFill?: ReturnType<typeof useTemplateFillReview>["fill"]): Promise<string | null> {
   let buffer: ArrayBuffer;
   if (chooseDeckDownloadPlan(templateFileId) === "template") {
-    const result = await fillDeckTemplateFileAction(templateFileId, {
+    const templateDeck = {
       presentationTitle: deck.presentationTitle,
       slides: deck.slides,
-    });
+    };
+    const result = reviewFill ? await reviewFill(templateFileId, templateDeck, isCurrent) : await fillDeckTemplateFileAction(templateFileId, templateDeck);
     if ("error" in result) return result.error;
     buffer = base64ToArrayBuffer(result.base64);
   } else {
@@ -232,6 +234,7 @@ async function runStage(stage: StageId, state: PipelineState, contextText: strin
 }
 
 export default function PipelineTab() {
+  const { fill: reviewFill, dialog: fillDialog } = useTemplateFillReview();
   const [pipelineState, setRawPipelineState] = usePersistedJSON<PipelineState>(
     PIPELINE_STATE_KEY,
     createInitialPipelineState()
@@ -479,7 +482,7 @@ export default function PipelineTab() {
       }
       recordTemplateDownload(choiceAtStart.kind, phase, started);
       phase = "fill";
-      const refusal = await downloadDeckPptx(deck, resolution.source.sourceFileId, () => revision === pipelineRevision.current && selectionGeneration === templateChoiceGeneration.current && !templatePendingRef.current);
+      const refusal = await downloadDeckPptx(deck, resolution.source.sourceFileId, () => revision === pipelineRevision.current && selectionGeneration === templateChoiceGeneration.current && !templatePendingRef.current, reviewFill);
       recordTemplateDownload(choiceAtStart.kind, phase, started, refusal === null ? undefined : pipelineTemplateFailureCategory(refusal));
       if (refusal !== null) setDownloadError(refusal);
     } catch {
@@ -518,6 +521,7 @@ export default function PipelineTab() {
 
   if (mounted && regenOpen && pipelineState.deck.status === "done") {
     return (
+      <>{fillDialog}
       <SlideRegenView
         pipelineState={pipelineState}
         setPipelineState={setPipelineState}
@@ -525,11 +529,13 @@ export default function PipelineTab() {
         appliedObjectives={appliedObjectives}
         onBack={() => setRegenOpen(false)}
       />
+      </>
     );
   }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
+      {fillDialog}
       <TabHeader
         eyebrow="Presentations"
         title="Slide Deck Pipeline"

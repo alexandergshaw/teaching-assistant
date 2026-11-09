@@ -265,14 +265,27 @@ describe("office-template-fill: groupOfficeTemplateParagraphsBySlide", () => {
 });
 
 describe("office-template-fill: planSlideTemplateFill (wave T2, docs/a43-scope.md section 11.4)", () => {
-  it("refuses missing bullet capacity and surplus original text", async () => {
+  it("refuses missing bullet capacity", async () => {
     const groups = await groupOfficeTemplateParagraphsBySlide("pptx", await buildPptxFixture([pptxParagraph("Title") + pptxParagraph("Body")]));
-    for (const [bullets, message] of [[[], "original text would remain"], [["one", "two"], "1 editable bullet slots but needs 2"]] as const) {
+    for (const [bullets, message] of [[["one", "two"], "1 editable bullet slots but needs 2"]] as const) {
       const plan = planSlideTemplateFill(groups, [{ title: "New", bullets: [...bullets] }]);
       expect(plan.ok).toBe(false);
       if (plan.ok) throw new Error("expected refusal");
       expect(plan.fitReport.adjustments[0]).toMatchObject({ class: "operation-refused", reason: expect.stringContaining(message) });
     }
+  });
+  it("clears unused editable text in a real PPTX without discarding supplied text", async () => {
+    const buffer = await buildPptxFixture([pptxParagraph("OLD TITLE") + pptxParagraph("OLD BULLET") + pptxParagraph("SURPLUS SAMPLE")]);
+    const groups = await groupOfficeTemplateParagraphsBySlide("pptx", buffer);
+    expect(planSlideTemplateFill(groups, [{ title: "New title", bullets: ["New bullet"] }]).ok).toBe(false);
+    const plan = planSlideTemplateFill(groups, [{ title: "New title", bullets: ["New bullet"] }], true);
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) throw new Error("expected plan");
+    const output = await fillOfficeTemplate("pptx", buffer, plan.replacements);
+    const zip = await JSZip.loadAsync(output);
+    const xml = await zip.file("ppt/slides/slide1.xml")!.async("string");
+    expect(xml).toContain("New title"); expect(xml).toContain("New bullet");
+    expect(xml).not.toContain("OLD TITLE"); expect(xml).not.toContain("OLD BULLET"); expect(xml).not.toContain("SURPLUS SAMPLE");
   });
   it("WATCHED RED before this wave: a template with fewer slides than the deck needs must not silently drop the rest", async () => {
     // This is the exact shape of the bug docs/a43-scope.md's wave T2 exists

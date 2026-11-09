@@ -51,7 +51,7 @@ describe("creation view reachability", () => {
 
   it("routes the download by plan: template through the fill action, own through serializeDeckToPptx", () => {
     const plan = card.indexOf('chooseDeckDownloadPlan(templateFileId) === "template"');
-    const fill = card.indexOf("fillDeckTemplateFileAction(templateFileId");
+    const fill = card.indexOf("fill(templateFileId");
     const own = card.indexOf("serializeDeckToPptx(deck)");
     expect(plan).toBeGreaterThan(-1);
     expect(fill).toBeGreaterThan(plan);

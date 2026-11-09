@@ -22,7 +22,7 @@ describe("pipeline saved-template caller wiring", () => {
     const caller = readFileSync("src/app/components/presentations/pipeline/PipelineTab.tsx", "utf8");
     const picker = readFileSync("src/app/components/presentations/pipeline/PipelineTemplatePicker.tsx", "utf8");
     expect(caller).toContain("resolveTemplateForDownload(choiceAtStart, pipelineLibraryActions)");
-    expect(caller).toContain("downloadDeckPptx(deck, resolution.source.sourceFileId, () => revision === pipelineRevision.current && selectionGeneration === templateChoiceGeneration.current && !templatePendingRef.current)");
+    expect(caller).toContain("downloadDeckPptx(deck, resolution.source.sourceFileId, () => revision === pipelineRevision.current && selectionGeneration === templateChoiceGeneration.current && !templatePendingRef.current, reviewFill)");
     expect(caller).toContain("fillDeckTemplateFileAction(templateFileId");
     expect(caller).toContain("onChoiceChange={(choice) => {");
     expect(caller).toContain("setTemplateChoice(choice)");
@@ -72,10 +72,10 @@ describe("pipeline saved-template caller wiring", () => {
         templateResolutionPending: false, templateChoiceGeneration: { current: 0 }, templateChoiceRef: { current: choice },
         setDownloading: vi.fn(), setDownloadError: vi.fn(), recordTemplateDownload, pipelineTemplateFailureCategory,
         pipelineLibraryActions: { getLibrary: vi.fn().mockResolvedValue({ library: { id: "private-library-id", sourceFileId: "private-source-id", name: "private library name" } }), reuseLibrary: vi.fn().mockResolvedValue({ sourceFileId: "private-source-id" }) },
-        resolveTemplateForDownload, downloadDeckPptx,
+        resolveTemplateForDownload, downloadDeckPptx, reviewFill: vi.fn(),
       });
       await handle();
-      expect(downloadDeckPptx).toHaveBeenCalledWith(expect.anything(), "private-source-id", expect.any(Function));
+      expect(downloadDeckPptx).toHaveBeenCalledWith(expect.anything(), "private-source-id", expect.any(Function), expect.any(Function));
       const expectedCode = result === null ? undefined : result instanceof Error ? "PPT_DOWNLOAD_ERROR" : result.startsWith("Your template") ? "PPT_FIT_REFUSED" : "PPT_UNAVAILABLE";
       expect(entries).toEqual([
         expect.objectContaining({ operation: `pipeline_template_${kind}_resolve`, outcome: "success" }),
@@ -142,7 +142,7 @@ describe("pipeline saved-template caller wiring", () => {
       pipelineState: { deck: { status: "done", artifact: { slides: [] } } }, sourcesDirty: false, pipelineRevision: { current: 0 },
       templateResolutionPending: false, templatePendingRef, templateChoiceGeneration: generation, templateChoiceRef: { current: { kind: "own" } },
       setDownloading: vi.fn(), setDownloadError, recordTemplateDownload: vi.fn(), pipelineTemplateFailureCategory,
-      pipelineLibraryActions: {}, resolveTemplateForDownload: async () => ({ source: { sourceFileId: "" } }), downloadDeckPptx,
+      pipelineLibraryActions: {}, resolveTemplateForDownload: async () => ({ source: { sourceFileId: "" } }), downloadDeckPptx, reviewFill: vi.fn(),
     });
     const pending = handle(); await Promise.resolve();
     templatePendingRef.current = true; generation.current++;

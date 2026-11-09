@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@mui/material";
 import TabHeader from "../TabHeader";
 import { useSupabase } from "@/context/SupabaseProvider";
@@ -28,8 +28,8 @@ import { extractDeckSourceFileAction, extractDeckSourceRepoAction } from "@/app/
 import {
   uploadDeckTemplateFileAction,
   deleteDeckTemplateFileAction,
-  fillDeckTemplateFileAction,
 } from "@/app/actions/deck-template-files";
+import { useTemplateFillReview } from "../presentations/TemplateFillReview";
 import { buildSlidesPptx, type PptxTheme } from "@/lib/pptx";
 import { saveRecordingFile } from "@/lib/recording-files";
 import { getStoredProvider } from "@/lib/llm-provider";
@@ -70,6 +70,7 @@ function base64ToBytes(base64: string): ArrayBuffer {
 }
 
 export default function PowerPointDesignTab() {
+  const { fill: reviewTemplateFill, dialog: fillReviewDialog } = useTemplateFillReview();
   const { supabase, user } = useSupabase();
   const draftedGradesInbox = useDraftedGradesInbox();
 
@@ -125,6 +126,8 @@ export default function PowerPointDesignTab() {
   // file's own slides (src/lib/decks/office-template-fill.ts) instead of
   // building a fresh presentation with buildSlidesPptx.
   const [selectedFileId, setSelectedFileId] = useSelectedDeckTemplateFileId();
+  const currentFill = useRef({ selectedFileId, generatedDeck, editedSlides });
+  useLayoutEffect(() => { currentFill.current = { selectedFileId, generatedDeck, editedSlides }; }, [selectedFileId, generatedDeck, editedSlides]);
   const { templateFiles, loadError: templateFilesLoadError, refresh: refreshTemplateFiles } =
     useDeckTemplateFiles(user);
   const [fileUploadBusy, setFileUploadBusy] = useState(false);
@@ -528,10 +531,10 @@ export default function PowerPointDesignTab() {
   const buildOutputPptx = async (): Promise<{ bytes: ArrayBuffer; name: string } | { error: string }> => {
     if (!generatedDeck || !selected) return { error: "Generate a deck first." };
     if (selectedFileId) {
-      const result = await fillDeckTemplateFileAction(selectedFileId, {
+      const result = await reviewTemplateFill(selectedFileId, {
         presentationTitle: generatedDeck.presentationTitle,
         slides: editedSlides,
-      });
+      }, () => currentFill.current.selectedFileId === selectedFileId && currentFill.current.generatedDeck === generatedDeck && currentFill.current.editedSlides === editedSlides);
       if ("error" in result) return result;
       return { bytes: base64ToBytes(result.base64), name: result.name };
     }
@@ -671,6 +674,7 @@ export default function PowerPointDesignTab() {
 
   return (
     <div className={styles.tabContainer}>
+      {fillReviewDialog}
       <TabHeader
         eyebrow="Design"
         title="PowerPoint Design"

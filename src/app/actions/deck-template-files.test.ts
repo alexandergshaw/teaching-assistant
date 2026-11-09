@@ -314,6 +314,21 @@ describe("per-user scoping (S-AUTH-1/2)", () => {
     expect(xml).toContain("Intro");
   });
 
+  it("refuses unmatched editable bullet text without an explicit reviewed choice", async () => {
+    h.state.rows = [storedRow(ID_A, USER_A, await realPptxBase64())];
+    const result = await fillDeckTemplateFileAction(ID_A, { presentationTitle: "Lesson", slides: [{ title: "New title", bullets: ["One bullet"] }] });
+    expect(result).toHaveProperty("preview.paragraphs", [{ slide: 1, text: "Body two" }]);
+    if (!("preview" in result) || !result.preview) throw new Error("expected preview");
+    const deck = { presentationTitle: "Lesson", slides: [{ title: "New title", bullets: ["One bullet"] }] };
+    const changed = await fillDeckTemplateFileAction(ID_A, { ...deck, presentationTitle: "Changed" }, result.preview.token);
+    expect(changed).toHaveProperty("preview");
+    const accepted = await fillDeckTemplateFileAction(ID_A, deck, result.preview.token);
+    if (!("base64" in accepted)) throw new Error(accepted.error);
+    const output = await JSZip.loadAsync(Buffer.from(accepted.base64, "base64"));
+    const xml = await output.file("ppt/slides/slide1.xml")!.async("string");
+    expect(xml).toContain("New title"); expect(xml).toContain("One bullet"); expect(xml).not.toContain("Body two");
+  });
+
   it("a non-uuid id never reaches the query", async () => {
     const del = await deleteDeckTemplateFileAction("not-a-uuid");
     const fill = await fillDeckTemplateFileAction("not-a-uuid", DECK);

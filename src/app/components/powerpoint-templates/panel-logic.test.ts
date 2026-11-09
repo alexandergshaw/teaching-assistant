@@ -1,6 +1,21 @@
 import { resetSessionDiagnosticLogForTests, readSessionDiagnosticLogState } from "@/lib/session-diagnostic-log";
 import { describe, it, expect, vi } from "vitest";
-import { filterLibraryPage, libraryDisplayName, filterTemplateSlides, handoffTemplate, SELECTED_TEMPLATE_KEY, SELECTED_ROLE_LIBRARY_KEY, recordPowerPointDiagnostic, sourceSlidePage } from "./panel-logic";
+import { allowPowerPointRouteChange, filterLibraryPage, libraryDisplayName, filterTemplateSlides, handoffTemplate, SELECTED_TEMPLATE_KEY, SELECTED_ROLE_LIBRARY_KEY, recordPowerPointDiagnostic, sourceSlidePage } from "./panel-logic";
+import { allowRecordingRouteChange, registerRecordingRouteGuard } from "@/lib/recording-route-guard";
+it("guards pathname navigation for unsaved or processing templates and unregisters cleanly", () => {
+  const confirm = vi.fn(() => false), inform = vi.fn();
+  expect(allowPowerPointRouteChange(false, false, confirm, inform)).toBe(true);
+  expect(confirm).not.toHaveBeenCalled();
+  expect(allowPowerPointRouteChange(true, false, confirm, inform)).toBe(false);
+  confirm.mockReturnValue(true);
+  expect(allowPowerPointRouteChange(true, false, confirm, inform)).toBe(true);
+  expect(allowPowerPointRouteChange(false, true, confirm, inform)).toBe(false);
+  expect(inform).toHaveBeenCalledOnce();
+  const unregister = registerRecordingRouteGuard(() => allowPowerPointRouteChange(true, false, () => false, inform));
+  expect(allowRecordingRouteChange("/", "/knowledge")).toBe(false);
+  expect(allowRecordingRouteChange("/", "/")).toBe(true);
+  unregister(); expect(allowRecordingRouteChange("/", "/knowledge")).toBe(true);
+});
 it("filters names without conflating duplicate library identities and clamps the page after a refresh", () => {
   const entries = Array.from({ length: 13 }, (_, i) => ({ id: String(i), name: i < 2 ? "Résumé" : `Class ${i}` }));
   expect(filterLibraryPage(entries, " re\u0301sume\u0301 ", 1).items.map((item) => item.id)).toEqual(["0", "1"]);

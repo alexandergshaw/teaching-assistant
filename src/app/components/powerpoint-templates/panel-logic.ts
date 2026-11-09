@@ -1,6 +1,10 @@
 import { recordSessionDiagnosticEntry } from "@/lib/session-diagnostic-log";
 import { failure, type LibrarySlide, type TemplateFailure } from "@/lib/powerpoint-template-library/types";
 export const SELECTED_TEMPLATE_KEY = "ta-ppt-template-file-id";
+export function allowPowerPointRouteChange(dirty: boolean, busy: boolean, confirm: () => boolean, inform: () => void): boolean {
+  if (busy) { inform(); return false; }
+  return !dirty || confirm();
+}
 export function libraryDisplayName<T extends { id: string; name: string }>(library: T, libraries: readonly T[]): string {
   const key = library.name.trim().normalize("NFKC").toLocaleLowerCase();
   const duplicate = libraries.some((other) => other.id !== library.id && other.name.trim().normalize("NFKC").toLocaleLowerCase() === key);

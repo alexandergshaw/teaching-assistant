@@ -3,6 +3,11 @@ import { readFileSync } from "node:fs";
 import { stripComments } from "@/app/components/ui/modalAdoptionSourceScan";
 describe("PowerPoint template UI wiring (source, not rendering)", () => {
   const source = stripComments(readFileSync("src/app/components/powerpoint-templates/index.tsx", "utf8"));
+  it("registers the pathname guard at commit and retains the browser unload guard", () => {
+    expect(source).toContain("useLayoutEffect(() => registerRecordingRouteGuard");
+    expect(source).toContain("busy || locked.current");
+    expect(source).toContain('window.addEventListener("beforeunload", warn)');
+  });
   it("offers searchable paged library results without changing the open action", () => {
     expect(source).toContain('label="Search saved libraries"');
     expect(source).toContain("filterLibraryPage(libraries, libraryQuery, libraryPage)");

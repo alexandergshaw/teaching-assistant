@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, MenuItem, Pagination, TextField } from "@mui/material";
 import { uploadPowerPointTemplateAction, analyzePowerPointTemplateAction, listPowerPointTemplateLibrariesAction,
   getPowerPointTemplateLibraryAction, savePowerPointTemplateLibraryAction, reusePowerPointTemplateLibraryAction,
   downloadPowerPointTemplateLibraryAction } from "@/app/actions/powerpoint-template-library";
 import { SLIDE_ROLES, absentRoles, failure, type LibraryDefinition, type LibraryMeta, type TemplateFailure } from "@/lib/powerpoint-template-library/types";
 import { checkFileWireBudget } from "@/lib/upload-budget";
-import { recordPowerPointDiagnostic as diagnostic, templateOperationStartedAt, handoffTemplate, readTemplateFile, downloadTemplate, filterLibraryPage, libraryDisplayName, filterTemplateSlides, sourceSlidePage } from "./panel-logic";
+import { recordPowerPointDiagnostic as diagnostic, templateOperationStartedAt, handoffTemplate, readTemplateFile, downloadTemplate, filterLibraryPage, libraryDisplayName, filterTemplateSlides, sourceSlidePage, allowPowerPointRouteChange } from "./panel-logic";
+import { registerRecordingRouteGuard } from "@/lib/recording-route-guard";
 import TabHeader from "../TabHeader";
 import styles from "../template-tools.module.css";
 import { useSupabase } from "@/context/SupabaseProvider";
@@ -95,11 +96,19 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
   // A newly entered view refreshes; the session is keyed to the authenticated user.
   }, [active]);
   useEffect(() => {
-    if (!dirty) return;
+    if (!dirty && !busy) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty]);
+  }, [dirty, busy]);
+  // The existing registry is used by the app's pathname-changing links.
+  // Its synchronous contract matches the established recording draft guard.
+  useLayoutEffect(() => registerRecordingRouteGuard(() => allowPowerPointRouteChange(
+    dirty,
+    busy || locked.current,
+    () => window.confirm("This PowerPoint template has unsaved changes. Leave without saving?"),
+    () => window.alert("Wait for the PowerPoint template operation to finish before leaving."),
+  )), [dirty, busy]);
   function requireSuccess<T extends object>(result: T): Exclude<T, TemplateFailure> {
     if ("error" in result) throw result;
     return result as Exclude<T, TemplateFailure>;

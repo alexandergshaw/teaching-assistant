@@ -7,6 +7,7 @@ import { analyzeSlides, validateAssignments } from "@/lib/powerpoint-template-li
 import { getSource, listLibrariesWithCompleteness, getLibrary, saveLibrary } from "@/lib/powerpoint-template-library/store";
 import { failure, libraryName, TemplateError, type LibraryDefinition } from "@/lib/powerpoint-template-library/types";
 import { checkWireBudget } from "@/lib/upload-budget";
+import { createHash } from "node:crypto";
 
 export async function uploadPowerPointTemplateAction(name: string, fileName: string, base64: string, confirmed: boolean) {
   let user;
@@ -39,8 +40,10 @@ export async function analyzePowerPointTemplateAction(sourceFileId: string, mode
         definition = { version: 1, slides: inventory.map((slide) => ({ ...slide, role: "other" })) };
       }
     }
-    await getSource(user.id, sourceFileId);
-    return { definition, manual };
+    const latest = await getSource(user.id, sourceFileId);
+    const sourceDigest = createHash("sha256").update(source.content).digest("hex");
+    if (createHash("sha256").update(latest.content).digest("hex") !== sourceDigest) throw new TemplateError("PPT_INVALID");
+    return { definition, manual, sourceDigest };
   } catch (error) { return failure(error, "PPT_STORAGE"); }
 }
 export async function listPowerPointTemplateLibrariesAction() {
@@ -58,7 +61,7 @@ export async function getPowerPointTemplateLibraryAction(id: string) {
     const source = await getSource(user.id, library.sourceFileId);
     const inventory = await inventorySlides(decodeSource(source.content));
     if (library.definition.version !== 1) throw new TemplateError("PPT_INVALID");
-    return { library: { ...library, definition: validateAssignments(library.definition, inventory) } };
+    return { library: { ...library, definition: validateAssignments(library.definition, inventory) }, sourceDigest: createHash("sha256").update(source.content).digest("hex") };
   } catch (error) { return failure(error, "PPT_STORAGE"); }
 }
 export async function savePowerPointTemplateLibraryAction(id: string | null, sourceFileId: string, name: string, proposal: LibraryDefinition) {

@@ -9,6 +9,8 @@ import { SLIDE_ROLES, absentRoles, failure, type LibraryDefinition, type Library
 import { checkFileWireBudget } from "@/lib/upload-budget";
 import { recordPowerPointDiagnostic as diagnostic, templateOperationStartedAt, handoffTemplate, readTemplateFile, downloadTemplate, filterLibraryPage, libraryDisplayName, filterTemplateSlides, sourceSlidePage, allowPowerPointRouteChange } from "./panel-logic";
 import { registerRecordingRouteGuard } from "@/lib/recording-route-guard";
+import { ownerMarkerFor, readSweepOwnerMarker } from "@/lib/client-state-sweep";
+import { applyRecoveredRoles, parseRecovery, recoveryKey, recoverySnapshot } from "./recovery";
 import TabHeader from "../TabHeader";
 import styles from "../template-tools.module.css";
 import { useSupabase } from "@/context/SupabaseProvider";
@@ -17,10 +19,10 @@ export default function PowerPointTemplates({ onUseInSlideDeckCreation, active =
   const { user, loading } = useSupabase();
   if (loading) return <Alert severity="info" role="status">Loading your session...</Alert>;
   if (!user) return <Alert severity="info">Sign in to manage PowerPoint templates.</Alert>;
-  return <PowerPointTemplatesSession key={user.id} active={active} onUseInSlideDeckCreation={onUseInSlideDeckCreation} />;
+  return <PowerPointTemplatesSession key={user.id} userId={user.id} active={active} onUseInSlideDeckCreation={onUseInSlideDeckCreation} />;
 }
 
-function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUseInSlideDeckCreation?: () => void; active: boolean }) {
+function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active, userId }: { onUseInSlideDeckCreation?: () => void; active: boolean; userId: string }) {
   const [libraries, setLibraries] = useState<LibraryMeta[]>([]);
   const [librariesTruncated, setLibrariesTruncated] = useState(false);
   const [librariesSnapshotUncertain, setLibrariesSnapshotUncertain] = useState(false);
@@ -36,6 +38,7 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
   const [confirmed, setConfirmed] = useState(false);
   const [name, setName] = useState("");
   const [sourceId, setSourceId] = useState("");
+  const [sourceDigest, setSourceDigest] = useState("");
   const [savedId, setSavedId] = useState<string | null>(null);
   const [definition, setDefinition] = useState<LibraryDefinition | null>(null);
   const [manualReview, setManualReview] = useState(false);
@@ -43,11 +46,52 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
   const [error, setError] = useState<TemplateFailure | null>(null);
   const [status, setStatus] = useState("");
   const [dirty, setDirty] = useState(false);
+  const [recoveryReady, setRecoveryReady] = useState(false);
+  const [recoveryMessage, setRecoveryMessage] = useState("");
+  const [recoveryWriteFailed, setRecoveryWriteFailed] = useState(false);
+  const [recoveryBlocked, setRecoveryBlocked] = useState(false);
   const [pending, setPending] = useState<{ kind: "file"; file: File } | { kind: "open"; id: string } | { kind: "analyze"; mode: "auto" | "manual" } | null>(null);
   const alive = useRef(true);
   const generation = useRef(0);
   const listGeneration = useRef(0);
   const locked = useRef(false);
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      let saved;
+      try {
+        if (readSweepOwnerMarker() !== ownerMarkerFor(userId)) throw new Error("owner");
+        const raw = localStorage.getItem(recoveryKey(userId));
+        saved = raw ? parseRecovery(raw) : null;
+        if (raw && !saved) throw new Error("invalid");
+      } catch { if (active) { setRecoveryBlocked(true); setRecoveryMessage("Draft recovery could not be read. The existing record will not be overwritten."); setRecoveryReady(true); } return; }
+      if (!saved) { if (active) setRecoveryReady(true); return; }
+      if (!saved.sourceId) {
+        if (active) { setName(saved.name); setDirty(true); setRecoveryMessage(saved.needsFile ? "Recovered the template name. The source file was not saved in this browser; choose it again." : "Recovered the unsaved template name."); setRecoveryReady(true); }
+        return;
+      }
+      try {
+        const result = await analyzePowerPointTemplateAction(saved.sourceId, "manual");
+        if (!active || readSweepOwnerMarker() !== ownerMarkerFor(userId)) return;
+        if ("error" in result) throw new Error("unavailable");
+        if (result.sourceDigest !== saved.sourceDigest) throw new Error("changed");
+        const restored = applyRecoveredRoles(result.definition, saved.roles);
+        if (!restored) throw new Error("changed");
+        setName(saved.name); setSourceId(saved.sourceId); setSourceDigest(saved.sourceDigest); setSavedId(null); setDefinition(restored); setDirty(true); setManualReview(true);
+        setRecoveryMessage("Recovered unsaved classifications for this account. Review them before saving as a new library; the existing library will not be overwritten."); setRecoveryReady(true);
+      } catch { if (active) { setRecoveryBlocked(true); setRecoveryMessage("Could not restore the draft source. Your recovery record was kept; reload to try again."); setRecoveryReady(true); } }
+    })();
+    return () => { active = false; };
+  }, [userId]);
+  useLayoutEffect(() => {
+    if (!recoveryReady || recoveryBlocked || readSweepOwnerMarker() !== ownerMarkerFor(userId)) return;
+    let active = true;
+    try {
+      if (dirty) localStorage.setItem(recoveryKey(userId), JSON.stringify(recoverySnapshot(name, sourceDigest ? sourceId : "", sourceDigest, sourceDigest ? savedId : null, sourceDigest ? definition : null, Boolean(file && !sourceDigest))));
+      else localStorage.removeItem(recoveryKey(userId));
+    } catch { queueMicrotask(() => { if (active) setRecoveryWriteFailed(true); }); }
+    return () => { active = false; };
+  }, [recoveryReady, recoveryBlocked, userId, dirty, name, sourceId, sourceDigest, savedId, definition, file]);
   const visibleSlides = useMemo(() => filterTemplateSlides(definition?.slides ?? [], slideQuery), [definition, slideQuery]);
   const effectiveSlidePage = Math.min(slidePage, Math.max(1, Math.ceil(visibleSlides.length / 6)));
   async function handleOperation(operation: "load" | "analyze" | "save" | "reuse" | "download", job: (current: () => boolean) => Promise<void>) {
@@ -131,7 +175,7 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
       const result = requireSuccess(await analyzePowerPointTemplateAction(id, mode));
       diagnostic("analyze", started);
       if (!current()) return;
-      setDefinition(result.definition); setManualReview(result.manual); setSlidePage(1); setSlideQuery(""); setDirty(true); setStatus(result.manual ? `${mode === "auto" ? "Automatic classification was unavailable. " : ""}Manual review: all slides start as other. Assign roles, then save. Textless slides have no image preview and cannot be filled by the positional writer.` : "Review the source slides and classifications, then save.");
+      setDefinition(result.definition); setSourceDigest(result.sourceDigest); setManualReview(result.manual); setSlidePage(1); setSlideQuery(""); setDirty(true); setStatus(result.manual ? `${mode === "auto" ? "Automatic classification was unavailable. " : ""}Manual review: all slides start as other. Assign roles, then save. Textless slides have no image preview and cannot be filled by the positional writer.` : "Review the source slides and classifications, then save.");
     });
   }
   async function open(id: string) {
@@ -141,7 +185,7 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
       diagnostic("load", started);
       if (!current()) return;
       setSavedId(result.library.id); setSourceId(result.library.sourceFileId);
-      setName(result.library.name); setDefinition(result.library.definition); setManualReview(false); setSlidePage(1); setSlideQuery("");
+      setName(result.library.name); setDefinition(result.library.definition); setSourceDigest(result.sourceDigest); setManualReview(false); setSlidePage(1); setSlideQuery("");
       setFile(null); setConfirmed(false); setDirty(false); setStatus("Saved library reopened.");
     });
   }
@@ -183,12 +227,17 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
   }
   function selectFile(next: File) {
     const preserveName = !file && !sourceId && !definition && name.trim();
-    generation.current++; setFile(next); setConfirmed(false); setSourceId(""); setSavedId(null);
+    generation.current++; setFile(next); setConfirmed(false); setSourceId(""); setSourceDigest(""); setSavedId(null);
     setDefinition(null); setManualReview(false); setError(null); setStatus(""); setDirty(true);
     if (!preserveName) setName(next.name.replace(/\.pptx$/i, "").slice(0, 160));
   }
+  if (!recoveryReady) return <Alert severity="info" role="status">Checking for an unsaved PowerPoint draft...</Alert>;
   return <div className={styles.page}>
     <TabHeader eyebrow="Presentations" title="PowerPoint Templates" subtitle="Review extracted slide text and save classifications. Standard download fills the original deck by position; choose Match slides by role in Slide Deck Creation to use your classifications. Slides need editable text, and slide and bullet capacity limits apply. Image previews are not available." />
+    <p className={styles.helperText}>Unsaved names and classifications can be recovered in this browser for this account. Recovery is cleared on sign-out. Source files and slide text are not saved here.</p>
+    {recoveryMessage && <Alert severity="info">{recoveryMessage}</Alert>}
+    {recoveryBlocked && <Alert severity="warning">New edits cannot be recovered until the previous recovery record is resolved. <Button size="small" onClick={() => { try { localStorage.removeItem(recoveryKey(userId)); setRecoveryBlocked(false); setRecoveryMessage(""); } catch { setRecoveryWriteFailed(true); } }}>Discard old recovery record</Button></Alert>}
+    {recoveryWriteFailed && <Alert severity="warning">Draft recovery could not be saved in this browser. Keep this page open until your changes are saved.</Alert>}
     <div className={styles.workspace}>
       <section className={styles.panel} aria-labelledby="ppt-template-heading">
         <header className={styles.panelHeader}>

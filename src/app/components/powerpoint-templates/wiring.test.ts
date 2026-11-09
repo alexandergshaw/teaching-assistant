@@ -3,6 +3,19 @@ import { readFileSync } from "node:fs";
 import { stripComments } from "@/app/components/ui/modalAdoptionSourceScan";
 describe("PowerPoint template UI wiring (source, not rendering)", () => {
   const source = stripComments(readFileSync("src/app/components/powerpoint-templates/index.tsx", "utf8"));
+  it("gates editing during account-scoped recovery and revalidates the source", () => {
+    expect(source).toContain("readSweepOwnerMarker() !== ownerMarkerFor(userId)");
+    expect(source).toContain('analyzePowerPointTemplateAction(saved.sourceId, "manual")');
+    expect(source).toContain("applyRecoveredRoles(result.definition, saved.roles)");
+    expect(source).toContain('if (!recoveryReady) return <Alert');
+    expect(source).toContain("The source file was not saved in this browser; choose it again.");
+    expect(source).toContain("!recoveryReady || recoveryBlocked || readSweepOwnerMarker()");
+    expect(source).toContain("Discard old recovery record");
+    expect(source).toContain("result.sourceDigest !== saved.sourceDigest");
+    expect(source).toContain("setSourceDigest(saved.sourceDigest); setSavedId(null); setDefinition(restored)");
+    expect(source).toContain("saving as a new library; the existing library will not be overwritten");
+    expect(source).toContain("Recovery is cleared on sign-out");
+  });
   it("registers the pathname guard at commit and retains the browser unload guard", () => {
     expect(source).toContain("useLayoutEffect(() => registerRecordingRouteGuard");
     expect(source).toContain("busy || locked.current");

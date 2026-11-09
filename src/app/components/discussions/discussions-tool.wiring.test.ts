@@ -26,20 +26,35 @@ describe("discussions wiring", () => {
     expect(run).toContain("discussionRosterProblem(roster, rosterReviewed)");
     expect(run.indexOf("if (rosterProblem)")).toBeLessThan(run.indexOf("setRows(names.map"));
   });
-  it("exposes responses and roster views with saved-class selection and conditional saves", () => {
-    expect(source).toContain('value="responses" label="Responses"');
-    expect(source).toContain('value="rosters" label="Rosters"');
+  it("uses existing course rosters without exposing roster editing or writing courses", () => {
+    expect(source).not.toContain('value="rosters"');
+    expect(source).not.toContain('saveDiscussionRosterAction');
+    expect(source).not.toContain('Save roster');
+    expect(source).toContain('listDiscussionRostersAction()');
+    expect(source).toContain('discussionRosterNames(course.roster)');
     expect(source).toContain('selectedId={responseCourse}');
-    expect(source).toContain('selectedId={selectedCourse}');
-    expect(source).toContain('expectedRoster: editorSource');
     expect(source).toContain('Replace the current response roster?');
-    expect(source).toContain('Discard roster edits?');
+    expect(source).toContain('writeDiscussionDraft(localStorage, userId');
+    expect(source).toContain('readDiscussionDraft(localStorage, userId)');
   });
-  it("invalidates an older class refresh when a roster save starts", () => {
-    const retry = source.slice(source.indexOf("const retryCourses = async"), source.indexOf("const saveCourse = async"));
-    const save = source.slice(source.indexOf("const saveCourse = async"), source.indexOf("if (!draftReady)"));
+  it("ignores stale class refreshes", () => {
+    const retry = source.slice(source.indexOf("const retryCourses = async"), source.indexOf("if (!draftReady)"));
     expect(retry).toContain("const courseRevision = ++courseDataRevision.current");
     expect(retry.indexOf("if (courseRevision !== courseDataRevision.current) return")).toBeLessThan(retry.indexOf("setCourses(result.rosters)"));
-    expect(save).toContain("courseDataRevision.current++");
+    expect(source).toContain('Refresh classes');
+    expect(retry).not.toContain('setRoster("")');
+  });
+  it("does not replace a newer roster after the confirmation was opened", () => {
+    expect(source).toContain('setPendingUse({ course, revision: rosterRevision.current })');
+    expect(source).toContain('pendingUse.revision !== rosterRevision.current');
+    expect(source).toContain('current.roster !== pendingUse.course.roster');
+    expect(source).toContain('if (revision !== rosterRevision.current) return; rosterRevision.current++; setRoster(text)');
+  });
+  it("holds class selection and generation while a roster file is being read", () => {
+    expect(source).toContain('selectedId={responseCourse} disabled={busy || fileReading}');
+    expect(source).toContain('if (fileReadLock.current) return; const course');
+    expect(source).toContain('if (fileReadLock.current) { setError("Wait for the roster file to finish loading.")');
+    expect(source).toContain('finally { fileReadLock.current = false; setFileReading(false); }');
+    expect(source).toContain('Reading roster file...');
   });
 });

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ requireUser: vi.fn(), createServiceClient: vi.fn() }));
 vi.mock("@/lib/supabase/auth", () => ({ requireUser: mocks.requireUser }));
 vi.mock("@/lib/supabase/server", () => ({ createServiceClient: mocks.createServiceClient }));
-import { listDiscussionRostersAction, saveDiscussionRosterAction } from "./discussion-rosters";
+import { listDiscussionRostersAction } from "./discussion-rosters";
 
 function client(data: unknown, error: unknown = null) {
   const q = { select: vi.fn(), eq: vi.fn(), is: vi.fn(), order: vi.fn(), update: vi.fn(), maybeSingle: vi.fn() };
@@ -20,21 +20,9 @@ describe("discussion roster actions", () => {
     expect(q.eq).toHaveBeenCalledWith("user_id", "owner-a");
     client(null, { message: "unavailable" }); expect(await listDiscussionRostersAction()).toHaveProperty("error");
   });
-  it("writes only the roster with owner, course, and source equality predicates", async () => {
-    const q = client({ roster: "Ada | ada\nGrace" });
-    expect(await saveDiscussionRosterAction({ courseId: "course-1", expectedRoster: "Ada | ada", names: ["Ada", "Grace"] })).toEqual({ roster: "Ada | ada\nGrace" });
-    expect(q.update).toHaveBeenCalledWith({ roster: "Ada | ada\nGrace", updated_at: expect.any(String) });
-    expect(q.eq).toHaveBeenCalledWith("user_id", "owner-a"); expect(q.eq).toHaveBeenCalledWith("id", "course-1"); expect(q.eq).toHaveBeenCalledWith("roster", "Ada | ada");
-  });
-  it("uses IS NULL for an empty source and reports a lost update instead of overwriting", async () => {
-    const q = client(null);
-    expect(await saveDiscussionRosterAction({ courseId: "course-1", expectedRoster: null, names: ["Ada"] })).toHaveProperty("error");
-    expect(q.is).toHaveBeenCalledWith("roster", null);
-  });
-  it("does not touch storage on failed authentication or unsafe edits", async () => {
+  it("does not touch storage on failed authentication", async () => {
     mocks.requireUser.mockRejectedValueOnce(new Error("no auth"));
     expect(await listDiscussionRostersAction()).toHaveProperty("error");
-    expect(await saveDiscussionRosterAction({ courseId: "course-1", expectedRoster: "Ada | ada", names: [] })).toHaveProperty("error");
     expect(mocks.createServiceClient).not.toHaveBeenCalled();
   });
 });

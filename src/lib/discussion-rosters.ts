@@ -22,26 +22,3 @@ function parseRows(roster: string | null): Result<{ rows: { name: string; raw: s
   }
   return { rows };
 }
-
-/** Preserve each retained row verbatim, including its GitHub username. */
-export function prepareDiscussionRoster(expected: string | null, names: readonly string[]): Result<{ roster: string }> {
-  const parsed = parseRows(expected);
-  if ("error" in parsed) return parsed;
-  if (!Array.isArray(names) || names.length > 1000) return { error: "Use at most 1,000 student names." };
-  const old = new Map(parsed.rows.map((row) => [row.name, row.raw]));
-  const oldNormalized = new Map(parsed.rows.map((row) => [row.name.normalize("NFKC").toLocaleLowerCase(), row.name]));
-  const seen = new Set<string>();
-  const next: string[] = [];
-  for (const value of names) {
-    if (typeof value !== "string") return { error: "Enter one valid student name per line." };
-    const name = value.trim();
-    const key = name.normalize("NFKC").toLocaleLowerCase();
-    if (!name || name.length > 500 || /[\r\n|]/.test(name) || seen.has(key)) return { error: "Enter distinct valid student names, one per line." };
-    if (oldNormalized.has(key) && oldNormalized.get(key) !== name) return { error: "Change existing name spelling in Courses to preserve linked usernames." };
-    seen.add(key); next.push(old.get(name) ?? name);
-  }
-  if (parsed.rows.some((row) => row.raw.includes("|") && !names.includes(row.name))) return { error: "Remove or rename students with linked usernames in Courses so their existing data is not lost." };
-  const roster = next.join("\n");
-  if (roster.length > 200_000) return { error: "This roster is too large to save." };
-  return { roster };
-}

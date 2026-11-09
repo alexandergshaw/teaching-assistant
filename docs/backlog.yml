@@ -30,9 +30,9 @@
   owns: ['src/app/components/discussions/', 'src/app/actions/discussion-rosters.ts', 'src/lib/discussion-rosters.ts']
   verify: null
   blocked_by: []
-  instrument: 'In a disposable authenticated account, verify listing owner-scoped existing courses, saving a roster, preserving linked usernames and unrelated course fields, and refusing a stale save after a concurrent edit; verify null and existing roster sources and error recovery. In a rendered browser exercise the Responses and Rosters tabs, duplicate-name class chips, handoff of the selected roster to Responses, desktop and mobile layout, keyboard navigation and focus, without sending student replies.'
+  instrument: 'In an authenticated browser verify the owner-scoped, read-only Courses roster source, null and existing rosters, username extraction, failed-load recovery and refresh after an external roster change. Verify school parent and disambiguated class child chips, selection and replacement confirmation into Responses, draft preservation during refresh, pending-file behavior, desktop and mobile layout, keyboard navigation and focus without sending student replies or changing a saved roster.'
   from: 'Owner requested saved class rosters and class selection within Discussions.'
-  note: 'The candidate reuses course rosters and includes owner-scoped conditional writes and synthetic tests. Actual authenticated Supabase save and conflict behavior, rendered desktop/mobile interaction, keyboard/focus, and the Responses handoff remain unverified. Do not treat mock action or source-level tests as database or rendered evidence.'
+  note: 'The owner superseded the Rosters editor: Discussions reads existing Courses rosters and does not provide a roster editor or write endpoint. A prior deployed version showed school and class chips in a read-only browser walkthrough, but the revised single-view candidate still requires authenticated source and refresh verification, Responses handoff, mobile layout, and keyboard/focus checks. Do not treat source-level or mocked tests as rendered or database evidence.'
   question: null
 - id: 'DISCUSSIONS-GENERIC-ROSTER-REPLIES'
   state: 'actionable'

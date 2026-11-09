@@ -29,8 +29,8 @@ describe("discussions wiring", () => {
   it("exposes responses and roster views with saved-class selection and conditional saves", () => {
     expect(source).toContain('value="responses" label="Responses"');
     expect(source).toContain('value="rosters" label="Rosters"');
-    expect(source).toContain('aria-pressed={responseCourse === course.id}');
-    expect(source).toContain('aria-pressed={selectedCourse === course.id}');
+    expect(source).toContain('selectedId={responseCourse}');
+    expect(source).toContain('selectedId={selectedCourse}');
     expect(source).toContain('expectedRoster: editorSource');
     expect(source).toContain('Replace the current response roster?');
     expect(source).toContain('Discard roster edits?');

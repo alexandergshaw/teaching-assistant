@@ -7,7 +7,9 @@ import {
   useRef,
   useState,
 } from "react";
-import Link from "next/link";
+import NextLink from "next/link";
+import MuiLink from "@mui/material/Link";
+import { guardRecordingRouteNavigation } from "@/lib/recording-route-guard";
 import { IconButton, TextField } from "@mui/material";
 import styles from "../page.module.css";
 import type { ChatAttachment, ChatMessage, ChatToneStatus } from "@/lib/chat/types";
@@ -751,9 +753,9 @@ export default function AiChatWindow({
           role="status"
         >
           No writing-tone sample yet —{" "}
-          <Link href="/account/voice-style" className={styles.toneStatusChipLink}>
+          <MuiLink component={NextLink} underline="none" href="/account/voice-style" onNavigate={(event) => guardRecordingRouteNavigation("/account/voice-style", event)} className={styles.toneStatusChipLink}>
             add one in Voice &amp; Writing Style settings
-          </Link>
+          </MuiLink>
         </div>
       )}
       {toneStatus === "embedded" && (

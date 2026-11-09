@@ -144,7 +144,8 @@ export default function TakeAnnouncementPanel({
     }
   }
 
-  const hook = useTakeAnnouncement({ take, setTakes, context, posted, onPosted, cachedTranscript, onTranscriptCached });
+  const [selectedFormat, setSelectedFormat] = useState<{ scope: string; id: string } | null>(null);
+  const hook = useTakeAnnouncement({ take, setTakes, context, posted, onPosted, cachedTranscript, onTranscriptCached, hasSelectedFormat: selectedFormat !== null });
   const {
     stage,
     progress,
@@ -212,7 +213,6 @@ export default function TakeAnnouncementPanel({
   const library = useAnnouncementLibrary(courseId, libraryAdapters);
   const latestScope = useRef(library.scopeKey);
   useLayoutEffect(() => { latestScope.current = library.scopeKey; }, [library.scopeKey]);
-  const [selectedFormat, setSelectedFormat] = useState<{ scope: string; id: string } | null>(null);
   const selectedFormatId = selectedFormat?.scope === library.scopeKey ? selectedFormat.id : "";
   const [formatError, setFormatError] = useState<string | null>(null);
 

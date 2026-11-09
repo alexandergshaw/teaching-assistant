@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import NextLink from "next/link";
+import MuiLink from "@mui/material/Link";
+import { guardRecordingRouteNavigation } from "@/lib/recording-route-guard";
 import Button from "@mui/material/Button";
 import IconButton from "@mui/material/IconButton";
 import TextField from "@mui/material/TextField";
@@ -423,55 +425,49 @@ function SettingsMenu({ guardKbUnsavedEdits }: { guardKbUnsavedEdits: (code: str
           </div>
           <AppearanceSection />
           <InstitutionsSection open={open} guardKbUnsavedEdits={guardKbUnsavedEdits} />
-          <Link
-            href="/knowledge"
+          <MuiLink component={NextLink} underline="none" href="/knowledge" onNavigate={(event) => guardRecordingRouteNavigation("/knowledge", event)}
             className={styles.menuItem}
             role="menuitem"
             onClick={() => setOpen(false)}
           >
             Knowledge review
-          </Link>
-          <Link
-            href="/account/integrations"
+          </MuiLink>
+          <MuiLink component={NextLink} underline="none" href="/account/integrations" onNavigate={(event) => guardRecordingRouteNavigation("/account/integrations", event)}
             className={styles.menuItem}
             role="menuitem"
             onClick={() => setOpen(false)}
           >
             Integrations
-          </Link>
-          <Link
-            href="/account/security"
+          </MuiLink>
+          <MuiLink component={NextLink} underline="none" href="/account/security" onNavigate={(event) => guardRecordingRouteNavigation("/account/security", event)}
             className={styles.menuItem}
             role="menuitem"
             onClick={() => setOpen(false)}
           >
             Security
-          </Link>
-          <Link
-            href="/account/voice-style"
+          </MuiLink>
+          <MuiLink component={NextLink} underline="none" href="/account/voice-style" onNavigate={(event) => guardRecordingRouteNavigation("/account/voice-style", event)}
             className={styles.menuItem}
             role="menuitem"
             onClick={() => setOpen(false)}
           >
             Voice & Style
-          </Link>
-          <Link
-            href="/account/diagnostics"
+          </MuiLink>
+          <MuiLink component={NextLink} underline="none" href="/account/diagnostics" onNavigate={(event) => guardRecordingRouteNavigation("/account/diagnostics", event)}
             className={styles.menuItem}
             role="menuitem"
             onClick={() => setOpen(false)}
           >
             Diagnostics
-          </Link>
+          </MuiLink>
           {shouldShowOwnerNavEntry(accessDecision) && (
-            <Link
-              href="/account/people"
+            <MuiLink component={NextLink} underline="none" href="/account/people" onNavigate={(event) => guardRecordingRouteNavigation("/account/people", event)}
               className={styles.menuItem}
               role="menuitem"
               onClick={() => setOpen(false)}
             >
               Accounts
-            </Link>
+            </MuiLink>
           )}
         </div>
       )}
@@ -518,10 +514,10 @@ export default function TopBar({ guardKbUnsavedEdits = ALWAYS_ALLOW, onSelectCou
   return (
     <>
       <header className={styles.bar}>
-        <Link href="/" className={styles.brand}>
+        <MuiLink component={NextLink} underline="none" href="/" onNavigate={(event) => guardRecordingRouteNavigation("/", event)} className={styles.brand}>
           <LogoMark />
           <span className={styles.name}>Teaching Assistant</span>
-        </Link>
+        </MuiLink>
         <nav className={styles.actions}>
           {institutions.length > 0 && <InstitutionSwitcher metric="both" />}
           <AccessibilityPill />

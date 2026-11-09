@@ -3,7 +3,9 @@
 // Thin leaf for the FAB chat's response-mode control (ASK-AI-VOICE-TOGGLE W2).
 // Lives outside AiChatWindow because that file sits near the 1000-line ceiling.
 // Composes the house SegmentedToggle; never MUI ToggleButtonGroup.
-import Link from "next/link";
+import NextLink from "next/link";
+import MuiLink from "@mui/material/Link";
+import { guardRecordingRouteNavigation } from "@/lib/recording-route-guard";
 import styles from "../../page.module.css";
 import SegmentedToggle from "../ui/SegmentedToggle";
 import type { ChatResponseMode } from "@/lib/chat/types";
@@ -37,9 +39,9 @@ export default function ResponseModeStrip({
       />
       {voiceDisabled && showSampleLink && (
         <div className={`${styles.toneStatusChip} ${styles.toneStatusChipMuted}`}>
-          <Link href="/account/voice-style" className={styles.toneStatusChipLink}>
+          <MuiLink component={NextLink} underline="none" href="/account/voice-style" onNavigate={(event) => guardRecordingRouteNavigation("/account/voice-style", event)} className={styles.toneStatusChipLink}>
             Add a writing sample to draft in your voice
-          </Link>
+          </MuiLink>
         </div>
       )}
     </div>

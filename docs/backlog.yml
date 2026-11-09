@@ -56,7 +56,7 @@
   blocked_by: []
   instrument: 'Walk Back to takes, reload, browser back and forward, same-origin route links, and normal app tab switching with a changed draft and an in-flight save/post. Keep mounted tabs non-disruptive; prevent silent data loss on true unmount and verify keyboard/focus in a real browser.'
   from: 'Recording-announcement audit: beforeunload does not intercept Next client-side pathname or history navigation.'
-  note: 'Candidate safeguards cover Back to takes and browser unload; normal app tabs hide the mounted recording surface rather than unmounting it. Same-origin SPA route and browser history transitions still require an appropriate router-level guard; avoid intercepting unrelated links globally.'
+  note: 'Candidate scoped pathname guard covers the settings menu and chat Voice and Style links using Next Link onNavigate while a recording announcement is mounted; it checks unsaved subject, body, selected format, direction and synchronous save/post locks. Same-path app tabs stay mounted and do not prompt. Browser history back/forward and other programmatic pathname transitions remain unresolved; Next App Router does not expose a cancellable beforePopState. The candidate has not been delivered or verified in a rendered browser; check keyboard/focus and preservation with an authenticated browser before closing this row.'
   question: null
 - id: 'WALKTHROUGH-PASTED-ANNOUNCEMENT-FORMATTING'
   state: 'actionable'

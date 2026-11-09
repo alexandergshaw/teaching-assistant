@@ -120,7 +120,7 @@ export interface PostedAnnouncementInfo {
 }
 
 export interface UseTakeAnnouncementOptions {
-  take: Take;
+  take: Take; hasSelectedFormat?: boolean;
   setTakes: React.Dispatch<React.SetStateAction<Take[]>>;
   context: AnnouncementRecordingContext;
   /** The durable "this take has already been posted" fact, owned by the
@@ -300,7 +300,7 @@ export function useTakeAnnouncement({
   posted,
   onPosted,
   cachedTranscript,
-  onTranscriptCached,
+  onTranscriptCached, hasSelectedFormat = false,
 }: UseTakeAnnouncementOptions): UseTakeAnnouncementReturn {
   const { active: activeInstitution } = useInstitutionSelection();
 
@@ -372,7 +372,7 @@ export function useTakeAnnouncement({
   const [savedSignature, setSavedSignature] = useState("");
   const [postError, setPostError] = useState<string | null>(null);
   const [savingDraft, setSavingDraft] = useState(false);
-  const draftGuard = useRecordingDraftGuard({ subject, body, courseId, posted: !!posted, savingDraft, posting, isPostingNow: () => postLock.isHeld() && !posted });
+  const draftGuard = useRecordingDraftGuard({ subject, body, courseId, hasUnsavedSetup: instructorContext.length > 0 || hasSelectedFormat, posted: !!posted, savingDraft, posting, isSavingNow: () => saveLock.isHeld(), isPostingNow: () => postLock.isHeld() && !posted });
   const [draftSaved, setDraftSaved] = useState(false);
   const [draftSavedHadCourse, setDraftSavedHadCourse] = useState(false);
   const savedDraftIdRef = useRef<string | null>(null);

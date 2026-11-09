@@ -15,7 +15,10 @@ describe("recording announcement safeguards", () => {
     expect(hook).toContain("!acquireExclusive(postLock, saveLock)");
     const guard = read("./useRecordingDraftGuard.ts");
     expect(guard).toContain("posting || isPostingNow()");
-    expect(guard).toContain("if (savingDraft)");
+    const confirmLeave = guard.slice(guard.indexOf("    confirmLeave:"));
+    expect(confirmLeave).toContain("recordingSavePending(savingDraft, isSavingNow)");
+    expect(guard).toContain("[dirty, savingDraft, posting, isPostingNow, isSavingNow]");
+    expect(hook).toContain("isSavingNow: () => saveLock.isHeld()");
     expect(guard).toContain("return false;");
   });
 });

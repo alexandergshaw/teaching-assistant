@@ -48,7 +48,7 @@ import { buildUrlSearch, parseUrlState, type UrlNavState } from "../../url-state
  */
 
 describe("the Tools rail is one flat list of the Manual views (D26; WORKFLOWS-COLLAPSE W2 dissolved the Workflows family)", () => {
-  it("holds exactly the eight Manual views, in order", () => {
+  it("holds exactly the nine Manual views, in order", () => {
     expect(TOOLS_RAIL_ITEMS.map((item) => item.id)).toEqual([
       "manual:course-planning",
       "manual:content",
@@ -57,11 +57,12 @@ describe("the Tools rail is one flat list of the Manual views (D26; WORKFLOWS-CO
       "manual:artifact-design",
       "manual:presentations",
       "manual:announcements",
+      "manual:discussions",
       "manual:grading",
     ]);
     // WORKFLOWS-COLLAPSE: 11 (post-fold) -> 10 (W1, Drafts to Library) -> 8 (W2,
     // Workflows + Automations into the Automate container).
-    expect(TOOLS_RAIL_ITEMS).toHaveLength(8);
+    expect(TOOLS_RAIL_ITEMS).toHaveLength(9);
   });
 
   it("carries every registered Manual view, derived from MANUAL_VIEW_ORDER rather than restated", () => {

@@ -20,7 +20,8 @@ export type ManualViewType =
   | "artifact-design"
   | "grading"
   | "presentations"
-  | "announcements";
+  | "announcements"
+  | "discussions";
 export type BuildViewType = "new" | "prebuilt" | "auto";
 
 // The Grading sub-tab's own inner selection: which of its two surfaces is
@@ -190,6 +191,10 @@ export const destinations: DestinationGroup[] = [
     ],
   },
   {
+    name: null,
+    destinations: [{ id: "discussions", label: "Discussions", description: "Create generic replies for a class roster" }],
+  },
+  {
     name: "Presentations",
     destinations: [
       { id: "presentations-slide-deck", label: "Slide Deck Creation", description: "Generate a lecture outline, activity ideas, and a slide deck from pasted context" },
@@ -239,6 +244,7 @@ export const MANUAL_VIEW_ORDER: ManualViewType[] = [
   "artifact-design",
   "presentations",
   "announcements",
+  "discussions",
   "grading",
 ];
 
@@ -246,6 +252,7 @@ export const MANUAL_VIEW_LABELS: Record<ManualViewType, string> = {
   "course-planning": "Build Courses",
   content: "LMS",
   announcements: "Announcements",
+  discussions: "Discussions",
   "version-control": "Version Control",
   recording: "Recording",
   "artifact-design": "Automate",
@@ -329,6 +336,8 @@ export function getActiveDestinationId(
     return "version-control";
   } else if (manualView === "recording") {
     return "recording";
+  } else if (manualView === "discussions") {
+    return "discussions";
   } else if (manualView === "artifact-design") {
     return automateView === "templates" ? "artifact-design" : `artifact-design-${automateView}`;
   } else if (manualView === "presentations") {
@@ -417,6 +426,7 @@ export function resolveStateFromDestinationId(
     if (id.startsWith("lms-")) return "content";
     if (id === "version-control") return "version-control";
     if (id === "recording") return "recording";
+    if (id === "discussions") return "discussions";
     if (legacyPptDesignView(id)) return "presentations";
     if (id === "artifact-design" || id.startsWith("artifact-design-")) return "artifact-design";
     if (id.startsWith("presentations-")) return "presentations";

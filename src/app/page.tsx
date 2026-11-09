@@ -11,6 +11,7 @@ import VersionControlTab from "./components/VersionControlTab";
 import CanvasTab from "./components/CanvasTab";
 import ContentTab from "./components/ContentTab";
 import RecordingTab from "./components/RecordingTab";
+import DiscussionsTool from "./components/discussions/DiscussionsTool";
 import GradingChatPanel from "./components/grading-chat/GradingChatPanel";
 import WalkthroughAnnouncementPanel from "./components/walkthrough-announcement/WalkthroughAnnouncementPanel";
 import FilesTab from "./components/FilesTab";
@@ -84,6 +85,9 @@ export default function Home() {
   const { activeTab, setActiveTab, coursesSection, setCoursesSection, toolsSection, setToolsSection, librarySection, setLibrarySection, manualView, setManualView, buildView, setBuildView, contentView, setContentView, gradingView, setGradingView, presentationsView, setPresentationsView, announcementsView, setAnnouncementsView, automateView, setAutomateView, tasksView, setTasksView } = nav;
   const autoBuildVisible = activeTab === "manual" && toolsSection === "manual" && manualView === "course-planning" && buildView === "auto";
   const [autoBuildVisited, setAutoBuildVisited] = useState(false);
+  const discussionsVisible = activeTab === "manual" && toolsSection === "manual" && manualView === "discussions";
+  const [discussionsVisited, setDiscussionsVisited] = useState(false);
+  if (discussionsVisible && !discussionsVisited) setDiscussionsVisited(true);
   if (autoBuildVisible && !autoBuildVisited) setAutoBuildVisited(true);
 
   // The full URL-addressable nav state, used only to build each tab's deep-link
@@ -784,6 +788,12 @@ export default function Home() {
               </>
             )}
           </>
+        )}
+
+        {discussionsVisited && (
+          <div style={{ display: discussionsVisible ? undefined : "none" }}>
+            <TabShell><DiscussionsTool /></TabShell>
+          </div>
         )}
 
         {autoBuildVisited && (

@@ -1,3 +1,15 @@
+- id: 'DISCUSSIONS-GENERIC-ROSTER-REPLIES'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'discussion-reply-grading'
+  title: 'Add a Discussions tool for generic name-personalized roster replies.'
+  owns: ['src/app/components/discussions/', 'src/app/actions/discussions-tool.ts', 'src/app/components/manual/manual-rail.ts', 'src/app/page.tsx']
+  verify: 'npm.cmd run test:paths src/lib/discussions-tool.test.ts src/app/components/discussions/discussions-tool.wiring.test.ts'
+  blocked_by: []
+  instrument: 'Verify pasted prompt and roster, editable actual model prompt, pasted or model-generated shared template, name-only substitution, searchable copyable rows, failed generation recovery, no student post input or sending, and browser keyboard/focus behavior.'
+  from: 'Owner request in this chat: a single Discussions view with a discussion prompt, roster, exposed LLM prompt and shared reply template, producing searchable copyable generic replies personalized only by student name.'
+  note: 'Leverage: combines a reusable course roster with a single reviewed generic reply template to produce individually copyable, name-addressed rows without sending or claiming to read individual student posts. Implementation underway; rendered and provider checks remain open.'
+  question: null
 - id: 'RECORDING-LIBRARY-MEDIA-PICKER'
   state: 'actionable'
   kind: 'bug'

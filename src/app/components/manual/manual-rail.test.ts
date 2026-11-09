@@ -216,6 +216,7 @@ describe("manual-rail", () => {
         "artifact-design",
         "presentations",
         "announcements",
+        "discussions",
         "grading",
       ]);
     });

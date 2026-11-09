@@ -20,6 +20,35 @@ function selectionSnapshot() {
 }
 function serverSelectionSnapshot() { return ""; }
 
+/** Pipeline already owns its selection; verify its library directly without browser handoff state. */
+export function ExplicitRoleAwareTemplateFill({ libraryId, sourceFileId, title, slides, disabled, onStart, onEnd, isCurrent }: {
+  libraryId: string; sourceFileId: string; title: string; slides: readonly PptxSlide[]; disabled?: boolean; onStart: () => boolean; onEnd: () => void; isCurrent: () => boolean;
+}) {
+  const { user, loading } = useSupabase();
+  if (loading || !user || !libraryId || !sourceFileId) return null;
+  return <VerifyExplicitLibrary key={`${user.id}:${libraryId}:${sourceFileId}`} libraryId={libraryId} sourceFileId={sourceFileId} title={title} slides={slides} disabled={disabled} onStart={onStart} onEnd={onEnd} isCurrent={isCurrent} />;
+}
+
+function VerifyExplicitLibrary({ libraryId, sourceFileId, title, slides, disabled, onStart, onEnd, isCurrent }: {
+  libraryId: string; sourceFileId: string; title: string; slides: readonly PptxSlide[]; disabled?: boolean; onStart: () => boolean; onEnd: () => void; isCurrent: () => boolean;
+}) {
+  const [library, setLibrary] = useState<{ id: string; name: string } | null>(null);
+  const [verificationError, setVerificationError] = useState("");
+  useEffect(() => {
+    let active = true;
+    void getPowerPointTemplateLibraryAction(libraryId).then((result) => {
+      if (!active) return;
+      if ("library" in result && result.library.id === libraryId && result.library.sourceFileId === sourceFileId) setLibrary({ id: result.library.id, name: result.library.name });
+      else setVerificationError("Could not verify this saved library and source. Select it again.");
+    }).catch(() => { if (active) setVerificationError("Could not verify this saved library and source. Select it again."); });
+    return () => { active = false; };
+  }, [libraryId, sourceFileId]);
+  if (verificationError) return <Alert severity="warning">{verificationError}</Alert>;
+  if (!library) return <Typography role="status">Verifying saved library...</Typography>;
+  const selection = JSON.stringify({ libraryId, sourceFileId });
+  return <RoleSelector key={JSON.stringify({ selection, title, slides })} libraryId={library.id} libraryName={library.name} selection={selection} sourceFileId={sourceFileId} title={title} slides={slides} disabled={disabled} onStart={onStart} onEnd={onEnd} isSelectionCurrent={isCurrent} />;
+}
+
 export default function RoleAwareTemplateFill({ sourceFileId, title, slides, disabled, onStart, onEnd }: {
   sourceFileId: string; title: string; slides: readonly PptxSlide[]; disabled?: boolean; onStart: () => boolean; onEnd: () => void;
 }) {
@@ -50,8 +79,8 @@ function VerifyLibrary({ sourceFileId, title, slides, disabled, onStart, onEnd }
 }
 
 /** Remount when deck content or library identity changes to discard old role choices. */
-function RoleSelector({ libraryId, libraryName, selection, sourceFileId, title, slides, disabled, onStart, onEnd }: {
-  libraryName: string; selection: string; disabled?: boolean; onStart: () => boolean; onEnd: () => void;
+function RoleSelector({ libraryId, libraryName, selection, sourceFileId, title, slides, disabled, onStart, onEnd, isSelectionCurrent }: {
+  libraryName: string; selection: string; disabled?: boolean; onStart: () => boolean; onEnd: () => void; isSelectionCurrent?: () => boolean;
   libraryId: string; sourceFileId: string; title: string; slides: readonly PptxSlide[];
 }) {
   const [roles, setRoles] = useState<Array<SlideRole | "">>(() => slides.map(() => ""));
@@ -66,17 +95,19 @@ function RoleSelector({ libraryId, libraryName, selection, sourceFileId, title, 
   useLayoutEffect(() => { alive.current = true; return () => { alive.current = false; if (lock.current) onEnd(); }; }, [onEnd]);
   useEffect(() => { if (initialSignature !== currentSignature) revision.current++; }, [initialSignature, currentSignature]);
   async function download() {
+    const currentSelection = () => isSelectionCurrent ? isSelectionCurrent() : selectionSnapshot() === selection;
     if (disabled || lock.current || stale || roles.length !== slides.length || roles.some((role) => !role) || !onStart()) return;
+    if (!currentSelection()) { onEnd(); return; }
     lock.current = true; setBusy(true); setError(""); const started = revision.current;
     try {
       const result = await fillRoleAwarePowerPointAction(libraryId, sourceFileId, { presentationTitle: title, slides: slides.map((slide, index) => ({ ...slide, role: roles[index] })) });
-      if (!alive.current || started !== revision.current || selectionSnapshot() !== selection) return;
+      if (!alive.current || started !== revision.current || !currentSelection()) return;
       if ("error" in result) { setError(result.error); return; }
       const bytes = Uint8Array.from(atob(result.base64), (char) => char.charCodeAt(0));
       const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.presentationml.presentation" }));
       try { const anchor = document.createElement("a"); anchor.href = url; anchor.download = `${result.name}.pptx`; anchor.click(); }
       finally { URL.revokeObjectURL(url); }
-    } catch { if (alive.current && started === revision.current && selectionSnapshot() === selection) setError("Could not prepare the role-aware PowerPoint. Try again."); }
+    } catch { if (alive.current && started === revision.current && currentSelection()) setError("Could not prepare the role-aware PowerPoint. Try again."); }
     finally { lock.current = false; if (alive.current) { onEnd(); setBusy(false); } }
   }
   return <Stack spacing={1}>

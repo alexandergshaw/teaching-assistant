@@ -5,6 +5,7 @@ import { pipelineTemplateFailureCategory, resolveTemplateForDownload } from "./t
 
 // Execute actual handler declarations with isolated dependencies; no component is rendered.
 function callerFunction(name: string, bindings: Record<string, unknown>) {
+  if (name === "handleDownload" && !("downloadLock" in bindings)) bindings = { ...bindings, downloadLock: { current: false } };
   const source = ts.createSourceFile("PipelineTab.tsx", readFileSync("src/app/components/presentations/pipeline/PipelineTab.tsx", "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   let declaration: ts.FunctionDeclaration | undefined;
   function visit(node: ts.Node) {
@@ -29,7 +30,7 @@ describe("pipeline saved-template caller wiring", () => {
     expect(caller).toContain("effectiveChoice={templateChoice}");
     expect(caller).toContain('templateChoice.kind !== "own"');
     expect(caller).toContain("templateChoiceGeneration.current !== selectionGeneration");
-    expect(caller).toContain("disabled={downloading}");
+    expect(caller).toContain("disabled={downloading || roleDownloading}");
     expect(caller).toContain("templateResolutionPending || !pipelineState.deck.artifact");
     expect(picker).toContain("choiceStateRef.current");
     expect(picker).toContain("initialTemplateChoiceState(effectiveChoice)");

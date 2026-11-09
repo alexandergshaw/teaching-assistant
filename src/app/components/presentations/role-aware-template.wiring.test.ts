@@ -9,7 +9,8 @@ describe("role-aware selection safety wiring", () => {
   it("revalidates same-source library changes and invalidates stale async downloads", () => {
     expect(source).toContain("useSyncExternalStore(subscribeSelection, selectionSnapshot");
     expect(source).toContain("library.selected !== selected");
-    expect(source).toContain("selectionSnapshot() !== selection");
+    expect(source).toContain("selectionSnapshot() === selection");
+    expect(source).toContain("!currentSelection()");
     expect(source).toContain("useLayoutEffect(() => { alive.current = true");
     expect(handoff).toContain("window.dispatchEvent(new Event(ROLE_LIBRARY_CHANGED))");
   });
@@ -23,5 +24,11 @@ describe("role-aware selection safety wiring", () => {
     expect(card).toContain('<RoleAwareTemplateFill sourceFileId={templateFileId}');
     expect(card).toContain('slides={deck.slides}');
     expect(source).toContain("getPowerPointTemplateLibraryAction(saved.libraryId)");
+  });
+  it("starts the explicit pipeline snapshot before checking whether it remains current", () => {
+    const handler = source.slice(source.indexOf("async function download()"), source.indexOf("return <Stack", source.indexOf("async function download()")));
+    expect(handler.indexOf("!onStart()") ).toBeGreaterThan(-1);
+    expect(handler.indexOf("!currentSelection()") ).toBeGreaterThan(handler.indexOf("!onStart()"));
+    expect(handler).toContain("if (!currentSelection()) { onEnd(); return; }");
   });
 });

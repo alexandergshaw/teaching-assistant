@@ -79,6 +79,8 @@ import FrameEditor from "./FrameEditor";
 import ReviewFindings from "./ReviewFindings";
 import SlideRegenView from "./SlideRegenView";
 import PipelineTemplatePicker from "./PipelineTemplatePicker";
+import { ExplicitRoleAwareTemplateFill } from "../RoleAwareTemplateFill";
+import { pipelineRoleDownloadCurrent } from "./pipeline-role-guard";
 import { useTemplateFillReview } from "../TemplateFillReview";
 import { chooseRawTemplate, pipelineTemplateFailureCategory, resolveTemplateForDownload, type PipelineLibraryActions, type PipelineTemplateChoice, type PipelineTemplateFailureCategory } from "./template-choice";
 import { PipelineSlideEditor } from "./pipeline-slide-editor";
@@ -264,6 +266,9 @@ export default function PipelineTab() {
   const [askBusy, setAskBusy] = useState(false);
   const [askOutcome, setAskOutcome] = useState<{ severity: "warning" | "error"; text: string } | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [roleDownloading, setRoleDownloading] = useState(false);
+  const downloadLock = useRef(false);
+  const roleSnapshot = useRef<{ revision: number; selection: number } | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [templateResolutionPending, setTemplateResolutionPending] = useState(false);
   const templatePendingRef = useRef(false);
@@ -274,6 +279,17 @@ export default function PipelineTab() {
   const [templateChoice, setTemplateChoice] = useState<PipelineTemplateChoice>(() => chooseRawTemplate(templateFileId, "Uploaded PowerPoint"));
   const templateChoiceRef = useRef(templateChoice);
   const templateChoiceGeneration = useRef(0);
+  const startRoleDownload = useCallback(() => {
+    if (downloadLock.current || operationLock.current || templatePendingRef.current || sourcesDirty || pipelineState.deck.status !== "done" || templateChoiceRef.current.kind !== "library") return false;
+    downloadLock.current = true;
+    roleSnapshot.current = { revision: pipelineRevision.current, selection: templateChoiceGeneration.current };
+    setRoleDownloading(true);
+    return true;
+  }, [sourcesDirty, pipelineState.deck.status]);
+  const finishRoleDownload = useCallback(() => { downloadLock.current = false; roleSnapshot.current = null; setRoleDownloading(false); }, []);
+  const roleDownloadCurrent = useCallback(() => {
+    return pipelineRoleDownloadCurrent(roleSnapshot.current, pipelineRevision.current, templateChoiceGeneration.current, templatePendingRef.current, templateChoiceRef.current.kind);
+  }, []);
   const [regenOpen, setRegenOpen] = usePersistedJSON<boolean>(PIPELINE_REGEN_OPEN_KEY, false);
   // Hydration guard: the persisted open flag must not choose the first paint.
   // false on the server / first render, true once mounted on the client.
@@ -452,6 +468,7 @@ export default function PipelineTab() {
   }
 
   async function handleDownload() {
+    if (downloadLock.current) return;
     const deck = pipelineState.deck.artifact;
     if (sourcesDirty) { setDownloadError("Commit your source changes before downloading the deck."); return; }
     if (!deck) return;
@@ -460,7 +477,7 @@ export default function PipelineTab() {
       setDownloadError("Wait for the template selection to finish before downloading.");
       return;
     }
-    setDownloading(true);
+    downloadLock.current = true; setDownloading(true);
     setDownloadError(null);
     const revision = pipelineRevision.current;
     const selectionGeneration = templateChoiceGeneration.current;
@@ -489,6 +506,7 @@ export default function PipelineTab() {
       recordTemplateDownload(choiceAtStart.kind, phase, started, "PPT_DOWNLOAD_ERROR");
       setDownloadError("Could not build the .pptx");
     } finally {
+      downloadLock.current = false;
       setDownloading(false);
     }
   }
@@ -517,7 +535,7 @@ export default function PipelineTab() {
     );
   }
 
-  const busy = runningStage !== null || runningToEnd || askBusy;
+  const busy = runningStage !== null || runningToEnd || askBusy || roleDownloading;
 
   if (mounted && regenOpen && pipelineState.deck.status === "done") {
     return (
@@ -745,7 +763,7 @@ export default function PipelineTab() {
                   setTemplateChoice(choice);
                 }}
                 onResolutionPendingChange={(pending) => { templatePendingRef.current = pending; if (pending) templateChoiceGeneration.current += 1; setTemplateResolutionPending(pending); }}
-                disabled={downloading}
+                disabled={downloading || roleDownloading}
               />
               {templateChoice.kind !== "own" && (
                 <Alert severity="info" variant="outlined">
@@ -759,12 +777,13 @@ export default function PipelineTab() {
                 <Button
                   variant="outlined"
                   onClick={handleDownload}
-                  disabled={downloading || templateResolutionPending || !pipelineState.deck.artifact || pipelineState.deck.status !== "done"}
+                  disabled={downloading || roleDownloading || templateResolutionPending || !pipelineState.deck.artifact || pipelineState.deck.status !== "done"}
                   sx={{ textTransform: "none" }}
                 >
                   {downloading ? "Preparing .pptx..." : "Download .pptx"}
                 </Button>
               </div>
+              {templateChoice.kind === "library" && pipelineState.deck.status === "done" && pipelineState.deck.artifact && <ExplicitRoleAwareTemplateFill libraryId={templateChoice.libraryId} sourceFileId={templateChoice.sourceFileId} title={pipelineState.deck.artifact.presentationTitle} slides={pipelineState.deck.artifact.slides} disabled={busy || downloading || sourcesDirty || templateResolutionPending} onStart={startRoleDownload} onEnd={finishRoleDownload} isCurrent={roleDownloadCurrent} />}
               {downloadError && <Alert severity="error">{downloadError}</Alert>}
               {pipelineState.deck.status === "stale" && <Alert severity="warning">Inputs changed. Existing slides are kept for review; regenerate the deck before downloading.</Alert>}
 

@@ -22,13 +22,22 @@ export async function getSource(userId: string, id: string): Promise<SourceFile>
 export async function listLibraries(userId: string): Promise<LibraryMeta[]> {
   const { data, error } = await table("powerpoint_template_libraries").select("id,source_file_id,name,updated_at").eq("user_id", userId).order("updated_at", { ascending: false });
   if (error) throw new TemplateError("PPT_STORAGE");
-  // Joining ownership on read also hides orphaned/foreign references in legacy data.
-  const out: LibraryMeta[] = [];
-  for (const row of (data ?? []) as LibraryRow[]) {
-    try { await getSource(userId, row.source_file_id); out.push(meta(row)); }
+  // Check ownership without downloading full PowerPoint files. Bound each IN
+  // query so it stays below common database row and URL limits.
+  const rows = (data ?? []) as LibraryRow[];
+  const ids: string[] = [];
+  for (const id of new Set(rows.map((row) => row.source_file_id))) {
+    try { assertId(id); ids.push(id); }
     catch (error) { if (!(error instanceof TemplateError) || error.code !== "PPT_NOT_FOUND") throw error; }
   }
-  return out;
+  const owned = new Set<string>();
+  for (let start = 0; start < ids.length; start += 100) {
+    const batch = ids.slice(start, start + 100);
+    const result = await table("deck_template_files").select("id").eq("user_id", userId).in("id", batch);
+    if (result.error) throw new TemplateError("PPT_STORAGE");
+    for (const source of (result.data ?? []) as { id: string }[]) owned.add(source.id);
+  }
+  return rows.filter((row) => owned.has(row.source_file_id)).map(meta);
 }
 export async function getLibrary(userId: string, id: string): Promise<SavedLibrary> {
   assertId(id);

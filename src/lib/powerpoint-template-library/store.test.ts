@@ -3,14 +3,16 @@ import { getLibrary, getSource, listLibraries, saveLibrary } from "./store";
 type Row = Record<string, unknown>;
 const h = vi.hoisted(() => ({
   userId: "11111111-1111-4111-8111-111111111111", status: "active", anonymous: false,
-  tables: {} as Record<string, Row[]>, calls: [] as Array<{ table: string; op: string; args: unknown[] }>, failSave: false, model: vi.fn(),
+  tables: {} as Record<string, Row[]>, calls: [] as Array<{ table: string; op: string; args: unknown[] }>, failSave: false, failSourceRead: false, model: vi.fn(),
 }));
 function fakeTable(name: string) {
   const filters: [string, unknown][] = [];
+  const membership: [string, unknown[]][] = [];
   let mode = "read", pending: Row | undefined;
   const record = (op: string, ...args: unknown[]) => { h.calls.push({ table: name, op, args }); };
-  const matches = () => (h.tables[name] ?? []).filter(row => filters.every(([key, value]) => row[key] === value));
+  const matches = () => (h.tables[name] ?? []).filter(row => filters.every(([key, value]) => row[key] === value) && membership.every(([key, values]) => values.includes(row[key])));
   const execute = (single = false): { data: unknown; error: unknown } => {
+    if (name === "deck_template_files" && mode === "read" && h.failSourceRead) return { data: null, error: { message: "unavailable" } };
     if (mode !== "read" && h.failSave) return { data: null, error: { message: "private database detail" } };
     let rows = matches();
     if (mode === "insert" && pending) { h.tables[name] ??= []; h.tables[name].push(pending); rows = [pending]; pending = undefined; }
@@ -20,6 +22,7 @@ function fakeTable(name: string) {
   const builder = {
     select: (...args: unknown[]) => { record("select", ...args); return builder; },
     eq: (key: string, value: unknown) => { record("eq", key, value); filters.push([key, value]); return builder; },
+    in: (key: string, values: unknown[]) => { record("in", key, values); membership.push([key, values]); return builder; },
     order: (...args: unknown[]) => { record("order", ...args); return builder; },
     insert: (row: Row) => { record("insert", row); mode = "insert"; pending = { id: "99999999-9999-4999-8999-999999999999", ...row }; return builder; },
     update: (row: Row) => { record("update", row); mode = "update"; pending = row; return builder; },
@@ -46,7 +49,7 @@ vi.mock("@/lib/llm", () => ({ callLlm: h.model }));
 const sourceId = "22222222-2222-4222-8222-222222222222";
 const definition = { version: 1 as const, slides: [{ id: "ppt/slides/slide1.xml", ordinal: 1, text: "Title", role: "title" as const }] };
 beforeEach(() => {
-  h.calls = []; h.failSave = false;
+  h.calls = []; h.failSave = false; h.failSourceRead = false;
   h.tables = { deck_template_files: [{ id: sourceId, user_id: h.userId, content: "original", file_name: "source.pptx" }], powerpoint_template_libraries: [] };
 });
 describe("library storage tenant boundary", () => {
@@ -68,6 +71,37 @@ describe("library storage tenant boundary", () => {
     h.tables.powerpoint_template_libraries = [{ id: sourceId, user_id: h.userId, source_file_id: sourceId, name: "orphan", definition, updated_at: "" }];
     expect(await listLibraries(h.userId)).toEqual([]);
     await expect(getLibrary(h.userId, sourceId)).rejects.toMatchObject({ code: "PPT_NOT_FOUND" });
+  });
+  it("batches source ownership checks without selecting source content and keeps duplicate library references", async () => {
+    const foreignId = "33333333-3333-4333-8333-333333333333";
+    h.tables.deck_template_files.push({ id: foreignId, user_id: "foreign", content: "private" });
+    h.tables.powerpoint_template_libraries = [
+      { id: "1", user_id: h.userId, source_file_id: sourceId, name: "First", updated_at: "3" },
+      { id: "2", user_id: h.userId, source_file_id: sourceId, name: "Second", updated_at: "2" },
+      { id: "3", user_id: h.userId, source_file_id: foreignId, name: "Foreign", updated_at: "1" },
+    ];
+    expect((await listLibraries(h.userId)).map((item) => item.name)).toEqual(["First", "Second"]);
+    expect(h.calls.filter((call) => call.table === "deck_template_files" && call.op === "select")).toEqual([{ table: "deck_template_files", op: "select", args: ["id"] }]);
+    expect(h.calls).toContainEqual({ table: "deck_template_files", op: "eq", args: ["user_id", h.userId] });
+    expect(h.calls).toContainEqual({ table: "deck_template_files", op: "in", args: ["id", [sourceId, foreignId]] });
+  });
+  it("limits ownership lookups to batches and avoids the source query for an empty list", async () => {
+    expect(await listLibraries(h.userId)).toEqual([]);
+    expect(h.calls.some((call) => call.table === "deck_template_files")).toBe(false);
+    h.calls = [];
+    const ids = Array.from({ length: 101 }, (_, i) => `${(i + 1).toString(16).padStart(8, "0")}-0000-4000-8000-000000000000`);
+    h.tables.deck_template_files = ids.map((id) => ({ id, user_id: h.userId }));
+    h.tables.powerpoint_template_libraries = ids.map((id) => ({ id, user_id: h.userId, source_file_id: id, name: "Example", updated_at: "" }));
+    expect(await listLibraries(h.userId)).toHaveLength(101);
+    expect(h.calls.filter((call) => call.table === "deck_template_files" && call.op === "in").map((call) => (call.args[1] as string[]).length)).toEqual([100, 1]);
+  });
+  it("fails closed on a source query error and hides malformed referenced IDs", async () => {
+    h.tables.powerpoint_template_libraries = [{ id: "1", user_id: h.userId, source_file_id: sourceId, name: "First", updated_at: "" }];
+    h.failSourceRead = true;
+    await expect(listLibraries(h.userId)).rejects.toMatchObject({ code: "PPT_STORAGE" });
+    h.failSourceRead = false;
+    h.tables.powerpoint_template_libraries[0].source_file_id = "bad-id";
+    expect(await listLibraries(h.userId)).toEqual([]);
   });
   it("does not overwrite saved JSON when a scoped update fails", async () => {
     const created = await saveLibrary(h.userId, null, sourceId, "Before", definition);

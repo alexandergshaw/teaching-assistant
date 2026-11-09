@@ -24,6 +24,13 @@ export type PipelineLibraryActions = {
 
 export const ownTemplateChoice: PipelineTemplateChoice = { kind: "own" };
 
+/** Preserve the full identity when multiple saved libraries share a name. */
+export function pipelineLibraryLabel(library: LibraryMeta, libraries: readonly LibraryMeta[]): string {
+  const key = library.name.trim().normalize("NFKC").toLocaleLowerCase();
+  return libraries.some((other) => other.id !== library.id && other.name.trim().normalize("NFKC").toLocaleLowerCase() === key)
+    ? `${library.name} (${library.id})` : library.name;
+}
+
 export function chooseRawTemplate(sourceFileId: string, name: string): PipelineTemplateChoice {
   return sourceFileId.trim() ? { kind: "raw", sourceFileId, name } : ownTemplateChoice;
 }

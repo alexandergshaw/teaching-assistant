@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Typography } from "@mui/material";
+import { Alert, Button, MenuItem, TextField, Typography } from "@mui/material";
 import {
   getPowerPointTemplateLibraryAction,
   listPowerPointTemplateLibrariesAction,
@@ -14,6 +14,7 @@ import {
   chooseRawTemplate,
   createTemplateChoiceGate,
   initialTemplateChoiceState,
+  pipelineLibraryLabel,
   reduceTemplateChoice,
   resolveLibraryChoiceIfCurrent,
   type PipelineLibraryActions,
@@ -123,7 +124,8 @@ export default function PipelineTemplatePicker({ effectiveChoice, rawTemplateFil
   }, [rawTemplateFileId, rawTemplates, dispatch, onChoiceChange]);
 
   async function selectLibrary(libraryId: string) {
-    if (!libraryId) return;
+    if (disabled || choiceState.libraryLoading) return;
+    if (!libraryId) { clearChoice(); return; }
     const generation = gate.current.next();
     onResolutionPendingChange(true);
     dispatch({ type: "begin-library-resolution", generation });
@@ -176,7 +178,7 @@ export default function PipelineTemplatePicker({ effectiveChoice, rawTemplateFil
     ? "Generated deck design"
     : currentChoice.kind === "raw"
       ? `Uploaded PowerPoint: ${currentChoice.name}`
-      : `Saved library: ${currentChoice.name}${sourceFile ? ` — ${sourceFile.fileName}` : ""}`;
+      : `Saved library: ${selectedLibrary ? pipelineLibraryLabel(selectedLibrary, libraries) : currentChoice.name}${sourceFile ? ` — ${sourceFile.fileName}` : ""}`;
 
   return (
     <fieldset disabled={disabled} style={{ border: 0, margin: 0, minWidth: 0, padding: 0 }}>
@@ -185,14 +187,14 @@ export default function PipelineTemplatePicker({ effectiveChoice, rawTemplateFil
       <Typography variant="body2" color="text.secondary" aria-live="polite">{effectiveLabel}</Typography>
       <DeckTemplatePicker selectedId={rawTemplateFileId} onSelectId={selectRaw} />
       <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", alignItems: "center" }}>
-        <label htmlFor="pipeline-saved-library">Saved PowerPoint library</label>
-        <select id="pipeline-saved-library" aria-label="Choose a saved PowerPoint library" value={selectedLibraryId} disabled={choiceState.libraryLoading} onChange={(event) => void selectLibrary(event.target.value)}>
-          <option value="">Use no saved library</option>
+        <TextField select size="small" id="pipeline-saved-library" label="Saved PowerPoint library" value={selectedLibraryId} disabled={disabled || choiceState.libraryLoading} onChange={(event) => void selectLibrary(event.target.value)} sx={{ minWidth: 240 }}>
+          <MenuItem value="">Use no saved library</MenuItem>
+          {currentChoice.kind === "library" && !selectedLibrary && <MenuItem value={currentChoice.libraryId}>{currentChoice.name} ({currentChoice.libraryId}) - not in loaded list</MenuItem>}
           {libraries.map((library) => {
             const source = rawTemplates.find((item) => item.id === library.sourceFileId);
-            return <option key={library.id} value={library.id}>{library.name}{source ? ` — ${source.fileName}` : ""}</option>;
+            return <MenuItem key={library.id} value={library.id}>{pipelineLibraryLabel(library, libraries)}{source ? ` — ${source.fileName}` : ""}</MenuItem>;
           })}
-        </select>
+        </TextField>
         {choiceState.libraryLoading && <Typography role="status">Checking saved library…</Typography>}
         {currentChoice.kind !== "own" && <Button size="small" onClick={clearChoice} sx={{ textTransform: "none" }}>Clear effective template</Button>}
       </div>

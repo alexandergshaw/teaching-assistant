@@ -10,11 +10,18 @@ import {
   resolveAvailableLibraryTemplateChoice,
   resolveTemplateForDownload,
   pipelineTemplateFailureCategory,
+  pipelineLibraryLabel,
 } from "./template-choice";
 
 const LIBRARY = { id: "library-L", sourceFileId: "source-S", name: "Reviewed lecture", updatedAt: "2026-10-16T00:00:00Z" };
 
 describe("pipeline template choice", () => {
+  it("disambiguates duplicate names without changing selected identities", () => {
+    const duplicate = { ...LIBRARY, id: "library-M", name: "REVIEWED LECTURE" };
+    expect(pipelineLibraryLabel(LIBRARY, [LIBRARY, duplicate])).toBe("Reviewed lecture (library-L)");
+    expect(pipelineLibraryLabel(duplicate, [LIBRARY, duplicate])).toBe("REVIEWED LECTURE (library-M)");
+    expect(pipelineLibraryLabel(LIBRARY, [LIBRARY])).toBe("Reviewed lecture");
+  });
   async function expectLaterLibraryRoute(libraries: typeof LIBRARY[]) {
     const actions = {
       getLibrary: vi.fn().mockResolvedValue({ library: { ...LIBRARY, name: "Latest reviewed lecture" } }),

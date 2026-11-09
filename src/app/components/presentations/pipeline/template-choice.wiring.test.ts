@@ -19,6 +19,21 @@ function callerFunction(name: string, bindings: Record<string, unknown>) {
 }
 
 describe("pipeline saved-template caller wiring", () => {
+  it("clears an existing selection when the empty option is chosen, unless locked", async () => {
+    const source = ts.createSourceFile("PipelineTemplatePicker.tsx", readFileSync("src/app/components/presentations/pipeline/PipelineTemplatePicker.tsx", "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    let declaration: ts.FunctionDeclaration | undefined;
+    const visit = (node: ts.Node) => { if (ts.isFunctionDeclaration(node) && node.name?.text === "selectLibrary") declaration = node; ts.forEachChild(node, visit); };
+    visit(source);
+    if (!declaration) throw new Error("Missing selectLibrary handler");
+    const js = ts.transpileModule(declaration.getText(source), { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+    const clear = vi.fn();
+    const make = new Function("disabled", "choiceState", "clearChoice", `${js}; return selectLibrary;`);
+    await make(false, { libraryLoading: false }, clear)("");
+    expect(clear).toHaveBeenCalledOnce();
+    await make(true, { libraryLoading: false }, clear)("");
+    await make(false, { libraryLoading: true }, clear)("");
+    expect(clear).toHaveBeenCalledOnce();
+  });
   it("carries the selected choice through a fresh identity resolution into positional fill", () => {
     const caller = readFileSync("src/app/components/presentations/pipeline/PipelineTab.tsx", "utf8");
     const picker = readFileSync("src/app/components/presentations/pipeline/PipelineTemplatePicker.tsx", "utf8");
@@ -39,6 +54,9 @@ describe("pipeline saved-template caller wiring", () => {
     expect(picker).toContain("onRawTemplateFileIdChange(\"\")");
     expect(picker).toContain("onResolutionPendingChange(true)");
     expect(picker).toContain("<fieldset disabled={disabled}");
+    expect(picker).toContain("disabled={disabled || choiceState.libraryLoading}");
+    expect(picker).toContain("if (disabled || choiceState.libraryLoading) return;");
+    expect(picker).toContain("if (!libraryId) { clearChoice(); return; }");
   });
 
   it("routes rejected library action promises through the same visible selection-error result", () => {

@@ -22,23 +22,54 @@ describe("PowerPoint template UI wiring (source, not rendering)", () => {
   });
   it("associates every processing-disabled name, source, reload and saved-open control with the visible busy status", () => {
     const reloadText = source.indexOf("Reload saved libraries");
-    const reloadStart = source.lastIndexOf("<button", reloadText);
-    const reloadEnd = source.indexOf("</button>", reloadText) + "</button>".length;
-    const openStart = source.indexOf('<button className={styles.libraryButton}');
-    const openEnd = source.indexOf("</button>", openStart) + "</button>".length;
+    const reloadStart = source.lastIndexOf("<Button", reloadText);
+    const reloadEnd = source.indexOf("</Button>", reloadText) + "</Button>".length;
+    const openStart = source.indexOf('<Button variant="text" fullWidth');
+    const openEnd = source.indexOf("</Button>", openStart) + "</Button>".length;
     expect(reloadText).toBeGreaterThanOrEqual(0);
     expect(openStart).toBeGreaterThanOrEqual(0);
     const controls = [
-      source.match(/Template name(<input[\s\S]*?\/>)/)?.[1],
-      source.match(/PowerPoint source \(\.pptx\)(<input[\s\S]*?\/>)/)?.[1],
+      source.match(/<TextField label=\{savedId \? "Library name"[\s\S]*?\/>/)?.[0],
+      source.match(/<Button component="label"[\s\S]*?Choose PowerPoint source/)?.[0],
       source.slice(reloadStart, reloadEnd),
       source.slice(openStart, openEnd),
     ];
     expect(controls).toHaveLength(4);
     for (const control of controls) {
-      expect(control).toContain('aria-describedby={busy ? "ppt-template-status"');
+      expect(control).toContain('"ppt-template-status"');
     }
     expect(source).toContain('<p id="ppt-template-status" className={styles.status} role="status" aria-live="polite">{busy ? "Working..." : status}</p>');
+  });
+  it("refreshes on entry, distinguishes loading/empty/error, and pages source slides", () => {
+    expect(source).toContain('if (active) queueMicrotask');
+    expect(source).toContain('if (!cancelled) void refreshLibraries()');
+    expect(source).toContain('ticket !== listGeneration.current');
+    expect(source).toContain('Loading saved libraries...');
+    expect(source).toContain('librariesLoaded && !libraries.length');
+    expect(source).toContain('librariesError && <Alert');
+    expect(source).toContain('sourceSlidePage(definition.slides, slidePage)');
+    expect(source).toContain('aria-label="Source slide pages"');
+    expect(source).toContain('classifications do not control slide mapping');
+    expect(source).toContain('Slides need editable text');
+  });
+  it("gates account-owned state and protects unsaved edits before replacement", () => {
+    expect(source).toContain('if (loading) return');
+    expect(source).toContain('if (!user) return');
+    expect(source).toContain('<PowerPointTemplatesSession key={user.id}');
+    expect(source).toContain('if (dirty && (file || sourceId || definition)) setPending({ kind: "file"');
+    expect(source).toContain('const preserveName = !file && !sourceId && !definition && name.trim()');
+    expect(source).toContain('if (!preserveName) setName(next.name');
+    expect(source).toContain('if (dirty) setPending({ kind: "open"');
+    expect(source).toContain('if (definition && dirty) setPending({ kind: "analyze"');
+    expect(source).toContain('disabled={busy || dirty || !onUseInSlideDeckCreation}');
+    expect(source).toContain('window.addEventListener("beforeunload", warn)');
+  });
+  it("keeps the editor mounted after first visit while presentation and other tabs change", () => {
+    const page = stripComments(readFileSync("src/app/page.tsx", "utf8"));
+    expect(page).toContain('pptTemplatesVisited && (');
+    expect(page).toContain('display: pptTemplatesVisible ? undefined : "none"');
+    expect(page).toContain('manualView === "presentations" && presentationsView !== "ppt-templates"');
+    expect(page.match(/<PowerPointTemplates\b/g)).toHaveLength(1);
   });
   it("removes comment-only JSX attribute decoys before checking wiring", () => {
     const commentOnlyDecoy = '<input disabled={busy} {' + '/* aria-describedby={busy ? "ppt-template-status" : undefined} */' + '} />';

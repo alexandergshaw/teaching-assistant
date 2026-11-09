@@ -1,6 +1,13 @@
 import { resetSessionDiagnosticLogForTests, readSessionDiagnosticLogState } from "@/lib/session-diagnostic-log";
 import { describe, it, expect, vi } from "vitest";
-import { handoffTemplate, SELECTED_TEMPLATE_KEY, recordPowerPointDiagnostic } from "./panel-logic";
+import { handoffTemplate, SELECTED_TEMPLATE_KEY, recordPowerPointDiagnostic, sourceSlidePage } from "./panel-logic";
+it("pages all source slides in order without dropping the last partial page", () => {
+  const slides = Array.from({ length: 14 }, (_, i) => i + 1);
+  expect(sourceSlidePage(slides, 1)).toEqual([1, 2, 3, 4, 5, 6]);
+  expect(sourceSlidePage(slides, 2)).toEqual([7, 8, 9, 10, 11, 12]);
+  expect(sourceSlidePage(slides, 3)).toEqual([13, 14]);
+  expect(sourceSlidePage(slides, 0)).toEqual(sourceSlidePage(slides, 1));
+});
 describe("synchronous template selection handoff", () => {
   it("commits the JSON source identity before navigation and destination reopen", () => {
     const values = new Map<string, string>();

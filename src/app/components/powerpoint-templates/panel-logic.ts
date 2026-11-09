@@ -1,6 +1,10 @@
 import { recordSessionDiagnosticEntry } from "@/lib/session-diagnostic-log";
 import { failure, type TemplateFailure } from "@/lib/powerpoint-template-library/types";
 export const SELECTED_TEMPLATE_KEY = "ta-ppt-template-file-id";
+export function sourceSlidePage<T>(slides: readonly T[], page: number, pageSize = 6): readonly T[] {
+  const safePage = Number.isInteger(page) && page > 0 ? page : 1;
+  return slides.slice((safePage - 1) * pageSize, safePage * pageSize);
+}
 export function handoffTemplate(sourceFileId: string, storage: Pick<Storage, "setItem">, navigate: () => void): { ok: true } | TemplateFailure {
   try { storage.setItem(SELECTED_TEMPLATE_KEY, JSON.stringify(sourceFileId)); }
   catch { return failure(null, "PPT_SELECTION"); }

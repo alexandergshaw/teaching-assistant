@@ -87,7 +87,10 @@ export default function Home() {
   const [autoBuildVisited, setAutoBuildVisited] = useState(false);
   const discussionsVisible = activeTab === "manual" && toolsSection === "manual" && manualView === "discussions";
   const [discussionsVisited, setDiscussionsVisited] = useState(false);
+  const pptTemplatesVisible = activeTab === "manual" && toolsSection === "manual" && manualView === "presentations" && presentationsView === "ppt-templates";
+  const [pptTemplatesVisited, setPptTemplatesVisited] = useState(false);
   if (discussionsVisible && !discussionsVisited) setDiscussionsVisited(true);
+  if (pptTemplatesVisible && !pptTemplatesVisited) setPptTemplatesVisited(true);
   if (autoBuildVisible && !autoBuildVisited) setAutoBuildVisited(true);
 
   // The full URL-addressable nav state, used only to build each tab's deep-link
@@ -746,11 +749,9 @@ export default function Home() {
                   </TabShell>
                 )}
 
-                {manualView === "presentations" && (
+                {manualView === "presentations" && presentationsView !== "ppt-templates" && (
                   <TabShell>
-                    {presentationsView === "ppt-templates" ? (
-                      <PowerPointTemplates onUseInSlideDeckCreation={() => setPresentationsView("slide-deck")} />
-                    ) : presentationsView === "document-templates" ? (
+                    {presentationsView === "document-templates" ? (
                       <DocumentTemplates />
                     ) : presentationsView === "ppt-design" ? (
                       <PowerPointDesignTab />
@@ -793,6 +794,12 @@ export default function Home() {
         {discussionsVisited && (
           <div style={{ display: discussionsVisible ? undefined : "none" }}>
             <TabShell><DiscussionsTool /></TabShell>
+          </div>
+        )}
+
+        {pptTemplatesVisited && (
+          <div style={{ display: pptTemplatesVisible ? undefined : "none" }}>
+            <TabShell><PowerPointTemplates onUseInSlideDeckCreation={() => setPresentationsView("slide-deck")} active={pptTemplatesVisible} /></TabShell>
           </div>
         )}
 

@@ -1,17 +1,30 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Alert, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, MenuItem, Pagination, TextField } from "@mui/material";
 import { uploadPowerPointTemplateAction, analyzePowerPointTemplateAction, listPowerPointTemplateLibrariesAction,
   getPowerPointTemplateLibraryAction, savePowerPointTemplateLibraryAction, reusePowerPointTemplateLibraryAction,
   downloadPowerPointTemplateLibraryAction } from "@/app/actions/powerpoint-template-library";
 import { SLIDE_ROLES, absentRoles, failure, type LibraryDefinition, type LibraryMeta, type TemplateFailure } from "@/lib/powerpoint-template-library/types";
 import { checkFileWireBudget } from "@/lib/upload-budget";
-import { recordPowerPointDiagnostic as diagnostic, templateOperationStartedAt, handoffTemplate, readTemplateFile, downloadTemplate } from "./panel-logic";
+import { recordPowerPointDiagnostic as diagnostic, templateOperationStartedAt, handoffTemplate, readTemplateFile, downloadTemplate, sourceSlidePage } from "./panel-logic";
 import TabHeader from "../TabHeader";
 import styles from "../template-tools.module.css";
+import { useSupabase } from "@/context/SupabaseProvider";
 
-export default function PowerPointTemplates({ onUseInSlideDeckCreation }: { onUseInSlideDeckCreation?: () => void }) {
+export default function PowerPointTemplates({ onUseInSlideDeckCreation, active = true }: { onUseInSlideDeckCreation?: () => void; active?: boolean }) {
+  const { user, loading } = useSupabase();
+  if (loading) return <Alert severity="info" role="status">Loading your session...</Alert>;
+  if (!user) return <Alert severity="info">Sign in to manage PowerPoint templates.</Alert>;
+  return <PowerPointTemplatesSession key={user.id} active={active} onUseInSlideDeckCreation={onUseInSlideDeckCreation} />;
+}
+
+function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUseInSlideDeckCreation?: () => void; active: boolean }) {
   const [libraries, setLibraries] = useState<LibraryMeta[]>([]);
+  const [librariesLoading, setLibrariesLoading] = useState(true);
+  const [librariesLoaded, setLibrariesLoaded] = useState(false);
+  const [librariesError, setLibrariesError] = useState("");
+  const [slidePage, setSlidePage] = useState(1);
   const [file, setFile] = useState<File | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [name, setName] = useState("");
@@ -21,8 +34,11 @@ export default function PowerPointTemplates({ onUseInSlideDeckCreation }: { onUs
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<TemplateFailure | null>(null);
   const [status, setStatus] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [pending, setPending] = useState<{ kind: "file"; file: File } | { kind: "open"; id: string } | { kind: "analyze" } | null>(null);
   const alive = useRef(true);
   const generation = useRef(0);
+  const listGeneration = useRef(0);
   const locked = useRef(false);
   async function handleOperation(operation: "load" | "analyze" | "save" | "reuse" | "download", job: (current: () => boolean) => Promise<void>) {
     if (locked.current) return;
@@ -43,20 +59,38 @@ export default function PowerPointTemplates({ onUseInSlideDeckCreation }: { onUs
   }
   useEffect(() => {
     alive.current = true;
-    let cancelled = false;
-    const initialGeneration = generation.current;
+    const operationCounter = generation, listCounter = listGeneration;
+    return () => { alive.current = false; operationCounter.current++; listCounter.current++; };
+  }, []);
+  async function refreshLibraries() {
+    const ticket = ++listGeneration.current;
     const started = templateOperationStartedAt();
-    void listPowerPointTemplateLibrariesAction().then(result => {
+    setLibrariesLoading(true); setLibrariesError("");
+    try {
+      const result = await listPowerPointTemplateLibrariesAction();
       diagnostic("load", started, "error" in result ? result : null);
-      if (cancelled || generation.current !== initialGeneration) return;
-      if ("error" in result) setError(result); else setLibraries(result.libraries);
-    }).catch(() => {
+      if (!alive.current || ticket !== listGeneration.current) return;
+      if ("error" in result) setLibrariesError(result.error);
+      else { setLibraries(result.libraries); setLibrariesLoaded(true); }
+    } catch {
       const result = failure(null, "PPT_STORAGE");
       diagnostic("load", started, result);
-      if (!cancelled && generation.current === initialGeneration) setError(result);
-    });
-    return () => { cancelled = true; alive.current = false; generation.current = initialGeneration + 1; };
-  }, []);
+      if (alive.current && ticket === listGeneration.current) setLibrariesError(result.error);
+    } finally { if (alive.current && ticket === listGeneration.current) setLibrariesLoading(false); }
+  }
+  useEffect(() => {
+    let cancelled = false;
+    const listCounter = listGeneration;
+    if (active) queueMicrotask(() => { if (!cancelled) void refreshLibraries(); });
+    return () => { cancelled = true; listCounter.current++; };
+  // A newly entered view refreshes; the session is keyed to the authenticated user.
+  }, [active]);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
   function requireSuccess<T extends object>(result: T): Exclude<T, TemplateFailure> {
     if ("error" in result) throw result;
     return result as Exclude<T, TemplateFailure>;
@@ -79,7 +113,7 @@ export default function PowerPointTemplates({ onUseInSlideDeckCreation }: { onUs
       const result = requireSuccess(await analyzePowerPointTemplateAction(id));
       diagnostic("analyze", started);
       if (!current()) return;
-      setDefinition(result.definition); setStatus("Review the source slides and classifications, then save.");
+      setDefinition(result.definition); setSlidePage(1); setDirty(true); setStatus("Review the source slides and classifications, then save.");
     });
   }
   async function open(id: string) {
@@ -89,8 +123,8 @@ export default function PowerPointTemplates({ onUseInSlideDeckCreation }: { onUs
       diagnostic("load", started);
       if (!current()) return;
       setSavedId(result.library.id); setSourceId(result.library.sourceFileId);
-      setName(result.library.name); setDefinition(result.library.definition);
-      setFile(null); setConfirmed(false); setStatus("Saved library reopened.");
+      setName(result.library.name); setDefinition(result.library.definition); setSlidePage(1);
+      setFile(null); setConfirmed(false); setDirty(false); setStatus("Saved library reopened.");
     });
   }
   async function save() {
@@ -101,8 +135,9 @@ export default function PowerPointTemplates({ onUseInSlideDeckCreation }: { onUs
       diagnostic("save", started);
       if (!current()) return;
       setSavedId(result.library.id);
+      listGeneration.current++; setLibrariesLoading(false); setLibrariesLoaded(true); setLibrariesError("");
       setLibraries(previous => [result.library, ...previous.filter(item => item.id !== result.library.id)]);
-      setDefinition(result.library.definition); setStatus("Classifications saved.");
+      setDefinition(result.library.definition); setDirty(false); setStatus("Classifications saved.");
     });
   }
   async function reuse() {
@@ -128,42 +163,45 @@ export default function PowerPointTemplates({ onUseInSlideDeckCreation }: { onUs
       diagnostic("download", started); setStatus("Download prepared.");
     });
   }
+  function selectFile(next: File) {
+    const preserveName = !file && !sourceId && !definition && name.trim();
+    generation.current++; setFile(next); setConfirmed(false); setSourceId(""); setSavedId(null);
+    setDefinition(null); setError(null); setStatus(""); setDirty(true);
+    if (!preserveName) setName(next.name.replace(/\.pptx$/i, "").slice(0, 160));
+  }
   return <div className={styles.page}>
-    <TabHeader eyebrow="Presentations" title="PowerPoint Templates" subtitle="Save source slide examples and correct their roles. Examples show extracted text, without image previews. Reuse selects the original file for positional fill in Slide Deck Creation; slide count and fit limits still apply." />
+    <TabHeader eyebrow="Presentations" title="PowerPoint Templates" subtitle="Review extracted slide text and save classifications. Reuse fills the original deck by position; classifications do not control slide mapping. Slides need editable text, and slide and bullet capacity limits apply. Image previews are not available." />
     <div className={styles.workspace}>
       <section className={styles.panel} aria-labelledby="ppt-template-heading">
         <header className={styles.panelHeader}>
           <div><h2 id="ppt-template-heading" className={styles.panelTitle}>Add a presentation</h2><p className={styles.panelDescription}>Upload a deck, then classify the extracted slides.</p></div>
         </header>
         <div className={styles.formStack}>
-          <label className={styles.field}>Template name<input className={styles.input} value={name} maxLength={160} disabled={busy} aria-describedby={busy ? "ppt-template-status" : undefined} onChange={event => setName(event.target.value)} /></label>
-          <label className={styles.field}>PowerPoint source (.pptx)<input className={styles.input} type="file" accept=".pptx" disabled={busy} aria-describedby={busy ? "ppt-template-status" : undefined} onChange={event => {
-            generation.current++; setFile(event.target.files?.[0] ?? null); setConfirmed(false); setSourceId(""); setSavedId(null);
-            setDefinition(null); setError(null); setStatus("");
-            if (event.target.files?.[0]) setName(event.target.files[0].name.replace(/\.pptx$/i, "").slice(0, 160));
-          }} /></label>
-          <label className={styles.checkField}><input type="checkbox" checked={confirmed} disabled={busy || !file} aria-describedby={busy ? "ppt-template-status" : !file ? "ppt-confirm-reason" : undefined} onChange={event => setConfirmed(event.target.checked)} /> <span>Use this upload as a template</span></label>
-          {!file && <p id="ppt-confirm-reason" className={styles.helperText}>Choose a PowerPoint file before confirming it as a template.</p>}
-          <button className={definition ? styles.secondaryButton : styles.primaryButton} type="button" disabled={busy || (!sourceId && (!file || !confirmed)) || !name.trim()} aria-describedby={busy ? "ppt-template-status" : "ppt-analyze-reason"} onClick={() => void analyze()}>
-            {sourceId ? "Retry analysis" : "Upload and analyze"}
-          </button>
-          <p id="ppt-analyze-reason" className={styles.helperText}>To analyze, choose a .pptx file, confirm it as a template, and enter a name.</p>
+          <TextField label={savedId ? "Library name" : "Template name"} value={name} slotProps={{ htmlInput: { maxLength: 160, "aria-describedby": busy ? "ppt-template-status" : undefined } }} disabled={busy} onChange={event => { setName(event.target.value); setDirty(true); }} />
+          <Button component="label" variant="outlined" disabled={busy} aria-describedby={busy ? "ppt-template-status" : undefined}>Choose PowerPoint source (.pptx)<input type="file" accept=".pptx" hidden disabled={busy} onChange={event => {
+            const next = event.target.files?.[0]; event.target.value = "";
+            if (next) { if (dirty && (file || sourceId || definition)) setPending({ kind: "file", file: next }); else selectFile(next); }
+          }} /></Button>
+          {file && <p className={styles.helperText}>Selected: {file.name}</p>}
+          {file && <FormControlLabel control={<Checkbox checked={confirmed} disabled={busy} onChange={event => setConfirmed(event.target.checked)} />} label="Use this upload as a template" />}
+          {savedId && !file && <p className={styles.helperText}>Using the source saved with this library. Choose a file to start a different template.</p>}
+          <Button variant={definition ? "outlined" : "contained"} type="button" disabled={busy || (!sourceId && (!file || !confirmed)) || !name.trim()} aria-describedby={busy ? "ppt-template-status" : "ppt-analyze-reason"} onClick={() => { if (definition && dirty) setPending({ kind: "analyze" }); else void analyze(); }}>
+            {savedId ? "Reanalyze saved source" : sourceId ? "Retry analysis" : "Upload and analyze"}
+          </Button>
+          <p id="ppt-analyze-reason" className={styles.helperText}>{sourceId ? "Reanalysis uses the existing source and replaces the current classifications." : "To analyze, choose a .pptx file, confirm it as a template, and enter a name."}</p>
         </div>
       </section>
 
       <section className={styles.panel} aria-labelledby="ppt-library-heading">
         <header className={styles.panelHeader}>
           <div><h2 id="ppt-library-heading" className={styles.panelTitle}>Saved libraries</h2><p className={styles.panelDescription}>Reopen a deck’s saved slide classifications.</p></div>
-          <button className={styles.secondaryButton} type="button" disabled={busy} aria-describedby={busy ? "ppt-template-status" : undefined} onClick={() => void handleOperation("load", async current => {
-            const started = templateOperationStartedAt();
-            const result = requireSuccess(await listPowerPointTemplateLibrariesAction());
-            diagnostic("load", started);
-            if (current()) { setLibraries(result.libraries); setStatus("Library list reloaded."); }
-          })}>Reload saved libraries</button>
+          <Button variant="outlined" type="button" disabled={busy || librariesLoading} aria-describedby={busy ? "ppt-template-status" : undefined} onClick={() => void refreshLibraries()}>Reload saved libraries</Button>
         </header>
-        {!libraries.length && <p className={styles.emptyState}>No saved libraries loaded.</p>}
+        {librariesLoading && <p className={styles.helperText} role="status">Loading saved libraries...</p>}
+        {librariesError && <Alert severity="error">{librariesError}</Alert>}
+        {!librariesLoading && librariesLoaded && !libraries.length && <p className={styles.emptyState}>No saved libraries yet.</p>}
         {!!libraries.length && <ul className={styles.libraryList}>{libraries.map(library => <li key={library.id}>
-          <button className={styles.libraryButton} type="button" disabled={busy} aria-describedby={busy ? "ppt-template-status" : undefined} onClick={() => void open(library.id)}>{library.name}<span>Open</span></button>
+          <Button variant="text" fullWidth type="button" disabled={busy} aria-describedby={busy ? "ppt-template-status" : undefined} onClick={() => { if (dirty) setPending({ kind: "open", id: library.id }); else void open(library.id); }}>{library.name} - Open</Button>
         </li>)}</ul>}
       </section>
 
@@ -172,14 +210,16 @@ export default function PowerPointTemplates({ onUseInSlideDeckCreation }: { onUs
           <div><h2 id="ppt-review-heading" className={styles.panelTitle}>Review source slides</h2><p className={styles.panelDescription}>Assign a role to each slide. Saving updates the library; the manifest download creates a local JSON copy.</p></div>
           <p className={styles.roleSummary}>Absent roles: {absentRoles(definition).join(", ") || "none"}.</p>
         </header>
-        <div className={styles.slideGrid}>{definition.slides.map(slide => <article className={styles.slideCard} key={slide.id}>
+        <p className={styles.helperText}>Showing slides {(slidePage - 1) * 6 + 1}-{Math.min(slidePage * 6, definition.slides.length)} of {definition.slides.length}.</p>
+        <div className={styles.slideGrid}>{sourceSlidePage(definition.slides, slidePage).map(slide => <article className={styles.slideCard} key={slide.id}>
           <div className={styles.slideHeading}><h3>Source slide {slide.ordinal}</h3><small>{slide.id}</small></div>
           <pre className={styles.slideText}>{slide.text || "No extracted text. Visual content has not been classified."}</pre>
-          <label className={styles.field}>Role for source slide {slide.ordinal}<select className={styles.input} aria-describedby={busy ? "ppt-template-status" : !slide.text.trim() ? `ppt-role-reason-${slide.ordinal}` : undefined} disabled={busy || !slide.text.trim()} value={slide.role} onChange={event => {
-            setDefinition(previous => previous && ({ ...previous, slides: previous.slides.map(item => item.id === slide.id ? { ...item, role: event.target.value as typeof item.role } : item) }));
-          }}>{SLIDE_ROLES.map(role => <option key={role} value={role}>{role}</option>)}</select></label>
+          <TextField select fullWidth label={`Role for source slide ${slide.ordinal}`} slotProps={{ select: { "aria-describedby": busy ? "ppt-template-status" : !slide.text.trim() ? `ppt-role-reason-${slide.ordinal}` : undefined } }} disabled={busy || !slide.text.trim()} value={slide.role} onChange={event => {
+            setDefinition(previous => previous && ({ ...previous, slides: previous.slides.map(item => item.id === slide.id ? { ...item, role: event.target.value as typeof item.role } : item) })); setDirty(true);
+          }}>{SLIDE_ROLES.map(role => <MenuItem key={role} value={role}>{role}</MenuItem>)}</TextField>
           {!slide.text.trim() && <p id={`ppt-role-reason-${slide.ordinal}`} className={styles.helperText}>This slide has no extracted text, so its role cannot be classified here.</p>}
         </article>)}</div>
+        {definition.slides.length > 6 && <Pagination count={Math.ceil(definition.slides.length / 6)} page={slidePage} onChange={(_, page) => setSlidePage(page)} disabled={busy} aria-label="Source slide pages" />}
         <div className={styles.actionRow}>
           <button className={savedId ? styles.secondaryButton : styles.primaryButton} type="button" disabled={busy || !name.trim()} aria-describedby={busy ? "ppt-template-status" : !name.trim() ? "ppt-save-reason" : undefined} onClick={() => void save()}>Save classifications</button>
           <button className={styles.secondaryButton} type="button" disabled={busy} aria-describedby={busy ? "ppt-template-status" : undefined} onClick={() => {
@@ -194,14 +234,15 @@ export default function PowerPointTemplates({ onUseInSlideDeckCreation }: { onUs
       {savedId && <section className={`${styles.panel} ${styles.reviewPanel}`} aria-label="Saved template actions">
         <header className={styles.panelHeader}><div><h2 className={styles.panelTitle}>Use or download this template</h2><p className={styles.panelDescription}>Reuse sends the original deck to Slide Deck Creation. Downloads save a local copy or manifest.</p></div></header>
         <div className={styles.actionRow}>
-          <button className={styles.primaryButton} type="button" disabled={busy || !onUseInSlideDeckCreation} aria-describedby={busy ? "ppt-template-status" : !onUseInSlideDeckCreation ? "ppt-reuse-reason" : undefined} onClick={() => void reuse()}>Use in Slide Deck Creation</button>
+          <Button variant="contained" type="button" disabled={busy || dirty || !onUseInSlideDeckCreation} aria-describedby={busy ? "ppt-template-status" : dirty || !onUseInSlideDeckCreation ? "ppt-reuse-reason" : undefined} onClick={() => void reuse()}>Use in Slide Deck Creation</Button>
           <button className={styles.secondaryButton} type="button" disabled={busy} aria-describedby={busy ? "ppt-template-status" : undefined} onClick={() => void download("original")}>Download original .pptx</button>
           <button className={styles.secondaryButton} type="button" disabled={busy} aria-describedby={busy ? "ppt-template-status" : undefined} onClick={() => void download("manifest")}>Download saved manifest</button>
         </div>
-        {!onUseInSlideDeckCreation && <p id="ppt-reuse-reason" className={styles.helperText}>Slide Deck Creation is unavailable from this view.</p>}
+        {(dirty || !onUseInSlideDeckCreation) && <p id="ppt-reuse-reason" className={styles.helperText}>{dirty ? "Save your changes before using this template." : "Slide Deck Creation is unavailable from this view."}</p>}
       </section>}
     </div>
     <p id="ppt-template-status" className={styles.status} role="status" aria-live="polite">{busy ? "Working..." : status}</p>
     {error && <p className={styles.error} role="alert">{error.error} ({error.code})</p>}
+    <Dialog open={Boolean(pending)} onClose={() => setPending(null)} aria-labelledby="ppt-discard-title"><DialogTitle id="ppt-discard-title">Discard unsaved changes?</DialogTitle><DialogContent>The current template name and slide classifications have unsaved changes.</DialogContent><DialogActions><Button onClick={() => setPending(null)}>Cancel</Button><Button variant="contained" onClick={() => { const next = pending; setPending(null); if (!next) return; if (next.kind === "file") selectFile(next.file); else if (next.kind === "open") void open(next.id); else void analyze(); }}>Discard changes</Button></DialogActions></Dialog>
   </div>;
 }

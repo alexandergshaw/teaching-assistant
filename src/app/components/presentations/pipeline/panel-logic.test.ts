@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   applyRegenDecision,
+  regenInputSignature,
   buildPipelineRequest,
   editPipelineSlide,
   invalidateObjectiveDependents,
@@ -439,6 +440,20 @@ describe("applyRegenDecision", () => {
   it("accept: no deck is a no-op", () => {
     const empty = createInitialPipelineState();
     expect(applyRegenDecision(empty, candidate, 0, "accept")).toBe(empty);
+  });
+
+  it("does not promote a stale deck to done when accepting a candidate", () => {
+    const state = regenState();
+    const stale = { ...state, deck: { ...state.deck, status: "stale" as const } };
+    expect(applyRegenDecision(stale, candidate, 1, "accept", original.slides[1])).toBe(stale);
+  });
+
+  it("binds candidate inputs to the whole deck and committed source content", () => {
+    const state = regenState(), before = regenInputSignature(state, "context", ["objective"]);
+    const otherSlide = { ...state, deck: { ...state.deck, artifact: { ...original, slides: [original.slides[0], original.slides[1], makeSlide("changed")] } } };
+    expect(regenInputSignature(otherSlide, "context", ["objective"])).not.toBe(before);
+    expect(regenInputSignature(state, "changed", ["objective"])).not.toBe(before);
+    expect(regenInputSignature(state, "context", ["new"])).not.toBe(before);
   });
 
   it("discard: returns the state unchanged (deck and every stage status)", () => {

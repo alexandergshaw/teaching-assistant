@@ -58,8 +58,7 @@ describe("pipeline objectives", () => {
     const tab = readFileSync(join(process.cwd(), "src/app/components/presentations/pipeline/PipelineTab.tsx"), "utf8");
     expect(isObjectiveRevisionCurrent(4, 4)).toBe(true);
     expect(isObjectiveRevisionCurrent(4, 5)).toBe(false);
-    expect(tab).toContain("if (isObjectiveRevisionCurrent(objectiveRevisionAtStart, objectiveRevision.current)) setPipelineState(next)");
-    expect(tab).toContain("if (!isObjectiveRevisionCurrent(objectiveRevisionAtStart, objectiveRevision.current)) return");
+    expect(tab.match(/!isObjectiveRevisionCurrent\(objectiveRevisionAtStart, objectiveRevision.current\)/g)).toHaveLength(2);
     expect(tab).toContain("disabled={objectiveBusy || busy}");
     expect(tab).toContain("objectiveRevision.current += 1");
   });

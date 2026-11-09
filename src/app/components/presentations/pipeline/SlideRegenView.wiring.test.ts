@@ -32,8 +32,15 @@ describe("SlideRegenView wiring (source-text pin)", () => {
   });
 
   it("routes both Accept and Discard through applyRegenDecision", () => {
-    expect(src).toMatch(/applyRegenDecision\(prev, candidate, selectedIndex, "accept"\)/);
+    expect(src).toMatch(/applyRegenDecision\(prev, candidate, selectedIndex, "accept", expected\)/);
     expect(src).toMatch(/applyRegenDecision\(prev, candidate, selectedIndex, "discard"\)/);
+  });
+  it("guards uncommitted sources and captures current input at commit", () => {
+    expect(src).toContain("sourcesDirty || pipelineState.deck.status !== \"done\"");
+    expect(src).toContain("latest.current.signature === signature");
+    expect(src).toContain("candidateSignature.current !== signature");
+    expect(src).toContain("regenInputSignature(prev, contextText, appliedObjectives) === expectedSignature");
+    expect(src).toContain("useLayoutEffect(() => { latest.current");
   });
 
   it("persists the selected slide and the instruction via usePersistedJSON", () => {

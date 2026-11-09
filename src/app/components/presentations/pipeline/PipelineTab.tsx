@@ -545,6 +545,7 @@ export default function PipelineTab() {
         setPipelineState={setPipelineState}
         contextText={contextText}
         appliedObjectives={appliedObjectives}
+        sourcesDirty={sourcesDirty}
         onBack={() => setRegenOpen(false)}
       />
       </>

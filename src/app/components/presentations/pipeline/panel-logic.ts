@@ -327,10 +327,16 @@ export function applyRegenDecision(
   expectedSlide?: PptxSlide
 ): PipelineState {
   if (action === "discard") return state;
+  if (state.deck.status !== "done") return state;
   const deck = state.deck.artifact;
   if (!deck) return state;
   if (expectedSlide && JSON.stringify(deck.slides[slideIndex]) !== JSON.stringify(expectedSlide)) return state;
   return applyStageEdit(state, "deck", mergeRegeneratedSlide(deck, slideIndex, candidate));
+}
+
+/** Bind a candidate to all committed model inputs, not only its target slide. */
+export function regenInputSignature(state: PipelineState, contextText: string, objectives: readonly string[]): string {
+  return JSON.stringify({ contextText, appliedObjectives: objectives, sources: state.sources.artifact, deck: state.deck.artifact });
 }
 
 export function reducePipelineResponse(

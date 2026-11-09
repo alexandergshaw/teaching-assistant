@@ -40,6 +40,8 @@ import { listAnnouncementLibraryAction, saveAnnouncementLibraryEntryAction, dele
 import { resolveTakeFormat } from "./take-format-selection";
 import RecordingAnnouncementEditor from "./RecordingAnnouncementEditor";
 import { sanitizeRecordingAnnouncementHtml } from "@/lib/recording-announcement-html";
+import { recordTakeDiagnostic } from "./take-announcement-diagnostics";
+import type { LibraryOperation, LibraryCode } from "../walkthrough-announcement/announcement-library-diagnostics";
 // docs/DEV_LOOP.md's "every feature needs a downloadable log" rule -
 // collection lives in useTakeAnnouncement.ts (getAnnouncementLog); this
 // panel only formats/downloads, mirroring GradingRecordingPanel.tsx and
@@ -197,6 +199,10 @@ export default function TakeAnnouncementPanel({
     list: (id: string) => listAnnouncementLibraryAction(id),
     save: (input: Parameters<typeof saveAnnouncementLibraryEntryAction>[0]) => saveAnnouncementLibraryEntryAction(input),
     remove: (id: string, entryId: string) => deleteAnnouncementLibraryEntryAction(id, entryId),
+    onDiagnostic: (operation: LibraryOperation, code: LibraryCode, duration: number, count: number) => {
+      const kind = operation === "load" ? "example_list" : operation === "save" || operation === "retry" ? "example_add" : operation === "delete" ? "example_remove" : null;
+      if (kind) recordTakeDiagnostic(kind, code === "ok", Date.now() - duration, kind === "example_list" ? { exampleCount: count } : {});
+    },
   }), []);
   const library = useAnnouncementLibrary(courseId, libraryAdapters);
   const [selectedFormat, setSelectedFormat] = useState<{ scope: string; id: string } | null>(null);
@@ -495,6 +501,7 @@ export default function TakeAnnouncementPanel({
               onChange={(event) => {
                 const id = event.target.value;
                 setSelectedFormat(id ? { scope: library.scopeKey, id } : null);
+                recordTakeDiagnostic("example_select", true, Date.now(), { exampleSelected: !!id });
                 setFormatError(null);
               }}>
               <MenuItem value="">Default format</MenuItem>

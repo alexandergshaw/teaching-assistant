@@ -2,6 +2,13 @@ import { expect, it, vi } from "vitest";
 import { createAnnouncementLibraryController, importAnnouncementLibraryFiles } from "./announcement-library-controller";
 import { deriveAnnouncementOutline } from "@/lib/announcement-outline";
 import { buildSessionDiagnosticLog, formatSessionDiagnosticLogCsv, formatSessionDiagnosticLogJson, readSessionDiagnosticLogState, resetSessionDiagnosticLogForTests } from "@/lib/session-diagnostic-log";
+import * as sessionLog from "@/lib/session-diagnostic-log";
+import { recordLibraryDiagnostic } from "./announcement-library-diagnostics";
+it("does not fail the library operation if the session logger throws", () => {
+  const spy = vi.spyOn(sessionLog, "recordSessionDiagnosticEntry").mockImplementation(() => { throw new Error("store failed"); });
+  expect(() => recordLibraryDiagnostic("load", "ok", 5)).not.toThrow();
+  spy.mockRestore();
+});
 it("production controller operations reach the session JSON/CSV log without bodies, labels, filenames or raw errors", async () => {
   vi.useFakeTimers(); resetSessionDiagnosticLogForTests("2026-01-01T00:00:00Z");
   const marker = "PRIVATE_BODY_LABEL_FILENAME_SECRET_123";

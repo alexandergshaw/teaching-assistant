@@ -60,7 +60,16 @@ export type AnnouncementIngredient = Extract<ReplyIngredient, "insight" | "resou
 
 /** Retain the example's symbols without passing its prose as course facts. */
 export function exampleFormatSymbols(example: string): string[] {
-  return [...new Set(example.match(/\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic})*/gu) ?? [])].slice(0, 24);
+  const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  const symbols = new Set<string>();
+  for (const { segment } of segmenter.segment(example)) {
+    // Emoji components remain attached to their grapheme: flags, keycaps,
+    // skin tones, variation selectors and joined sequences must not be split.
+    if (/\p{Extended_Pictographic}|\p{Regional_Indicator}|\p{Emoji_Presentation}|\u20e3/u.test(segment)) {
+      symbols.add(segment);
+    }
+  }
+  return [...symbols];
 }
 
 export const ANNOUNCEMENT_INGREDIENTS: readonly AnnouncementIngredient[] = ["insight", "resources"];

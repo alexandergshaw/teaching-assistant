@@ -1,7 +1,7 @@
 import { EXEMPLAR_FETCH_TIMEOUT_MS } from "./announcement-draft-slots";
 import { ANNOUNCEMENT_LIBRARY_MAX_BODY_CHARS, ANNOUNCEMENT_LIBRARY_MAX_BODY_BYTES, ANNOUNCEMENT_LIBRARY_MAX_LABEL_CHARS, normalizeAnnouncementLibraryLabel } from "@/lib/announcement-library-input";
 import type { AnnouncementLibraryEntry, AnnouncementLibrarySnapshot, SaveAnnouncementLibraryInput, AnnouncementLibraryResult } from "@/lib/announcement-library-types";
-import { recordLibraryDiagnostic } from "./announcement-library-diagnostics";
+import { recordLibraryDiagnostic, type LibraryOperation, type LibraryCode } from "./announcement-library-diagnostics";
 export type LibraryCard = { id: string; exemplarText: string; label: string; acknowledged: AnnouncementLibraryEntry | null;
   status: "Unsaved" | "Saving" | "Saved" | "Could not save"; error: string | null; deleting: boolean };
 export type LibraryState = { cards: readonly LibraryCard[]; load: "loading" | "loaded" | "failed" | "timedout" };
@@ -9,6 +9,7 @@ export interface LibraryAdapters {
   list(courseId: string): Promise<AnnouncementLibraryResult<AnnouncementLibraryEntry[]>>;
   save(input: SaveAnnouncementLibraryInput): Promise<AnnouncementLibraryResult<AnnouncementLibraryEntry>>;
   remove(courseId: string, id: string): Promise<AnnouncementLibraryResult<void>>;
+  onDiagnostic?: (operation: LibraryOperation, code: LibraryCode, durationMs: number, count: number) => void;
 }
 export function libraryValidation(body: string, label: string): string | null {
   if (!body.trim()) return "Enter announcement text before saving.";
@@ -35,24 +36,29 @@ export function createAnnouncementLibraryController(courseId: string, adapters: 
   const cardFor = (id: string) => state.cards.find(c => c.id === id);
   const patch = (id: string, p: Partial<LibraryCard>) => { state = { ...state, cards: state.cards.map(c => c.id === id ? { ...c, ...p } : c) }; emit(); };
   const cancel = (id: string) => { clearTimeout(timers.get(id)); timers.delete(id); };
+  const diagnostic = (operation: LibraryOperation, code: LibraryCode, duration: number, count = 1) => {
+    recordLibraryDiagnostic(operation, code, duration, count);
+    try { adapters.onDiagnostic?.(operation, code, duration, count); } catch { /* Diagnostic failures are non-fatal. */ }
+  };
   function schedule(id: string) { cancel(id); timers.set(id, setTimeout(() => { timers.delete(id); void save(id); }, options.debounceMs ?? 700)); }
   async function save(id: string, retry = false, replay?: SaveAnnouncementLibraryInput): Promise<void> {
     cancel(id);
     const card = cardFor(id);
     if (disposed || !card || card.deleting || pending.has(id) || (!replay && current(card) && !uncertain.has(id))) return;
     const error = replay ? null : libraryValidation(card.exemplarText, card.label);
-    if (error) { patch(id, { status: "Unsaved", error }); return; }
+    if (error) { patch(id, { status: "Unsaved", error }); diagnostic(retry ? "retry" : "save", "invalid", 0); return; }
     const started = Date.now();
+    let timedOut = false;
     const input = replay ?? { id, courseId, exemplarText: card.exemplarText, label: normalizeAnnouncementLibraryLabel(card.label), expected: snapshot(card) };
     attempted.add(id); uncertain.set(id, input);
     patch(id, { status: "Saving", error: null });
     const timeout = setTimeout(() => { if (!disposed && cardFor(id) && !cardFor(id)?.deleting) {
       patch(id, { status: "Could not save", error: "Saving is taking longer than expected. Retry after the request finishes." });
-      recordLibraryDiagnostic(retry ? "retry" : "save", "timedout", Date.now() - started);
+      timedOut = true; diagnostic(retry ? "retry" : "save", "timedout", Date.now() - started);
     } }, options.timeoutMs ?? EXEMPLAR_FETCH_TIMEOUT_MS);
     const request = Promise.resolve().then(() => adapters.save(input)).catch(() => ({ ok: false, code: "unavailable" } as const)).then(result => {
       if (disposed || !cardFor(id)) return;
-      recordLibraryDiagnostic(retry ? "retry" : "save", result.ok ? "ok" : result.code, Date.now() - started);
+      if (!timedOut) diagnostic(retry ? "retry" : "save", result.ok ? "ok" : result.code, Date.now() - started);
       if (result.ok || result.code !== "unavailable") uncertain.delete(id);
       if (result.ok) {
         patch(id, { acknowledged: result.value });
@@ -70,13 +76,13 @@ export function createAnnouncementLibraryController(courseId: string, adapters: 
     pending.set(id, request); await request;
   }
   async function load() {
-    const run = ++loadRun, started = Date.now();
+    const run = ++loadRun, started = Date.now(); let timedOut = false;
     state = { ...state, load: "loading" }; emit();
-    const timeout = setTimeout(() => { if (!disposed && run === loadRun) { state = { ...state, load: "timedout" }; emit(); recordLibraryDiagnostic("load", "timedout", Date.now() - started); } }, options.timeoutMs ?? EXEMPLAR_FETCH_TIMEOUT_MS);
+    const timeout = setTimeout(() => { if (!disposed && run === loadRun) { state = { ...state, load: "timedout" }; emit(); timedOut = true; diagnostic("load", "timedout", Date.now() - started); } }, options.timeoutMs ?? EXEMPLAR_FETCH_TIMEOUT_MS);
     const result = await adapters.list(courseId).catch(() => ({ ok: false, code: "unavailable" } as const));
     clearTimeout(timeout);
     if (disposed || run !== loadRun) return;
-    recordLibraryDiagnostic("load", result.ok ? "ok" : result.code, Date.now() - started, result.ok ? result.value.length : 0);
+    if (!timedOut) diagnostic("load", result.ok ? "ok" : result.code, Date.now() - started, result.ok ? result.value.length : 0);
     if (!result.ok) { state = { ...state, load: "failed" }; emit(); return; }
     const ids = new Set(state.cards.map(c => c.id));
     state = { load: "loaded", cards: [...state.cards, ...result.value.filter(e => !ids.has(e.id) && !deleted.has(e.id)).map(e => ({ id: e.id, exemplarText: e.exemplarText, label: e.label ?? "", acknowledged: e, status: "Saved" as const, error: null, deleting: false }))] }; emit();
@@ -102,7 +108,7 @@ export function createAnnouncementLibraryController(courseId: string, adapters: 
     const started = Date.now();
     const result = latest.acknowledged || attempted.has(id) ? await adapters.remove(courseId, id).catch(() => ({ ok: false, code: "unavailable" } as const)) : { ok: true } as const;
     if (disposed) return false;
-    recordLibraryDiagnostic("delete", result.ok ? "ok" : result.code, Date.now() - started);
+    diagnostic("delete", result.ok ? "ok" : result.code, Date.now() - started);
     if (!result.ok) { patch(id, { deleting: false, error: "Could not remove. Retry removal." }); return false; }
     deleted.add(id); state = { ...state, cards: state.cards.filter(c => c.id !== id) }; emit(); return true;
   }

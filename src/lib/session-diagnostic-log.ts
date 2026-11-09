@@ -70,9 +70,9 @@ import { csvRow, yesNo } from "@/lib/course-tasks-view-csv";
  * string so the coverage registry below cannot drift out of sync with what is
  * actually instrumented: adding a surface here without a coverage row fails
  * type-checking at SESSION_DIAGNOSTIC_COVERAGE. */
-export type SessionDiagnosticSurface = "lms-content" | "diagnostics" | "grading" | "messaging" | "templates" | "courses";
+export type SessionDiagnosticSurface = "lms-content" | "diagnostics" | "grading" | "messaging" | "templates" | "courses" | "recording";
 
-const SURFACES: readonly SessionDiagnosticSurface[] = ["lms-content", "diagnostics", "grading", "messaging", "templates", "courses"];
+const SURFACES: readonly SessionDiagnosticSurface[] = ["lms-content", "diagnostics", "grading", "messaging", "templates", "courses", "recording"];
 
 export const SESSION_DIAGNOSTIC_SURFACE_LABELS: Readonly<Record<SessionDiagnosticSurface, string>> = {
   courses: "Institutions",
@@ -81,6 +81,7 @@ export const SESSION_DIAGNOSTIC_SURFACE_LABELS: Readonly<Record<SessionDiagnosti
   grading: "Grading",
   messaging: "Student Messaging",
   templates: "Template tools",
+  recording: "Recording-based Announcements",
 };
 
 export interface SessionDiagnosticCoverageRow {
@@ -93,6 +94,7 @@ export interface SessionDiagnosticCoverageRow {
 /** Every instrumented surface, stated in the download. Typed as a full record
  * keyed by surface so a new surface cannot be added without describing it. */
 const COVERAGE_BY_SURFACE: Readonly<Record<SessionDiagnosticSurface, string>> = {
+  recording: "Recording announcement example loading, saving, selecting and removal, drafting and regeneration, saving reviewed edits, source retrieval and browser download dispatch, and explicit Canvas post attempts. Download dispatch does not confirm a file reached disk. Entries contain only bounded counts, booleans and fixed categories, never announcement text, recording data, example text or identifiers.",
   courses: "Institutions directory load/profile/column/value outcomes, elapsed time, aggregate institution/column counts, validation/storage/unavailable failure categories, and explicit external-link dispatch by fixed destination category; no institution labels, email addresses, destinations, custom values or credentials. Other Courses operations and browser link-open success are not covered.",
   templates: "Walkthrough pair/draft outcomes, role, live or upload source kind, counts, elapsed time and fixed mapping/storage/cancellation failure codes. Uploaded video reading reports sampled/planned frames, gaps, unreadable blocks, failed batches, duration and separate narration outcome; no filenames, paths, media, frames, example content, materials, revision notes, output or upstream error text. Announcement library load, import, autosave, retry and removal outcomes, elapsed time, aggregate counts and fixed failure codes; no announcement bodies, labels or filenames. PowerPoint and document template load, analyze, save, reuse and download outcomes, elapsed time and fixed error codes; no filenames, source text, model responses or replacement values. Private Pipeline snapshot publication records a terminal verified/refused/uncertain outcome, total elapsed time and bounded slide/byte counts (not individual GitHub upload phase timings); no repository URLs/names or credentials. Template-backed publication includes the disclosed original and shared title/bullet fill. Copilot task dispatch requires explicit server configuration and remains default-off pending live verification; task submission and status refresh record outcomes without task content.",
   "lms-content":
@@ -115,7 +117,7 @@ export const SESSION_DIAGNOSTIC_COVERAGE: readonly SessionDiagnosticCoverageRow[
  * removed from here without its surface being added above turns a truthful
  * gap into a false claim of coverage. */
 export const SESSION_DIAGNOSTIC_NOT_COVERED: readonly string[] = [
-  "Recording, captions, teleprompter and avatar tools, except the walkthrough pair/draft operations declared above.",
+  "Recording, captions, teleprompter and avatar tools, except the announcement operations declared above.",
   "Workflows and the Automate panel - these keep their own per-run logs, downloadable from their own views.",
   "Chat, the knowledge base, discussion replies and message replies.",
   "Files, course planning, and every other tab not listed as covered above.",

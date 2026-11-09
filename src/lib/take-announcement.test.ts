@@ -60,6 +60,20 @@ describe("buildTakeAnnouncementInstruction", () => {
     expect(symbols).toEqual([symbol]);
     expect(symbols.join("")).not.toContain("private example words");
   });
+  it("preserves complete emoji graphemes including flags, keycaps, modifiers and joined sequences", () => {
+    const flag = String.fromCodePoint(0x1f1fa, 0x1f1f8);
+    const keycap = String.fromCodePoint(0x31, 0xfe0f, 0x20e3);
+    const tone = String.fromCodePoint(0x1f44b, 0x1f3fd);
+    const joined = String.fromCodePoint(0x1f469, 0x1f3fd, 0x200d, 0x1f4bb);
+    const variation = String.fromCodePoint(0x2764, 0xfe0f);
+    expect(exampleFormatSymbols(`Week 1 ${flag} ${keycap} ${tone} ${joined} ${variation} ${joined}`))
+      .toEqual([flag, keycap, tone, joined, variation]);
+  });
+  it("keeps all distinct symbols from the selected example without copying its prose", () => {
+    const symbols = Array.from({ length: 30 }, (_, i) => String.fromCodePoint(0x1f600 + i));
+    expect(exampleFormatSymbols(`private text ${symbols.join(" ")}`)).toEqual(symbols);
+    expect(exampleFormatSymbols("Week 123 #2 *")).toEqual([]);
+  });
   it("includes instructor direction with the selected transcript and recording context", () => {
     const instruction = buildTakeAnnouncementInstruction("SELECTED_TRANSCRIPT", baseContext, undefined, "Emphasize the lab deadline");
     expect(instruction).toContain("SELECTED_TRANSCRIPT");

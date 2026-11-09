@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/supabase/auth", () => ({ requireUser: vi.fn() }));
 vi.mock("@/lib/canvas", () => ({ resolveAnnouncementImage: vi.fn() }));
-vi.mock("@/lib/canvas/announcements", () => ({ createAnnouncementFromSafeHtml: vi.fn() }));
+vi.mock("@/lib/canvas/announcements", () => ({ createAnnouncementFromSafeHtml: vi.fn(), RecordingAnnouncementRefusal: class RecordingAnnouncementRefusal extends Error {} }));
 import { requireUser } from "@/lib/supabase/auth";
 import { resolveAnnouncementImage } from "@/lib/canvas";
-import { createAnnouncementFromSafeHtml } from "@/lib/canvas/announcements";
+import { createAnnouncementFromSafeHtml, RecordingAnnouncementRefusal } from "@/lib/canvas/announcements";
 import { postRecordingAnnouncementAction } from "./recording-announcement-post";
 
 describe("recording announcement posting", () => {
@@ -32,5 +32,11 @@ describe("recording announcement posting", () => {
     vi.mocked(requireUser).mockRejectedValue(new Error("Not signed in"));
     expect(await postRecordingAnnouncementAction("course", "Week", "<p>Hi</p>")).toEqual({ error: "Not signed in" });
     expect(createAnnouncementFromSafeHtml).not.toHaveBeenCalled();
+  });
+  it("distinguishes explicit Canvas refusal from an ambiguous failure", async () => {
+    vi.mocked(createAnnouncementFromSafeHtml).mockRejectedValueOnce(new RecordingAnnouncementRefusal("Refused"));
+    expect(await postRecordingAnnouncementAction("course", "Week", "<p>Hi</p>")).toEqual({ error: "Refused", delivery: "refused" });
+    vi.mocked(createAnnouncementFromSafeHtml).mockRejectedValueOnce(new Error("network failure"));
+    expect(await postRecordingAnnouncementAction("course", "Week", "<p>Hi</p>")).toEqual({ error: "network failure" });
   });
 });

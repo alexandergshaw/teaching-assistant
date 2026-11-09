@@ -23,6 +23,38 @@ function harness(overrides: Partial<LibraryAdapters> = {}) {
 }
 afterEach(() => vi.useRealTimers());
 describe("announcement library production controller", () => {
+  it("records timeout once and does not report a late response as a successful operation", async () => {
+    vi.useFakeTimers(); const pending = deferred<AnnouncementLibraryResult<AnnouncementLibraryEntry[]>>();
+    const onDiagnostic = vi.fn(); const { controller: c } = harness({ list: () => pending.promise, onDiagnostic });
+    const loading = c.load(); await vi.advanceTimersByTimeAsync(41);
+    expect(onDiagnostic).toHaveBeenCalledWith("load", "timedout", expect.any(Number), 1);
+    pending.resolve({ ok: true, value: [entry()] }); await loading;
+    expect(onDiagnostic).toHaveBeenCalledTimes(1); c.dispose();
+  });
+  it("records validation and local removal even when the diagnostic callback throws", async () => {
+    vi.useFakeTimers(); const onDiagnostic = vi.fn(() => { throw new Error("diagnostic failure"); });
+    const { controller: c, adapters } = harness({ onDiagnostic }); const id = c.add("x".repeat(16001))!;
+    await vi.advanceTimersByTimeAsync(11);
+    expect(onDiagnostic).toHaveBeenCalledWith("save", "invalid", 0, 1);
+    expect(adapters.save).not.toHaveBeenCalled();
+    expect(await c.remove(id)).toBe(true);
+    expect(onDiagnostic).toHaveBeenCalledWith("delete", "ok", expect.any(Number), 1); c.dispose();
+  });
+  it("records a save timeout once and suppresses late success diagnostics", async () => {
+    vi.useFakeTimers(); const pending = deferred<AnnouncementLibraryResult<AnnouncementLibraryEntry>>();
+    const onDiagnostic = vi.fn(); const { controller: c } = harness({ save: () => pending.promise, onDiagnostic });
+    const id = c.add("Draft example")!; await vi.advanceTimersByTimeAsync(51);
+    expect(onDiagnostic).toHaveBeenCalledWith("save", "timedout", expect.any(Number), 1);
+    pending.resolve({ ok: true, value: entry(id, "Draft example") }); await vi.advanceTimersByTimeAsync(0);
+    expect(onDiagnostic.mock.calls.filter(([operation]) => operation === "save")).toHaveLength(1); c.dispose();
+  });
+  it("records a rejected save without exposing the exception", async () => {
+    vi.useFakeTimers(); const onDiagnostic = vi.fn();
+    const { controller: c } = harness({ save: async () => { throw new Error("private example"); }, onDiagnostic });
+    c.add("Draft example"); await vi.advanceTimersByTimeAsync(11);
+    expect(onDiagnostic).toHaveBeenCalledWith("save", "unavailable", expect.any(Number), 1);
+    expect(JSON.stringify(onDiagnostic.mock.calls)).not.toContain("private example"); c.dispose();
+  });
   it("coalesces typing into one stable identity and acknowledges the displayed revision", async () => {
     vi.useFakeTimers(); const { controller: c, adapters } = harness(); const id = c.add()!;
     c.edit(id, "exemplarText", "A"); c.edit(id, "exemplarText", "B"); c.edit(id, "label", "My label");

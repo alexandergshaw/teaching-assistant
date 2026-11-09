@@ -458,6 +458,8 @@ export async function createAnnouncementFromMarkdown(
   return toAnnouncement(topic, { title, message: markdownBody });
 }
 
+export class RecordingAnnouncementRefusal extends Error {}
+
 /** Post the same allowlisted HTML reviewed in the recording announcement editor. */
 export async function createAnnouncementFromSafeHtml(
   courseUrl: string,
@@ -467,8 +469,8 @@ export async function createAnnouncementFromSafeHtml(
   image?: AnnouncementBodyImage
 ): Promise<CanvasAnnouncement> {
   const safeHtml = sanitizeRecordingAnnouncementHtml(html);
-  if (!title.trim()) throw new Error("An announcement needs a title.");
-  if (!htmlToText(safeHtml).trim()) throw new Error("An announcement needs a message.");
+  if (!title.trim()) throw new RecordingAnnouncementRefusal("An announcement needs a title.");
+  if (!htmlToText(safeHtml).trim()) throw new RecordingAnnouncementRefusal("An announcement needs a message.");
   const { courseId, institution, token, baseUrl } = await resolveCourse(courseUrl, code);
   const params = new URLSearchParams();
   params.append("title", title.trim());
@@ -477,7 +479,11 @@ export async function createAnnouncementFromSafeHtml(
   const response = await canvasRequest(`${baseUrl}/api/v1/courses/${courseId}/discussion_topics`, {
     method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: params.toString(),
   }, token);
-  if (!response.ok) throw canvasError(response.status, institution);
+  if (!response.ok) {
+    const error = canvasError(response.status, institution);
+    if ([400, 401, 403, 404, 422].includes(response.status)) throw new RecordingAnnouncementRefusal(error.message);
+    throw error;
+  }
   const topic = (await response.json()) as CanvasDiscussionTopicListItem;
   return toAnnouncement(topic, { title, message: htmlToText(safeHtml) });
 }

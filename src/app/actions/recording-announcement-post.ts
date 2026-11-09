@@ -2,7 +2,7 @@
 
 import { requireUser } from "@/lib/supabase/auth";
 import { resolveAnnouncementImage } from "@/lib/canvas";
-import { createAnnouncementFromSafeHtml, type CanvasAnnouncement } from "@/lib/canvas/announcements";
+import { createAnnouncementFromSafeHtml, RecordingAnnouncementRefusal, type CanvasAnnouncement } from "@/lib/canvas/announcements";
 
 export async function postRecordingAnnouncementAction(
   courseUrl: string,
@@ -10,7 +10,7 @@ export async function postRecordingAnnouncementAction(
   html: string,
   acronym?: string,
   image?: { base64: string; mimeType: string; altText: string; fileName?: string },
-): Promise<{ announcement: CanvasAnnouncement; imageError?: string } | { error: string }> {
+): Promise<{ announcement: CanvasAnnouncement; imageError?: string } | { error: string; delivery?: "refused" }> {
   try {
     await requireUser();
     if (!image) return { announcement: await createAnnouncementFromSafeHtml(courseUrl, title, html, acronym) };
@@ -18,6 +18,7 @@ export async function postRecordingAnnouncementAction(
     const announcement = await createAnnouncementFromSafeHtml(courseUrl, title, html, acronym, uploadedImage);
     return imageError ? { announcement, imageError } : { announcement };
   } catch (err) {
+    if (err instanceof RecordingAnnouncementRefusal) return { error: err.message, delivery: "refused" };
     return { error: err instanceof Error ? err.message : "Could not post the announcement." };
   }
 }

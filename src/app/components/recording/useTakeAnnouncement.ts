@@ -91,6 +91,7 @@ import type { Take } from "./types";
 import type { AnnouncementOutline } from "@/lib/announcement-outline-types";
 import { recordingDraftToHtml } from "@/lib/recording-announcement-html";
 import { postRecordingAnnouncementAction } from "@/app/actions/recording-announcement-post";
+import { recordTakeDiagnostic } from "./take-announcement-diagnostics";
 
 export type { AnnouncementStage };
 export { decideRealTimeGuard };
@@ -232,21 +233,14 @@ export interface UseTakeAnnouncementReturn {
    * announcement text.
    *
    * The image DOES post now, as of this wave: when a "ready" image exists at
-   * commit time, commitPost() below passes it as createAnnouncementAction's
-   * optional 6th (image) argument, which uploads it to the course's Canvas
+   * commit time, commitPost() passes it to the Canvas posting action, which
+   * uploads it to the course's Canvas
    * Files and folds an <img> (with content-derived alt text -
    * buildAnnouncementImageAltText, src/lib/take-announcement.ts) onto the
    * HTML Canvas actually receives - see src/lib/canvas/announcements.ts's
    * buildAnnouncementBodyHtml and src/lib/canvas/announcement-image-upload.ts
-   * for the upload handshake. This does NOT touch `subject`/`body`
-   * (setSubject/setBody are never called with anything image-related, and
-   * neither is the saveDraft() MessageDraftPayload below) - the owner's
-   * separate "plain text copyable" requirement is about what the Subject/
-   * Message fields hold and what saveDraft() persists, not about what
-   * Canvas's own HTML body carries, and
-   * useTakeAnnouncement.image-copy-safety.test.ts guards exactly that
-   * distinction. An upload failure is never allowed to fail the whole post -
-   * createAnnouncementAction catches it and posts the announcement as text
+   * for the upload handshake. An upload failure does not fail the post:
+   * the posting action catches it and posts the announcement as text
    * only, returning `imageError` on the (still successful) result;
    * commitPost() surfaces that via lastMessage/announce so the instructor is
    * told the image failed and why, rather than assuming a "ready" image
@@ -530,6 +524,8 @@ export function useTakeAnnouncement({
 
   async function runDraft(transcript: string, formatExample: { outline: AnnouncementOutline; symbols: string[] } | null = null) {
     const hasPriorDraft = Boolean(subject.trim() || body.trim());
+    const started = Date.now(), operation = hasPriorDraft ? "regenerate" : "draft";
+    const diagnosticDetail = { hasExample: !!formatExample, hasInstructorContext: !!instructorContext.trim() };
     setRegenerationError(null);
     announce("Writing the announcement.");
     setStage({ phase: "drafting" });
@@ -553,6 +549,7 @@ export function useTakeAnnouncement({
     try {
       raw = await draftAnnouncementAction(instruction, provider, formatExample ? "structured" : "plain");
     } catch {
+      recordTakeDiagnostic(operation, false, started, diagnosticDetail);
       const message = "Could not generate the announcement. Please try again.";
       setLogDraftAttempts((prev) => [...prev, { at: new Date().toISOString(), ok: false, error: message }]);
       if (hasPriorDraft) {
@@ -580,6 +577,7 @@ export function useTakeAnnouncement({
       },
     });
     if (!result.ok) {
+      recordTakeDiagnostic(operation, false, started, diagnosticDetail);
       setLogDraftAttempts((prev) => [...prev, { at: new Date().toISOString(), ok: false, error: result.error }]);
       if (hasPriorDraft) {
         setRegenerationError(result.error);
@@ -590,6 +588,7 @@ export function useTakeAnnouncement({
       announce(`Could not draft the announcement - ${result.error}`);
       return;
     }
+    recordTakeDiagnostic(operation, true, started, diagnosticDetail);
     setLogDraftAttempts((prev) => [...prev, { at: new Date().toISOString(), ok: true, error: "" }]);
     setSubject(result.title);
     setBody(recordingDraftToHtml(result.message));
@@ -611,7 +610,6 @@ export function useTakeAnnouncement({
     announce("Draft ready to review.");
   }
 
-  // Take a fresh snapshot for each image operation.
   function imageDeps(): AnnouncementImageDeps {
     return {
       subject,
@@ -770,12 +768,14 @@ export function useTakeAnnouncement({
 
   function handlePostButtonClick() {
     setFieldError(null);
-    if (!currentArmSignature) return;
+    if (!currentArmSignature) { recordTakeDiagnostic("post", false, Date.now(), { delivery: "refused" }); return; }
     if (!subject.trim()) {
+      recordTakeDiagnostic("post", false, Date.now(), { delivery: "refused" });
       setFieldError("Enter a subject - an announcement cannot be posted without one.");
       return;
     }
     if (!body.trim()) {
+      recordTakeDiagnostic("post", false, Date.now(), { delivery: "refused" });
       setFieldError("Enter a message - an announcement cannot be posted without one.");
       return;
     }
@@ -792,6 +792,7 @@ export function useTakeAnnouncement({
 
   async function commitPost() {
     if (!selectedCourse) return;
+    const started = Date.now();
     setPosting(true);
     setPostError(null);
     setStage({ phase: "posting" });
@@ -818,6 +819,7 @@ export function useTakeAnnouncement({
     ).catch(() => ({ transport: true as const }));
     setPosting(false);
     if ("error" in result || "transport" in result) {
+      recordTakeDiagnostic("post", false, started, { delivery: "delivery" in result && result.delivery === "refused" ? "refused" : "uncertain" });
       const outcome = resolveTakePostFailure(result);
       const message = outcome.message;
       setArmedFor(outcome.armedFor);
@@ -830,6 +832,7 @@ export function useTakeAnnouncement({
       announce(message);
       return;
     }
+    recordTakeDiagnostic("post", true, started, { delivery: "confirmed" });
     setLogPostAttempts((prev) => [
       ...prev,
       { at: new Date().toISOString(), ok: true, error: "", imageUploadFailed: !!result.imageError, course: selectedCourse.name },
@@ -869,6 +872,7 @@ export function useTakeAnnouncement({
       return;
     }
     void (async () => {
+      const started = Date.now();
       setSavingDraft(true);
       const payload: MessageDraftPayload = {
         kind: "announcement",
@@ -889,7 +893,8 @@ export function useTakeAnnouncement({
           },
         },
         { summary: `Announcement from ${take.name}`, payload }
-      );
+      ).catch(() => ({ error: "Could not save the draft. Please try again." }));
+      recordTakeDiagnostic("edit_save", !("error" in result), started);
       setSavingDraft(false);
       if ("error" in result) {
         setDraftError(result.error);

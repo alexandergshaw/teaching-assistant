@@ -51,6 +51,14 @@ describe("pipeline saved-template caller wiring", () => {
     expect(picker).toContain("{choiceState.libraryError && <Alert severity=\"error\">");
   });
 
+  it("offers a reload that invalidates the prior list request", () => {
+    const picker = readFileSync("src/app/components/presentations/pipeline/PipelineTemplatePicker.tsx", "utf8");
+    expect(picker).toContain("Reload saved libraries");
+    expect(picker).toContain("setRefreshVersion((version) => version + 1)");
+    expect(picker).toContain("}, [refreshVersion]);");
+    expect(picker).toContain("if (cancelled) return;");
+  });
+
   it("invalidates held library lookups during picker unmount cleanup", () => {
     const choice = readFileSync("src/app/components/presentations/pipeline/template-choice.ts", "utf8");
     const picker = readFileSync("src/app/components/presentations/pipeline/PipelineTemplatePicker.tsx", "utf8");

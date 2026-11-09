@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/supabase/auth";
 import { uploadDeckTemplateFileAction } from "./deck-template-files";
 import { decodeSource, inventorySlides } from "@/lib/powerpoint-template-library/inventory";
 import { analyzeSlides, validateAssignments } from "@/lib/powerpoint-template-library/analysis";
-import { getSource, listLibraries, getLibrary, saveLibrary } from "@/lib/powerpoint-template-library/store";
+import { getSource, listLibrariesWithCompleteness, getLibrary, saveLibrary } from "@/lib/powerpoint-template-library/store";
 import { failure, libraryName, TemplateError, type LibraryDefinition } from "@/lib/powerpoint-template-library/types";
 import { checkWireBudget } from "@/lib/upload-budget";
 
@@ -46,7 +46,7 @@ export async function analyzePowerPointTemplateAction(sourceFileId: string, mode
 export async function listPowerPointTemplateLibrariesAction() {
   try {
     const user = await requireUser();
-    try { return { libraries: await listLibraries(user.id) }; }
+    try { return await listLibrariesWithCompleteness(user.id); }
     catch (error) { return failure(error, "PPT_STORAGE"); }
   } catch { return failure(null, "PPT_AUTH"); }
 }

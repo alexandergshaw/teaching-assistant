@@ -15,19 +15,23 @@ const h = vi.hoisted(() => ({
 function fakeTable(name: string) {
   const filters: [string, unknown][] = [];
   let mode = "read", pending: Row | undefined;
+  let range: [number, number] | null = null;
   const record = (op: string, ...args: unknown[]) => { h.calls.push({ table: name, op, args }); };
   const matches = () => (h.tables[name] ?? []).filter(row => filters.every(([key, value]) => row[key] === value));
-  const execute = (single = false): { data: unknown; error: unknown } => {
+  const execute = (single = false): { data: unknown; error: unknown; count?: number } => {
     if (mode !== "read" && h.failSave) return { data: null, error: { message: "private database detail" } };
     let rows = matches();
     if (mode === "insert" && pending) { h.tables[name] ??= []; h.tables[name].push(pending); rows = [pending]; pending = undefined; }
     if (mode === "update") { for (const row of rows) Object.assign(row, pending); }
-    return { data: JSON.parse(JSON.stringify(single ? rows[0] ?? null : rows)), error: null };
+    const count = rows.length;
+    if (range) rows = rows.slice(range[0], range[1] + 1);
+    return { data: JSON.parse(JSON.stringify(single ? rows[0] ?? null : rows)), error: null, count };
   };
   const builder = {
     select: (...args: unknown[]) => { record("select", ...args); return builder; },
     eq: (key: string, value: unknown) => { record("eq", key, value); filters.push([key, value]); return builder; },
     order: (...args: unknown[]) => { record("order", ...args); return builder; },
+    range: (start: number, end: number) => { record("range", start, end); range = [start, end]; return builder; },
     insert: (row: Row) => { record("insert", row); mode = "insert"; pending = { id: "99999999-9999-4999-8999-999999999999", ...row }; return builder; },
     update: (row: Row) => { record("update", row); mode = "update"; pending = row; return builder; },
     single: async () => execute(true),
@@ -151,7 +155,7 @@ describe("authenticated PowerPoint library flow", () => {
       () => savePowerPointTemplateLibraryAction(own.id, sourceId, "Foreign", own.definition),
       () => savePowerPointTemplateLibraryAction(null, sourceId, "Foreign", own.definition),
     ]) expect(await action()).toMatchObject({ code: "PPT_NOT_FOUND" });
-    expect(await listPowerPointTemplateLibrariesAction()).toEqual({ libraries: [] });
+    expect(await listPowerPointTemplateLibrariesAction()).toEqual({ libraries: [], truncated: false, snapshotUncertain: false });
     expect(JSON.stringify(h.tables)).toBe(before);
     expect(h.calls.filter(c => c.op === "eq" && c.args[0] === "user_id").length).toBeGreaterThanOrEqual(7);
   });

@@ -21,6 +21,8 @@ export default function PowerPointTemplates({ onUseInSlideDeckCreation, active =
 
 function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUseInSlideDeckCreation?: () => void; active: boolean }) {
   const [libraries, setLibraries] = useState<LibraryMeta[]>([]);
+  const [librariesTruncated, setLibrariesTruncated] = useState(false);
+  const [librariesSnapshotUncertain, setLibrariesSnapshotUncertain] = useState(false);
   const [libraryQuery, setLibraryQuery] = useState("");
   const [libraryPage, setLibraryPage] = useState(1);
   const libraryResults = filterLibraryPage(libraries, libraryQuery, libraryPage);
@@ -78,7 +80,7 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
       diagnostic("load", started, "error" in result ? result : null);
       if (!alive.current || ticket !== listGeneration.current) return;
       if ("error" in result) setLibrariesError(result.error);
-      else { setLibraries(result.libraries); setLibrariesLoaded(true); }
+      else { setLibraries(result.libraries); setLibrariesTruncated(result.truncated); setLibrariesSnapshotUncertain(result.snapshotUncertain); setLibrariesLoaded(true); }
     } catch {
       const result = failure(null, "PPT_STORAGE");
       diagnostic("load", started, result);
@@ -207,6 +209,8 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
         </header>
         {librariesLoading && <p className={styles.helperText} role="status">Loading saved libraries...</p>}
         {librariesError && <Alert severity="error">{librariesError}</Alert>}
+        {librariesTruncated && <Alert severity="warning">Only the most recently updated 5,000 library records are loaded. Search covers this partial list; older libraries may be missing.</Alert>}
+        {librariesSnapshotUncertain && <Alert severity="info">Libraries were loaded in batches. Changes made while loading may not appear; reload if a library is missing.</Alert>}
         {!librariesLoading && librariesLoaded && !libraries.length && <p className={styles.emptyState}>No saved libraries yet.</p>}
         {!!libraries.length && <TextField label="Search saved libraries" value={libraryQuery} onChange={(event) => { setLibraryQuery(event.target.value); setLibraryPage(1); }} size="small" fullWidth />}
         {!!libraries.length && <p className={styles.helperText} role="status">{libraryResults.matches} matching {libraryResults.matches === 1 ? "library" : "libraries"}.</p>}

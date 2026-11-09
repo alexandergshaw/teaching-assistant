@@ -19,12 +19,23 @@ export async function getSource(userId: string, id: string): Promise<SourceFile>
   if (!data) throw new TemplateError("PPT_NOT_FOUND");
   return { id: data.id, content: data.content, fileName: data.file_name };
 }
-export async function listLibraries(userId: string): Promise<LibraryMeta[]> {
-  const { data, error } = await table("powerpoint_template_libraries").select("id,source_file_id,name,updated_at").eq("user_id", userId).order("updated_at", { ascending: false });
-  if (error) throw new TemplateError("PPT_STORAGE");
+const LIBRARY_PAGE_SIZE = 200;
+const LIBRARY_LIST_LIMIT = 5000;
+export async function listLibrariesWithCompleteness(userId: string): Promise<{ libraries: LibraryMeta[]; truncated: boolean; snapshotUncertain: boolean }> {
+  const rows: LibraryRow[] = [];
+  let total: number | null = null;
+  const seen = new Set<string>();
+  for (let start = 0; start < LIBRARY_LIST_LIMIT; start += LIBRARY_PAGE_SIZE) {
+    const { data, error, count } = await table("powerpoint_template_libraries").select("id,source_file_id,name,updated_at", { count: "exact" }).eq("user_id", userId).order("updated_at", { ascending: false }).order("id", { ascending: false }).range(start, start + LIBRARY_PAGE_SIZE - 1);
+    if (error || !Array.isArray(data) || !Number.isSafeInteger(count) || count < 0 || (total !== null && total !== count)) throw new TemplateError("PPT_STORAGE");
+    total = count;
+    const expected = Math.min(LIBRARY_PAGE_SIZE, Math.max(0, count - start));
+    if (data.length !== expected) throw new TemplateError("PPT_STORAGE");
+    for (const row of data as LibraryRow[]) { if (seen.has(row.id)) throw new TemplateError("PPT_STORAGE"); seen.add(row.id); rows.push(row); }
+    if (start + data.length >= count) break;
+  }
   // Check ownership without downloading full PowerPoint files. Bound each IN
   // query so it stays below common database row and URL limits.
-  const rows = (data ?? []) as LibraryRow[];
   const ids: string[] = [];
   for (const id of new Set(rows.map((row) => row.source_file_id))) {
     try { assertId(id); ids.push(id); }
@@ -37,8 +48,9 @@ export async function listLibraries(userId: string): Promise<LibraryMeta[]> {
     if (result.error) throw new TemplateError("PPT_STORAGE");
     for (const source of (result.data ?? []) as { id: string }[]) owned.add(source.id);
   }
-  return rows.filter((row) => owned.has(row.source_file_id)).map(meta);
+  return { libraries: rows.filter((row) => owned.has(row.source_file_id)).map(meta), truncated: (total ?? 0) > LIBRARY_LIST_LIMIT, snapshotUncertain: (total ?? 0) > LIBRARY_PAGE_SIZE };
 }
+export async function listLibraries(userId: string): Promise<LibraryMeta[]> { return (await listLibrariesWithCompleteness(userId)).libraries; }
 export async function getLibrary(userId: string, id: string): Promise<SavedLibrary> {
   assertId(id);
   const { data, error } = await table("powerpoint_template_libraries").select("id,source_file_id,name,definition,updated_at").eq("user_id", userId).eq("id", id).maybeSingle();

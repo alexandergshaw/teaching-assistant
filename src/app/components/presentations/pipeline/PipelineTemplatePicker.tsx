@@ -61,6 +61,9 @@ export default function PipelineTemplatePicker({ effectiveChoice, rawTemplateFil
   const observedRawId = useRef(rawTemplateFileId);
   const [rawTemplates, setRawTemplates] = useState<DeckTemplateFileMeta[]>([]);
   const [libraries, setLibraries] = useState<LibraryMeta[]>([]);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [librariesTruncated, setLibrariesTruncated] = useState(false);
+  const [librariesSnapshotUncertain, setLibrariesSnapshotUncertain] = useState(false);
   const [libraryListLoading, setLibraryListLoading] = useState(true);
   const [libraryListError, setLibraryListError] = useState<string | null>(null);
   const [choiceState, setChoiceState] = useState<TemplateChoiceState>(() => initialTemplateChoiceState(effectiveChoice));
@@ -84,6 +87,8 @@ export default function PipelineTemplatePicker({ effectiveChoice, rawTemplateFil
         setLibraryListError(libraryResult.error);
       } else {
         setLibraries(libraryResult.libraries);
+        setLibrariesTruncated(libraryResult.truncated);
+        setLibrariesSnapshotUncertain(libraryResult.snapshotUncertain);
         setLibraryListError(null);
       }
       if (!("error" in rawResult)) {
@@ -104,9 +109,9 @@ export default function PipelineTemplatePicker({ effectiveChoice, rawTemplateFil
       }
     });
     return () => { cancelled = true; };
-  // The list is loaded once. Selection callbacks are intentionally omitted so a later choice does not restart it.
+  // Selection callbacks are intentionally omitted so a later choice does not restart the load.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [refreshVersion]);
 
   useEffect(() => {
     if (rawTemplateFileId === observedRawId.current) return;
@@ -193,6 +198,9 @@ export default function PipelineTemplatePicker({ effectiveChoice, rawTemplateFil
       </div>
       {choiceState.libraryError && <Alert severity="error">{choiceState.libraryError.error}</Alert>}
       {libraryListError && <Alert severity="error">{libraryListError}</Alert>}
+      {librariesTruncated && <Alert severity="warning">Only the most recently updated 5,000 library records are loaded. Older libraries may be missing.</Alert>}
+      {librariesSnapshotUncertain && <Alert severity="info">Libraries were loaded in batches. Changes made while loading may not appear; reload if a library is missing.</Alert>}
+      <Button size="small" onClick={() => { setLibraryListLoading(true); setLibraryListError(null); setRefreshVersion((version) => version + 1); }} disabled={libraryListLoading}>Reload saved libraries</Button>
       {!libraryListLoading && !libraryListError && libraries.length === 0 && <Typography variant="body2" color="text.secondary">No saved libraries are available. Create one in PowerPoint Templates.</Typography>}
       </div>
     </fieldset>

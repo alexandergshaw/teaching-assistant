@@ -11,6 +11,7 @@ import { requireOwner } from "@/lib/supabase/auth";
 import { getMessageDraft, createMessageDraft, markMessageDraftReviewed, updateMessageDraft, type MessageDraftPayload } from "@/lib/message-drafts";
 import { createAnnouncementAction, replyToConversationAction } from "./canvas";
 import { getWritingStyleBlock, jsonObjectSlice } from "./shared";
+import { postRecordingAnnouncementAction } from "./recording-announcement-post";
 
 
 // ── Message drafts ───────────────────────────────────────────────────────
@@ -290,7 +291,8 @@ export async function postMessageDraftAction(
       if (!payload.courseUrl) {
         return { error: "Invalid or missing course URL for announcement." };
       }
-      const res = await createAnnouncementAction(
+      const postAnnouncement = payload.bodyFormat === "html" ? postRecordingAnnouncementAction : createAnnouncementAction;
+      const res = await postAnnouncement(
         payload.courseUrl,
         payload.title || "Announcement",
         payload.body,
@@ -422,7 +424,8 @@ Return ONLY valid JSON: { "announcement": "..." }`;
  */
 export async function draftAnnouncementAction(
   instruction: string,
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  format: "plain" | "structured" = "plain"
 ): Promise<{ title: string; message: string } | { error: string }> {
   try {
     const user = await requireOwner();
@@ -451,7 +454,7 @@ Write a clear, warm, professional announcement. Return ONLY valid JSON:
 
 Requirements:
 - "title": a short, specific subject line (no more than ~10 words).
-- "message": the announcement body, addressed directly to students. Use plain text with blank lines between paragraphs; do not use markdown, headings, or bullet symbols.
+- "message": the announcement body, addressed directly to students. ${format === "structured" ? "Use Markdown headings and lists where the format reference calls for them; retain the example's literal symbols where appropriate." : "Use plain text with blank lines between paragraphs; do not use markdown, headings, or bullet symbols."}
 - Keep it concise and actionable. Do not invent dates, links, or details that were not provided.
 - Do not include any text outside the JSON object.`;
 

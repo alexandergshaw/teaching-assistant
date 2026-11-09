@@ -46,7 +46,7 @@ describe("announcement library production wiring", () => {
   });
   it("keeps accessible row controls, explicit deletion confirmation, import and add/remove focus paths", () => {
     const ui = source("AnnouncementLibrary.tsx");
-    for (const token of ['aria-live="polite"', 'type="file"', "multiple", "Confirm remove announcement", "bodyInputs.current.get(id)?.focus()", "addButton.current?.focus()", 'label={`Template ${index + 1} text`}']) expect(ui).toContain(token);
+    for (const token of ['aria-live="polite"', 'type="file"', "multiple", "Confirm remove announcement", "bodyInputs.current.get(id)?.focus()", "addButton.current?.focus()", 'label={`Paste previous announcement ${index + 1}`}']) expect(ui).toContain(token);
     expect(ui).toContain("useAnnouncementLibraryDeparture(controller)");
     expect(ui).toContain("open={departure.confirming}");
     expect(ui).toContain('aria-label={`Add a draft from this announcement ${index + 1}`}' );
@@ -54,9 +54,9 @@ describe("announcement library production wiring", () => {
   });
   it("names directly editable template slots while retaining the card map and autosave edits", () => {
     const ui = source("AnnouncementLibrary.tsx");
-    for (const token of ["Announcement templates", "Add template slot", 'label={`Template ${index + 1} label`}',
-      "Paste a previous announcement into each template slot. Each slot saves automatically. Choose its label under Format to match in the drafts below.",
-      'state.load === "loaded" && state.cards.length === 0 && "No templates saved yet. Add a template slot to get started."',
+    for (const token of ["Previous announcements", "Add previous announcement", 'label={`Previous announcement ${index + 1} label (optional)`}',
+      "Paste previous announcements here to save them for this course. They save automatically; choose one under Format to use its style in a new draft.",
+      'state.load === "loaded" && state.cards.length === 0 && "No previous announcements saved yet. Add one to paste its text."',
       "state.cards.map((card, index)", "key={card.id}", "const id = controller.add()", "onClick={add}",
       'controller.edit(card.id, "label", e.target.value)', 'controller.edit(card.id, "exemplarText", e.target.value)',
       "value={card.label}", "value={card.exemplarText}", "multiline minRows={6}"]) expect(ui).toContain(token);

@@ -227,10 +227,10 @@ describe("buildWalkthroughAnnouncementPrompt - AC4/AC6 ordering and coverage", (
     expect(lower).toContain("first appearance");
   });
 
-  it("instructs naming what was and was not covered", () => {
+  it("does not invent unread content or claim comprehensive coverage", () => {
     const prompt = buildWalkthroughAnnouncementPrompt(baseArgs());
     const lower = prompt.toLowerCase();
-    expect(lower).toContain("not covered");
+    expect(lower).toContain("do not invent missing content or claim comprehensive coverage");
   });
 
   it("carries the coverage block through into the prompt when supplied", () => {
@@ -666,9 +666,9 @@ function a18CountSentences(text: string): number {
 describe("A18 A1 (O1): the announcement task line stops asserting a screen-recorded walkthrough", () => {
   function expectedTaskLine(scope: string): string {
     return (
-      `Draft an announcement for students in ${scope}. ` +
-      "It covers a walkthrough of a series of LMS pages, reproducing the STRUCTURE of a previous " +
-      "announcement (described below as an outline) while covering what the walkthrough actually showed."
+      `Draft a direct announcement for students in ${scope}. ` +
+      "Explain the course information in the materials, reproducing the STRUCTURE of a previous " +
+      "announcement (described below as an outline)."
     );
   }
 
@@ -777,9 +777,10 @@ describe("A18 5.1/5.8/Ruling 17: the whole-prompt record-family inventory over a
   ];
 
   for (const { label, args } of ARMS) {
-    it(`whole-prompt record-family multiset is exactly ["record"], inside the framing block only - ${label}`, () => {
+    it(`whole-prompt record-family multiset contains only the negative instruction and framing noun - ${label}`, () => {
       const prompt = buildWalkthroughAnnouncementPrompt(baseArgs(args));
-      expect(a18RecordFamilyMatches(prompt)).toEqual(["record"]);
+      expect(a18RecordFamilyMatches(prompt)).toEqual(["recording", "record"]);
+      expect(prompt).toContain("Do not mention the walkthrough, screen sharing, capture, recording, or how the information was gathered");
       const framingSegment = a18Segments(prompt).find((s) => s.includes("untrusted content"));
       expect(framingSegment).toBeDefined();
       expect(a18RecordFamilyMatches(framingSegment as string)).toEqual(["record"]);
@@ -816,13 +817,13 @@ describe("A18 4b: the governed region - completeness over segments, for a fixed 
   // (5.0 rule 3), and never repaired by pasting a mismatched received value
   // (5.0 rule 2 / Ruling 13).
   const EXPECTED_SHAPE: SegShape[] = [
-    { head: "Draft an announcement for students in ZQ", lines: 1, sentences: 2, inventory: [] },
+    { head: "Draft a direct announcement for students", lines: 1, sentences: 2, inventory: [] },
     { head: "FORMAT VERSUS VOICE\n- The outline below ", lines: 5, sentences: 5, inventory: [] },
     { head: "WRITE IN MARKDOWN\n- Use Markdown heading", lines: 2, sentences: 2, inventory: [] },
     { head: "THE ANNOUNCEMENT FLOOR (applies on every", lines: 5, sentences: 6, inventory: [] },
     { head: "EMPHASIS\n- Where the content genuinely h", lines: 2, sentences: 2, inventory: [] },
     { head: "COVERAGE ORDER (AC4)\n- Cover the walkthr", lines: 3, sentences: 3, inventory: [] },
-    { head: "COVERAGE HONESTY (AC6)\n- Name, plainly, ", lines: 3, sentences: 2, inventory: [] },
+    { head: "COVERAGE HONESTY (AC6)\n- Use only inform", lines: 4, sentences: 4, inventory: ["recording"] },
     { head: "EMOJI POLICY\nDo not use emojis anywhere ", lines: 2, sentences: 1, inventory: [] },
     { head: "RESOURCE CITATION\nNo researched resource", lines: 2, sentences: 1, inventory: [] },
     { head: "Everything below this line, up to the wr", lines: 1, sentences: 2, inventory: ["record"] },
@@ -867,13 +868,13 @@ describe("A18 4b: the governed region - completeness over segments, for a fixed 
   };
 
   const EXPECTED_SECOND_SHAPE: SegShape[] = [
-    { head: "Draft an announcement for students in BI", lines: 1, sentences: 2, inventory: [] },
+    { head: "Draft a direct announcement for students", lines: 1, sentences: 2, inventory: [] },
     { head: "FORMAT VERSUS VOICE\n- The outline below ", lines: 5, sentences: 5, inventory: [] },
     { head: "WRITE IN MARKDOWN\n- Use Markdown heading", lines: 2, sentences: 2, inventory: [] },
     { head: "THE ANNOUNCEMENT FLOOR (applies on every", lines: 5, sentences: 6, inventory: [] },
     { head: "EMPHASIS\n- Where the content genuinely h", lines: 2, sentences: 2, inventory: [] },
     { head: "COVERAGE ORDER (AC4)\n- Cover the walkthr", lines: 3, sentences: 3, inventory: [] },
-    { head: "COVERAGE HONESTY (AC6)\n- Name, plainly, ", lines: 3, sentences: 2, inventory: [] },
+    { head: "COVERAGE HONESTY (AC6)\n- Use only inform", lines: 4, sentences: 4, inventory: ["recording"] },
     { head: "EMOJI POLICY\nEmojis are welcome in this ", lines: 2, sentences: 1, inventory: [] },
     { head: "RESOURCE CITATION\nBelow, after the untru", lines: 2, sentences: 3, inventory: [] },
     { head: "Everything below this line, up to the wr", lines: 1, sentences: 2, inventory: ["record"] },

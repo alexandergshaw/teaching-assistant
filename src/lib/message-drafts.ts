@@ -21,6 +21,7 @@ export type MessageDraftKind = "reply" | "announcement" | "message";
 export interface MessageDraftPayload {
   kind: MessageDraftKind;
   body: string;
+  bodyFormat?: "html";
   conversationId?: string;
   courseUrl?: string;
   title?: string;
@@ -70,6 +71,7 @@ export function coerceMessageDraftPayload(raw: unknown): MessageDraftPayload {
   return {
     kind,
     body,
+    ...(kind === "announcement" && o.bodyFormat === "html" ? { bodyFormat: "html" as const } : {}),
     ...(conversationId ? { conversationId } : {}),
     ...(courseUrl ? { courseUrl } : {}),
     ...(title ? { title } : {}),

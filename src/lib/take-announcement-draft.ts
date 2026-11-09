@@ -21,7 +21,7 @@ export type FinalizeResult = { ok: true; title: string; message: string } | { ok
 
 export function finalizeTakeDraft(
   raw: TakeDraftRaw,
-  args: { provider: LlmProvider; transcript: string; context: TakeAnnouncementContext }
+  args: { provider: LlmProvider; transcript: string; context: TakeAnnouncementContext; instructorContext?: string }
 ): FinalizeResult {
   if ("error" in raw) return { ok: false, error: raw.error };
   if (args.provider === "embedded") return { ok: false, error: EMBEDDED_DRAFT_REFUSAL };
@@ -29,6 +29,7 @@ export function finalizeTakeDraft(
   const { context } = args;
   const permitted = collectTakePermittedUrls([
     args.transcript,
+    args.instructorContext ?? "",
     context.topic ?? "",
     context.objectives ?? "",
     context.cardTitle ?? "",

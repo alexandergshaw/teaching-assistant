@@ -29,7 +29,6 @@ import {
   saveMessageDraftAction,
   updateMessageDraftPayloadAction,
   markMessageDraftReviewedAction,
-  createAnnouncementAction,
   listCourseHubAction,
 } from "../../actions";
 import { runTakeDraftSave, runTakeDraftPostCleanup } from "@/lib/take-draft-lifecycle";
@@ -89,6 +88,9 @@ import {
   type TranscriptionPipelineDeps,
 } from "./takeAnnouncementTranscription";
 import type { Take } from "./types";
+import type { AnnouncementOutline } from "@/lib/announcement-outline-types";
+import { recordingDraftToHtml } from "@/lib/recording-announcement-html";
+import { postRecordingAnnouncementAction } from "@/app/actions/recording-announcement-post";
 
 export type { AnnouncementStage };
 export { decideRealTimeGuard };
@@ -165,7 +167,7 @@ export interface UseTakeAnnouncementReturn {
   failedChunkNumber: number | null;
   retryFromFailedChunk: () => void;
   startOver: () => void;
-  retryDraft: () => void;
+  retryDraft: (example?: { outline: AnnouncementOutline; symbols: string[] } | null) => void;
   retryAudio: () => void;
   backToReviewAfterPostFailure: () => void;
 
@@ -213,6 +215,9 @@ export interface UseTakeAnnouncementReturn {
    * to join that signature too. */
   composition: AnnouncementCompositionSettings;
   setComposition: (next: AnnouncementCompositionSettings) => void;
+  instructorContext: string;
+  setInstructorContext: (value: string) => void;
+  regenerationError: string | null;
 
   /** The announcement's companion image (owner's ask: "a simple, everyday
    * image that is relevant"). "idle" before any attempt or after an explicit
@@ -329,6 +334,8 @@ export function useTakeAnnouncement({
 
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+  const [instructorContext, setInstructorContext] = useState("");
+  const [regenerationError, setRegenerationError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
 
   // Image companion (owner's ask, see this file's own header and
@@ -521,7 +528,9 @@ export function useTakeAnnouncement({
     };
   }
 
-  async function runDraft(transcript: string) {
+  async function runDraft(transcript: string, formatExample: { outline: AnnouncementOutline; symbols: string[] } | null = null) {
+    const hasPriorDraft = Boolean(subject.trim() || body.trim());
+    setRegenerationError(null);
     announce("Writing the announcement.");
     setStage({ phase: "drafting" });
     const instruction = buildTakeAnnouncementInstruction(
@@ -534,15 +543,33 @@ export function useTakeAnnouncement({
         cardTitle: context.cardTitle,
         cardSubtitle: context.cardSubtitle,
       },
-      composition
+      composition,
+      instructorContext,
+      formatExample?.outline ?? null,
+      formatExample?.symbols ?? []
     );
     const provider = getStoredProvider();
-    const raw = await draftAnnouncementAction(instruction, provider);
+    let raw: Awaited<ReturnType<typeof draftAnnouncementAction>>;
+    try {
+      raw = await draftAnnouncementAction(instruction, provider, formatExample ? "structured" : "plain");
+    } catch {
+      const message = "Could not generate the announcement. Please try again.";
+      setLogDraftAttempts((prev) => [...prev, { at: new Date().toISOString(), ok: false, error: message }]);
+      if (hasPriorDraft) {
+        setRegenerationError(message);
+        setStage({ phase: "review" });
+      } else {
+        setStage({ phase: "failed", stage: "draft", message });
+      }
+      announce(message);
+      return;
+    }
     // Refuses the embedded scaffold, blank drafts, and invented URLs before
     // anything reaches review (take-announcement-draft.ts).
     const result = finalizeTakeDraft(raw, {
       provider,
       transcript,
+      instructorContext,
       context: {
         takeName: take.name,
         durationSec: take.durationSec,
@@ -554,13 +581,18 @@ export function useTakeAnnouncement({
     });
     if (!result.ok) {
       setLogDraftAttempts((prev) => [...prev, { at: new Date().toISOString(), ok: false, error: result.error }]);
-      setStage({ phase: "failed", stage: "draft", message: result.error });
+      if (hasPriorDraft) {
+        setRegenerationError(result.error);
+        setStage({ phase: "review" });
+      } else {
+        setStage({ phase: "failed", stage: "draft", message: result.error });
+      }
       announce(`Could not draft the announcement - ${result.error}`);
       return;
     }
     setLogDraftAttempts((prev) => [...prev, { at: new Date().toISOString(), ok: true, error: "" }]);
     setSubject(result.title);
-    setBody(result.message);
+    setBody(recordingDraftToHtml(result.message));
     setArmedFor(null);
     setFieldError(null);
     setPostError(null);
@@ -579,14 +611,7 @@ export function useTakeAnnouncement({
     announce("Draft ready to review.");
   }
 
-  // Every function below is a thin wrapper that builds a fresh
-  // AnnouncementImageDeps snapshot from this render's current state and hands
-  // it to announcementImagePipeline.ts's own exported function of the same
-  // name - see that file's header for the full reasoning and each function's
-  // own doc comment for what it actually does. Kept as same-named local
-  // functions (not just re-exported directly) so every call site below and
-  // in UseTakeAnnouncementReturn keeps reading exactly as it did before this
-  // split - only imageDeps() is new.
+  // Take a fresh snapshot for each image operation.
   function imageDeps(): AnnouncementImageDeps {
     return {
       subject,
@@ -718,8 +743,8 @@ export function useTakeAnnouncement({
     void proceedToTranscription(0, pipelineDeps());
   }
 
-  function retryDraft() {
-    if (transcriptRef.current) void runDraft(transcriptRef.current);
+  function retryDraft(example: { outline: AnnouncementOutline; symbols: string[] } | null = null) {
+    if (transcriptRef.current) void runDraft(transcriptRef.current, example);
   }
 
   function retryAudio() {
@@ -784,12 +809,11 @@ export function useTakeAnnouncement({
             fileName: announcementImageFileName(subject, imageMimeType),
           }
         : undefined;
-    const result = await createAnnouncementAction(
+    const result = await postRecordingAnnouncementAction(
       selectedCourse.canvasUrl,
       subject,
       body,
       institution || undefined,
-      undefined,
       image
     ).catch(() => ({ transport: true as const }));
     setPosting(false);
@@ -850,6 +874,7 @@ export function useTakeAnnouncement({
         kind: "announcement",
         title: subject,
         body,
+        bodyFormat: "html",
         courseUrl: selectedCourse?.canvasUrl,
         hubCourseId: selectedCourse?.id,
         institution: institution || undefined,
@@ -953,6 +978,9 @@ export function useTakeAnnouncement({
 
     composition,
     setComposition,
+    instructorContext,
+    setInstructorContext,
+    regenerationError,
 
     imageState,
     imageBase64,

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  exampleFormatSymbols,
   truncateTranscriptForPrompt,
   buildTakeAnnouncementInstruction,
   buildAnnouncementImagePrompt,
@@ -53,6 +54,18 @@ describe("truncateTranscriptForPrompt", () => {
 });
 
 describe("buildTakeAnnouncementInstruction", () => {
+  it("carries format symbols without copying example prose", () => {
+    const symbol = String.fromCodePoint(0x1f4cc);
+    const symbols = exampleFormatSymbols(`private example words ${symbol} ${symbol}`);
+    expect(symbols).toEqual([symbol]);
+    expect(symbols.join("")).not.toContain("private example words");
+  });
+  it("includes instructor direction with the selected transcript and recording context", () => {
+    const instruction = buildTakeAnnouncementInstruction("SELECTED_TRANSCRIPT", baseContext, undefined, "Emphasize the lab deadline");
+    expect(instruction).toContain("SELECTED_TRANSCRIPT");
+    expect(instruction).toContain("INSTRUCTOR DIRECTION:\nEmphasize the lab deadline");
+    expect(instruction).toContain(baseContext.takeName);
+  });
   const baseContext = { takeName: "Take 3", durationSec: 615 };
 
   it("includes the standing instruction verbatim, at the start", () => {

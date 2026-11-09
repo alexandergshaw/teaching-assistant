@@ -6,6 +6,13 @@ import {
   type FinalizeResult,
 } from "./take-announcement-draft";
 import { buildTakeAnnouncementInstruction, type TakeAnnouncementContext } from "./take-announcement";
+
+it("retains a link supplied in instructor direction", () => {
+  const result = finalizeTakeDraft({ title: "Update", message: "Visit https://example.edu/lab" }, {
+    provider: "gemini", transcript: "Discuss the lab", context: { takeName: "Lab", durationSec: 20 }, instructorContext: "Include https://example.edu/lab",
+  });
+  expect(result.ok && result.message).toContain("https://example.edu/lab");
+});
 import { scaffoldAnnouncement } from "./embedded/communication";
 
 // Frozen copy literals: the spelling IS the fact for these.

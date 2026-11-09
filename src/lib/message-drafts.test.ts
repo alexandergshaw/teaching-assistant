@@ -77,6 +77,11 @@ describe("mapDraft", () => {
 });
 
 describe("coerceMessageDraftPayload", () => {
+  it("preserves the HTML marker only for announcement drafts", () => {
+    expect(coerceMessageDraftPayload({ kind: "announcement", body: "<p>Hi</p>", bodyFormat: "html" })).toEqual({ kind: "announcement", body: "<p>Hi</p>", bodyFormat: "html" });
+    expect(coerceMessageDraftPayload({ kind: "reply", body: "Hi", bodyFormat: "html" })).toEqual({ kind: "reply", body: "Hi" });
+    expect(coerceMessageDraftPayload({ kind: "announcement", body: "Hi", bodyFormat: "unexpected" })).toEqual({ kind: "announcement", body: "Hi" });
+  });
   it("returns a reply with empty body for null/undefined/non-object input", () => {
     expect(coerceMessageDraftPayload(null)).toEqual({ kind: "reply", body: "" });
     expect(coerceMessageDraftPayload(undefined)).toEqual({ kind: "reply", body: "" });

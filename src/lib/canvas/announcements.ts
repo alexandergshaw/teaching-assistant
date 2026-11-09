@@ -4,6 +4,7 @@
 
 import { canvasError, htmlToText, textToHtml, resolveCourse } from "../canvas-core";
 import { markdownToHtml } from "../markdown";
+import { sanitizeRecordingAnnouncementHtml } from "../recording-announcement-html";
 import { parseNextLink } from "./pagination";
 import { fetchWithThrottleRetry } from "../canvas-throttle";
 import {
@@ -455,6 +456,30 @@ export async function createAnnouncementFromMarkdown(
   }
   const topic = (await response.json()) as CanvasDiscussionTopicListItem;
   return toAnnouncement(topic, { title, message: markdownBody });
+}
+
+/** Post the same allowlisted HTML reviewed in the recording announcement editor. */
+export async function createAnnouncementFromSafeHtml(
+  courseUrl: string,
+  title: string,
+  html: string,
+  code?: string,
+  image?: AnnouncementBodyImage
+): Promise<CanvasAnnouncement> {
+  const safeHtml = sanitizeRecordingAnnouncementHtml(html);
+  if (!title.trim()) throw new Error("An announcement needs a title.");
+  if (!htmlToText(safeHtml).trim()) throw new Error("An announcement needs a message.");
+  const { courseId, institution, token, baseUrl } = await resolveCourse(courseUrl, code);
+  const params = new URLSearchParams();
+  params.append("title", title.trim());
+  params.append("message", image ? `${safeHtml}<p><img src="${escapeHtmlAttr(image.url)}" alt="${escapeHtmlAttr(image.altText)}"></p>` : safeHtml);
+  params.append("is_announcement", "true");
+  const response = await canvasRequest(`${baseUrl}/api/v1/courses/${courseId}/discussion_topics`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: params.toString(),
+  }, token);
+  if (!response.ok) throw canvasError(response.status, institution);
+  const topic = (await response.json()) as CanvasDiscussionTopicListItem;
+  return toAnnouncement(topic, { title, message: htmlToText(safeHtml) });
 }
 
 // ── Weekly-announcement-scheduling support (AC6, AC7) ───────────────────────

@@ -18,7 +18,7 @@
 // pipeline progress) resets cleanly when a different take is opened,
 // instead of this component trying to detect and reset that itself.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, MenuItem, TextField } from "@mui/material";
 import LinearProgress from "@mui/material/LinearProgress";
 import styles from "../../page.module.css";
@@ -33,6 +33,13 @@ import {
 } from "./useTakeAnnouncement";
 import AnnouncementCompositionControls from "./AnnouncementCompositionControls";
 import type { Take } from "./types";
+import { downloadSourceRecording } from "./source-recording-download";
+import { useAnnouncementLibrary } from "../walkthrough-announcement/useAnnouncementLibrary";
+import AnnouncementLibrary from "../walkthrough-announcement/AnnouncementLibrary";
+import { listAnnouncementLibraryAction, saveAnnouncementLibraryEntryAction, deleteAnnouncementLibraryEntryAction } from "@/app/actions/announcement-library";
+import { resolveTakeFormat } from "./take-format-selection";
+import RecordingAnnouncementEditor from "./RecordingAnnouncementEditor";
+import { sanitizeRecordingAnnouncementHtml } from "@/lib/recording-announcement-html";
 // docs/DEV_LOOP.md's "every feature needs a downloadable log" rule -
 // collection lives in useTakeAnnouncement.ts (getAnnouncementLog); this
 // panel only formats/downloads, mirroring GradingRecordingPanel.tsx and
@@ -121,6 +128,19 @@ export default function TakeAnnouncementPanel({
   onClose,
 }: TakeAnnouncementPanelProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const [downloadBusy, setDownloadBusy] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  async function handleDownloadRecording() {
+    setDownloadBusy(true);
+    setDownloadError(null);
+    try {
+      await downloadSourceRecording(take);
+    } catch {
+      setDownloadError("Could not download this recording. Please try again.");
+    } finally {
+      setDownloadBusy(false);
+    }
+  }
 
   const hook = useTakeAnnouncement({ take, setTakes, context, posted, onPosted, cachedTranscript, onTranscriptCached });
   const {
@@ -161,6 +181,9 @@ export default function TakeAnnouncementPanel({
     draftError,
     composition,
     setComposition,
+    instructorContext,
+    setInstructorContext,
+    regenerationError,
     imageState,
     imageBase64,
     imageMimeType,
@@ -170,6 +193,15 @@ export default function TakeAnnouncementPanel({
     downloadImage,
     getAnnouncementLog,
   } = hook;
+  const libraryAdapters = useMemo(() => ({
+    list: (id: string) => listAnnouncementLibraryAction(id),
+    save: (input: Parameters<typeof saveAnnouncementLibraryEntryAction>[0]) => saveAnnouncementLibraryEntryAction(input),
+    remove: (id: string, entryId: string) => deleteAnnouncementLibraryEntryAction(id, entryId),
+  }), []);
+  const library = useAnnouncementLibrary(courseId, libraryAdapters);
+  const [selectedFormat, setSelectedFormat] = useState<{ scope: string; id: string } | null>(null);
+  const selectedFormatId = selectedFormat?.scope === library.scopeKey ? selectedFormat.id : "";
+  const [formatError, setFormatError] = useState<string | null>(null);
 
   // AC28 item 5: focus moves to the surface heading on open. Restoring focus
   // on close is the caller's job (it owns the keyed ref map back to whichever
@@ -196,8 +228,13 @@ export default function TakeAnnouncementPanel({
   const [fieldsTouched, setFieldsTouched] = useState(false);
   const [regenArmed, setRegenArmed] = useState(false);
   function handleRegenerateConfirm() {
-    retryDraft();
-    setFieldsTouched(false);
+    const result = resolveTakeFormat(selectedFormat, library.scopeKey, library.enabled, library.state);
+    if (!result.ok) {
+      setFormatError("The selected example is unavailable or has unsaved changes. Save it or choose another format.");
+      return;
+    }
+    setFormatError(null);
+    retryDraft(result.example);
     setRegenArmed(false);
   }
 
@@ -223,6 +260,8 @@ export default function TakeAnnouncementPanel({
   }
 
   function handleCourseChange(id: string) {
+    if (id !== courseId && library.controller.dirty() && !window.confirm("Unsaved announcements will be discarded. Change course?")) return;
+    setSelectedFormat(null);
     setCourseId(id);
     onCourseIdChange?.(id);
   }
@@ -447,7 +486,36 @@ export default function TakeAnnouncementPanel({
               action is what makes the controls reachable rather than dead. */}
           <fieldset className={controls.section}>
             <legend className={controls.sectionLegend}>Announcement style</legend>
+            <Button size="small" variant="outlined" disabled={downloadBusy} onClick={handleDownloadRecording}>
+              {downloadBusy ? "Preparing recording..." : "Download source recording"}
+            </Button>
+            {downloadError && <p role="alert">{downloadError}</p>}
+            <TextField select size="small" label="Format example" value={selectedFormatId} fullWidth
+              disabled={busy || posting || !library.enabled}
+              onChange={(event) => {
+                const id = event.target.value;
+                setSelectedFormat(id ? { scope: library.scopeKey, id } : null);
+                setFormatError(null);
+              }}>
+              <MenuItem value="">Default format</MenuItem>
+              {library.state.cards.flatMap((card) => card.acknowledged ? [
+                <MenuItem key={card.acknowledged.id} value={card.acknowledged.id}>{card.acknowledged.label || "Untitled announcement"}</MenuItem>,
+              ] : [])}
+            </TextField>
+            {formatError && <p role="alert">{formatError}</p>}
             <AnnouncementCompositionControls composition={composition} onChange={setComposition} disabled={busy || posting} />
+            <TextField
+              label="Additional direction for regeneration"
+              value={instructorContext}
+              onChange={(event) => setInstructorContext(event.target.value)}
+              disabled={busy || posting}
+              multiline
+              minRows={2}
+              fullWidth
+              slotProps={{ htmlInput: { maxLength: 4000 } }}
+              helperText="Optional context to use when regenerating this announcement."
+            />
+            {regenerationError && <p role="alert">{regenerationError} Your previous draft is unchanged.</p>}
             <div className={styles.ghActions}>
               {/* Fixer pass finding 4: ConfirmArmButtons stays mounted for
                   both the untouched and the touched case - swapping it for
@@ -483,6 +551,8 @@ export default function TakeAnnouncementPanel({
               </p>
             )}
           </fieldset>
+          <AnnouncementLibrary key={library.scopeKey} controller={library.controller} state={library.state} enabled={library.enabled}
+            canAddDraft={false} addDraft={() => {}} onRemoved={(id) => { if (id === selectedFormatId) setSelectedFormat(null); }} />
 
           <TextField
             size="small"
@@ -495,19 +565,7 @@ export default function TakeAnnouncementPanel({
             disabled={busy || posting}
             fullWidth
           />
-          <TextField
-            size="small"
-            label="Message"
-            value={body}
-            onChange={(e) => {
-              setBody(e.target.value);
-              setFieldsTouched(true);
-            }}
-            disabled={busy || posting}
-            multiline
-            minRows={4}
-            fullWidth
-          />
+          <RecordingAnnouncementEditor value={body} disabled={busy || posting} onChange={(value) => { setBody(value); setFieldsTouched(true); }} />
 
           {/* Companion image (owner's ask: "a simple, everyday image that is
               relevant"). Entirely additive - imageState is independent of
@@ -608,9 +666,8 @@ export default function TakeAnnouncementPanel({
                 <span className={annChat.latestCardLabel}>Subject that will be sent</span>
                 <code className={annChat.latestCardText}>{subject}</code>
                 <span className={annChat.latestCardLabel}>Body that will be sent</span>
-                <code tabIndex={0} role="group" aria-label="Announcement preview" className={annChat.latestCardText}>
-                  {body}
-                </code>
+                <div tabIndex={0} role="group" aria-label="Announcement preview" className={annChat.latestCardText}
+                  dangerouslySetInnerHTML={{ __html: sanitizeRecordingAnnouncementHtml(body) }} />
               </div>
             </>
           )}

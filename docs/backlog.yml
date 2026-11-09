@@ -1,3 +1,27 @@
+- id: 'RECORDING-ANNOUNCEMENT-FORMAT-CONTROLS'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'live-lms-student-messaging'
+  title: 'Match recording-based announcements to selected examples, support rich text without Markdown, and expose source download and contextual regeneration.'
+  owns: ['docs/recording-announcement-format-criteria.md', 'docs/recording-announcement-format-architecture.md', 'src/app/components/recording/TakeAnnouncementPanel.tsx', 'src/app/components/recording/useTakeAnnouncement.ts', 'src/lib/take-announcement.ts', 'src/lib/announcement-exemplars.ts', 'src/app/actions/announcement-exemplars.ts', 'src/lib/recording-files.ts', 'src/lib/session-diagnostic-log.ts', 'src/lib/session-diagnostic-log.test.ts']
+  verify: null
+  blocked_by: []
+  instrument: 'Accepted criteria and tests must prove that a chosen uploaded/saved example preserves literal emoji and structure in generated output; the editor stores/render formatted text without Markdown syntax; regeneration includes explicit instructor context in the exact model request while keeping unrelated take/template data out; a recording download returns the selected source bytes; and multiple template examples can be added/listed/selected/removed without a fixed count cap. Prove persistence/account ownership, fallback/error behavior, and diagnostic redaction. Browser walk is required for editor formatting and download behavior; Vitest does not render components. Step: criteria and independent review, then implementation.'
+  from: 'Owner request in this chat, 2026-10-17: generated announcements should match the input format including emoji, support formatted text without Markdown, provide recording download and contextual regeneration, and accept any number of templates.'
+  note: 'Owner: coordinator. Work in the current candidate adds selected course-scoped example and instructor context for take announcement regeneration, a sanitized visual editor and HTML posting path, and download of the selected source recording. The first draft still uses the default format; selecting an example and applying context happens on regeneration. Full fidelity for emoji sequences in derived example outlines remains unproven. Required operation-level Diagnostics coverage and export/privacy tests for the complete feature are not implemented. Saved-draft round trip must preserve the formatted reviewed value. Complete independent review and focused tests, then verify keyboard and focus, editing and reopening, source download, and Diagnostics in an authenticated browser; use a live sample to assess model format fidelity and Canvas rendering. Do not mark this feature complete on unit or source-wiring tests.'
+  question: null
+- id: 'WALKTHROUGH-PREVIOUS-ANNOUNCEMENTS-DISCOVERABILITY'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'walkthrough-announcement-surface'
+  title: 'Make pasting and saving previous announcements obvious in the walkthrough.'
+  owns: ['src/app/components/walkthrough-announcement/AnnouncementLibrary.tsx', 'src/app/components/walkthrough-announcement/announcement-library.structure.test.ts']
+  verify: 'npm.cmd run test:paths src/app/components/walkthrough-announcement/announcement-library.structure.test.ts src/app/components/walkthrough-announcement/announcement-library-controller.test.ts'
+  blocked_by: []
+  instrument: 'Verify the walkthrough exposes a clearly labeled place to add and paste multiple previous announcements, indicates autosave and course scope, provides retry on failure, and uses the chosen saved format for new drafts. Walk the actual page with keyboard and screen reader where available, including changing course and reloading.'
+  from: 'Owner request in this chat: make it readily apparent where to paste and save former announcements in the walkthrough.'
+  note: 'Owner: coordinator. Existing AnnouncementLibrary already provides course-scoped autosaving entries and format selection; improve discoverability without duplicating storage. Browser and real storage verification remain open.'
+  question: null
 - id: 'CHAT-LARGE-UPLOAD-SCENARIOS'
   state: 'actionable'
   kind: 'feature'

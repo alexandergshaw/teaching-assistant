@@ -23,6 +23,8 @@ import {
   type MessageDraftAction,
 } from "./message-drafts-helpers";
 import styles from "../page.module.css";
+import RecordingAnnouncementEditor from "./recording/RecordingAnnouncementEditor";
+import { sanitizeRecordingAnnouncementHtml } from "@/lib/recording-announcement-html";
 
 export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: (id: string) => void }) {
   const { supabase, user } = useSupabase();
@@ -412,7 +414,7 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                           >
                             {busy === draft.id ? "Sending…" : "Send"}
                           </Button>
-                          {(draft.payload.recipientEmail || (draft.payload.kind === "announcement" && draft.payload.hubCourseId)) && (
+                          {draft.payload.bodyFormat !== "html" && (draft.payload.recipientEmail || (draft.payload.kind === "announcement" && draft.payload.hubCourseId)) && (
                             <Button
                               variant="outlined"
                               size="small"
@@ -455,17 +457,17 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                           onChange={(e) => setEditTitle(e.target.value)}
                           sx={{ width: "100%", marginBottom: 1 }}
                         />
-                        <TextField
+                        {draft.payload.bodyFormat === "html" ? <RecordingAnnouncementEditor value={editBody} onChange={setEditBody} disabled={busy === draft.id} /> : <TextField
                           multiline
                           minRows={4}
                           label="Message"
                           value={editBody}
                           onChange={(e) => setEditBody(e.target.value)}
                           sx={{ width: "100%" }}
-                        />
+                        />}
                       </>
                     ) : (
-                      <p className={styles.draftFeedback}>{draft.payload.body}</p>
+                      draft.payload.bodyFormat === "html" ? <div className={styles.draftFeedback} dangerouslySetInnerHTML={{ __html: sanitizeRecordingAnnouncementHtml(draft.payload.body) }} /> : <p className={styles.draftFeedback}>{draft.payload.body}</p>
                     )}
 
                     {draft.payload.context && (

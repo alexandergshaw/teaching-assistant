@@ -120,5 +120,5 @@ export function resolveMessageDraftSubject(payload: Pick<MessageDraftPayload, "t
 export type MessageDraftAction = "post" | "email" | "delete";
 
 export function messageDraftArmSignature(draft: MessageDraft, action: MessageDraftAction): string {
-  return JSON.stringify([draft.id, action, draft.payload.body, draft.payload.title ?? ""]);
+  return JSON.stringify([draft.id, action, draft.payload.body, draft.payload.title ?? "", draft.payload.bodyFormat ?? "plain"]);
 }

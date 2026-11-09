@@ -136,6 +136,9 @@ export async function sendMessageDraftByEmailAction(id: string): Promise<{ ok: t
     }
 
     const { payload } = draft;
+    if (payload.kind === "announcement" && payload.bodyFormat === "html") {
+      return { error: "Formatted announcement drafts can be posted to Canvas, but cannot be sent by email." };
+    }
 
     if (!payload.institution) {
       return { error: "The draft has no institution to send from." };

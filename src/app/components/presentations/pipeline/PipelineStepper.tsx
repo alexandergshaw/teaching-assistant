@@ -12,16 +12,16 @@ import { Chip } from "@mui/material";
 import { ALL_STAGE_IDS, canRunStage, type PipelineState, type StageId } from "@/lib/presentations/pipeline";
 
 export const STAGE_LABELS: Record<StageId, string> = {
-  sources: "1. Sources",
-  outline: "2. Outline",
-  activities: "8. Activities",
-  frame: "3-4. Frame",
-  plan: "5/9. Slide Plan",
-  deck: "10. Deck",
-  standard: "7. Standard Check",
-  reviewInfoFlow: "11. Review: Info Flow",
-  reviewVisual: "12. Review: Visuals",
-  polish: "13. Polish",
+  sources: "Sources",
+  outline: "Outline",
+  activities: "Activities",
+  frame: "Frame",
+  plan: "Slide Plan",
+  deck: "Deck",
+  standard: "Standard Check",
+  reviewInfoFlow: "Review: Info Flow",
+  reviewVisual: "Review: Visuals",
+  polish: "Polish",
 };
 
 const STATUS_COLOR: Record<

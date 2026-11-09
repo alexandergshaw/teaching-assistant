@@ -533,7 +533,7 @@ export default function PipelineTab() {
       <TabHeader
         eyebrow="Presentations"
         title="Slide Deck Pipeline"
-        subtitle="Work through all 13 stages one at a time, with an editable intermediate at every step, or run to the end."
+        subtitle="Work through the pipeline stages, edit the results, or run to the end. Some stages become available after their prerequisites are complete."
       />
 
       <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center" }}>

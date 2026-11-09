@@ -29,7 +29,7 @@
 // decideRealTimeGuard so no existing importer's path changes.
 
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
-import { transcribeLiveAudioAction } from "../../actions";
+import { transcribeRecordingAudio } from "./transcription-transport";
 import { LIVE_SAMPLE_RATE, downsampleToMono, encodeWav, base64FromArrayBuffer } from "@/lib/live-class/wav";
 import { checkWireBudget } from "@/lib/upload-budget";
 import { extractAudioOnly } from "@/lib/strip-audio";
@@ -37,6 +37,7 @@ import { awaitVideoMetadata, ensureFiniteDuration } from "@/lib/caption-burn";
 import { planTranscriptChunks, planSegmentSubchunks, sliceMonoSamples, joinTranscriptChunks, type TranscriptChunkPlan } from "@/lib/take-transcript";
 import { getStoredProvider } from "@/lib/llm-provider";
 import type { Take } from "./types";
+
 
 // The stage a review-and-post pass is currently in. Kept as a discriminated
 // union (rather than a handful of booleans) so a transcription failure, a
@@ -265,7 +266,12 @@ async function runTranscriptionLoop(startIndex: number, total: number, deps: Tra
         return { kind: "failed", chunkIndex: i, message: budget.error ?? "This chunk is too large to send." };
       }
 
-      const result = await transcribeLiveAudioAction(base64, { provider: getStoredProvider() });
+      let result: Awaited<ReturnType<typeof transcribeRecordingAudio>>;
+      try {
+        result = await transcribeRecordingAudio(base64, getStoredProvider());
+      } catch {
+        return { kind: "failed", chunkIndex: i, message: "The transcription request could not be completed. Retry this chunk." };
+      }
       if ("error" in result) {
         return { kind: "failed", chunkIndex: i, message: result.error };
       }

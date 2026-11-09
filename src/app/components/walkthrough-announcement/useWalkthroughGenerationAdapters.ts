@@ -13,6 +13,7 @@ import { fnv1aHash } from "@/lib/lms-generation/generation-diag";
 import type { AnnouncementOutline } from "@/lib/announcement-outline-types";
 import {
   draftWalkthroughAnnouncementAction,
+  prepareWalkthroughAnnouncementPromptAction,
   postWalkthroughAnnouncementAction,
 } from "@/app/actions/walkthrough-announcement";
 import type { gatherWalkthroughResourcesAction as gatherWalkthroughResourcesServerAction } from "@/app/actions/walkthrough-announcement";
@@ -42,7 +43,7 @@ const gatherWalkthroughResourcesAction: typeof gatherWalkthroughResourcesServerA
   }
 };
 
-export function useWalkthroughGenerationAdapters(selectedCourse: WtaCourseOption | null) {
+export function useWalkthroughGenerationAdapters(selectedCourse: WtaCourseOption | null, scopeKey: string, reviewPrompt: (prompt: string, scope: string) => Promise<string | null>) {
   // G3 Ruling 2/9: the actual research call - the only site (per blocker 5)
   // that may call a server action directly. gatherWalkthroughResourcesAction
   // never rejects on its own known failure paths, but the hook's own
@@ -74,14 +75,15 @@ export function useWalkthroughGenerationAdapters(selectedCourse: WtaCourseOption
   const draftOne = useCallback(
     async (
       ctx: AnnouncementDraftDispatchContext,
-      outline: AnnouncementOutline
+      outline: AnnouncementOutline,
+      isCurrent: () => boolean = () => true
     ): Promise<{ title: string; message: string; researchNotice: ResearchNotice } | { error: string }> => {
       // G3 Ruling 9/M3.3: the derivation from the once-per-Generate research
       // OUTCOME to the RAW resource list the composer/enforcer actually
       // consume - any outcome other than "found" contributes zero citable
       // resources.
       const researchedResources = ctx.researchOutcome.kind === "found" ? ctx.researchOutcome.links : [];
-      const result = await draftWalkthroughAnnouncementAction({
+      const input: Parameters<typeof draftWalkthroughAnnouncementAction>[0] = {
         courseLabel: ctx.courseLabel,
         moduleLabel: ctx.moduleLabel,
         materialsText: ctx.materialsText,
@@ -94,11 +96,17 @@ export function useWalkthroughGenerationAdapters(selectedCourse: WtaCourseOption
         researchOutcome: ctx.researchOutcome,
         timing: ctx.timing,
         revision: ctx.revision,
-      });
+      };
+      const prepared = await prepareWalkthroughAnnouncementPromptAction(input);
+      if ("error" in prepared) return { error: prepared.error };
+      if (!isCurrent()) return { error: "Draft was cancelled before prompt review." };
+      const promptOverride = await reviewPrompt(prepared.prompt, scopeKey);
+      if (promptOverride === null || !isCurrent()) return { error: "Draft cancelled before sending the prompt." };
+      const result = await draftWalkthroughAnnouncementAction({ ...input, promptOverride, promptPreparedFor: prepared.preparedFor });
       if ("error" in result) return { error: result.error };
       return { title: result.title, message: result.message, researchNotice: result.researchNotice };
     },
-    []
+    [scopeKey, reviewPrompt]
   );
 
   const postDraft = useCallback(

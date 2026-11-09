@@ -362,6 +362,58 @@ export interface WalkthroughAnnouncementDraftInput {
    * buildWalkthroughAnnouncementPrompt below. */
   timing: AnnouncementTiming;
   revision?: { editedDraft: { title: string; message: string }; revisionNote: string };
+  /** Exact instructor-reviewed provider prompt, if supplied. */
+  promptOverride?: string;
+  promptPreparedFor?: string;
+}
+
+function composeProviderPrompt(input: WalkthroughAnnouncementDraftInput, styleBlock: string): string {
+  const bodyInstruction = buildWalkthroughAnnouncementPrompt({
+    courseLabel: input.courseLabel,
+    moduleLabel: input.moduleLabel,
+    materialsText: input.materialsText,
+    outline: input.outline,
+    coverageBlock: input.coverageBlock,
+    notes: input.notes,
+    styleBlock,
+    // G3 wave 3 (walkthrough-announcement-prompt.ts): the wave-boundary
+    // gap this file's own header comments named for emojiPolicy and
+    // researchedResources - both parameters now exist on the composer, so
+    // both fields (already REQUIRED on this action's own input type per
+    // Ruling 11) are forwarded here instead of silently reaching this
+    // action and going nowhere.
+    emojiPolicy: input.emojiPolicy,
+    researchedResources: input.researchedResources,
+    // A19: forwards the caller's chosen tone into the composer (AC-6/AC-7).
+    timing: input.timing,
+    revision: input.revision,
+  });
+
+  return [
+    "You are an instructor writing a course announcement for students.",
+    bodyInstruction,
+    [
+      "Return ONLY valid JSON:",
+      "{",
+      '  "title": "...",',
+      '  "message": "..."',
+      "}",
+      "",
+      "Requirements:",
+      '- "title": a short, specific subject line (no more than ~10 words). Plain text, no markdown.',
+      '- "message": the announcement body itself, formatted exactly as instructed above (Markdown headings/lists where the outline calls for them, and Markdown bold/italic emphasis per the EMPHASIS instruction above).',
+      "- Do not include any text outside the JSON object.",
+    ].join("\n"),
+  ].join("\n\n");
+}
+
+/** Prepare the exact provider input for instructor review after slot research. */
+export async function prepareWalkthroughAnnouncementPromptAction(input: WalkthroughAnnouncementDraftInput): Promise<{ prompt: string; preparedFor: string } | { error: string }> {
+  try {
+    const user = await requireUser();
+    if (!input.materialsText.trim()) return { error: "No captured material is available. Capture a walkthrough first." };
+    return { prompt: composeProviderPrompt(input, await getWritingStyleBlock(user.id)), preparedFor: user.id };
+  } catch { return { error: "Could not prepare the announcement prompt. Try again." }; }
 }
 
 /**
@@ -397,43 +449,13 @@ export async function draftWalkthroughAnnouncementAction(
     }
 
     const styleBlock = await getWritingStyleBlock(user.id);
-    const bodyInstruction = buildWalkthroughAnnouncementPrompt({
-      courseLabel: input.courseLabel,
-      moduleLabel: input.moduleLabel,
-      materialsText: input.materialsText,
-      outline: input.outline,
-      coverageBlock: input.coverageBlock,
-      notes: input.notes,
-      styleBlock,
-      // G3 wave 3 (walkthrough-announcement-prompt.ts): the wave-boundary
-      // gap this file's own header comments named for emojiPolicy and
-      // researchedResources - both parameters now exist on the composer, so
-      // both fields (already REQUIRED on this action's own input type per
-      // Ruling 11) are forwarded here instead of silently reaching this
-      // action and going nowhere.
-      emojiPolicy: input.emojiPolicy,
-      researchedResources: input.researchedResources,
-      // A19: forwards the caller's chosen tone into the composer (AC-6/AC-7).
-      timing: input.timing,
-      revision: input.revision,
-    });
-
-    const prompt = [
-      "You are an instructor writing a course announcement for students.",
-      bodyInstruction,
-      [
-        "Return ONLY valid JSON:",
-        "{",
-        '  "title": "...",',
-        '  "message": "..."',
-        "}",
-        "",
-        "Requirements:",
-        '- "title": a short, specific subject line (no more than ~10 words). Plain text, no markdown.',
-        '- "message": the announcement body itself, formatted exactly as instructed above (Markdown headings/lists where the outline calls for them, and Markdown bold/italic emphasis per the EMPHASIS instruction above).',
-        "- Do not include any text outside the JSON object.",
-      ].join("\n"),
-    ].join("\n\n");
+    if (input.promptOverride !== undefined && input.promptPreparedFor !== user.id) {
+      return { error: "Your account changed. Prepare the prompt again.", diag: unattemptedLlmDiag(provider) };
+    }
+    if (input.promptOverride !== undefined && (!input.promptOverride.trim() || input.promptOverride.length > 160000)) {
+      return { error: "The prompt must contain text and be at most 160,000 characters.", diag: unattemptedLlmDiag(provider) };
+    }
+    const prompt = input.promptOverride ?? composeProviderPrompt(input, styleBlock);
 
     // THE COMPUTED TOKEN BUDGET (P7) - sized from the outline, never a fixed
     // 1024 (draftAnnouncementAction's own budget, deliberately not
@@ -490,7 +512,7 @@ export async function draftWalkthroughAnnouncementAction(
       materialsText: input.materialsText,
       outline: input.outline,
       coverageBlock: input.coverageBlock,
-      notes: input.notes,
+      notes: `${input.notes}\n${input.promptOverride ?? ""}`,
       styleBlock,
       researchedResources: input.researchedResources,
     });

@@ -41,7 +41,7 @@ describe("announcement library production wiring", () => {
   it("wires live saved outlines and dirty guards into the actual generation dispatch", () => {
     const panel = source("WalkthroughAnnouncementPanel.tsx"), draft = source("pair-dispatch.ts");
     expect(panel).toContain("saved: optionSource.saved, savedState: savedFormatsState, blocked: library.controller.blocked");
-    expect(draft).toContain("dispatchResolvedAnnouncementDraft({ ...ctx, timing: slot.timing, researchOutcome, revision }, resolved, api.draftOne)");
+    expect(draft).toContain("dispatchResolvedAnnouncementDraft({ ...ctx, timing: slot.timing, researchOutcome, revision }, resolved, guardedDraft)");
     expect(draft).toContain("if (resolved.error)");
   });
   it("keeps accessible row controls, explicit deletion confirmation, import and add/remove focus paths", () => {
@@ -58,7 +58,7 @@ describe("announcement library production wiring", () => {
       "Paste previous announcements here to save them for this course. They save automatically; choose one under Format to use its style in a new draft.",
       'state.load === "loaded" && state.cards.length === 0 && "No previous announcements saved yet. Add one to paste its text."',
       "state.cards.map((card, index)", "key={card.id}", "const id = controller.add()", "onClick={add}",
-      'controller.edit(card.id, "label", e.target.value)', 'controller.edit(card.id, "exemplarText", e.target.value)',
-      "value={card.label}", "value={card.exemplarText}", "multiline minRows={6}"]) expect(ui).toContain(token);
+      'controller.edit(card.id, "label", e.target.value)', 'controller.edit(card.id, "exemplarText", value)',
+      "value={card.label}", "value={card.exemplarText}", "PreviousAnnouncementEditor"]) expect(ui).toContain(token);
   });
 });

@@ -230,7 +230,8 @@ export function useAnnouncementDraftSlots(args: {
   readonly resolveLive: () => LiveDefaults;
   readonly draftOne: (
     ctx: AnnouncementDraftDispatchContext,
-    outline: AnnouncementOutline
+    outline: AnnouncementOutline,
+    isCurrent?: () => boolean
   ) => Promise<{ title: string; message: string; researchNotice: ResearchNotice } | { error: string }>;
   /**
    * `null`: no Canvas-linked course is selected. Checked BEFORE dispatching
@@ -307,7 +308,7 @@ export function useAnnouncementDraftSlots(args: {
     dispatch({ type: "choose", id: "wta-slot-2", choice: { kind: "unresolved" } });
   }, [args.scopeKey, reset, dispatch]);
 
-  const removeSlot = useCallback((id: string) => dispatch({ type: "remove", id }), [dispatch]);
+  const removeSlot = useCallback((id: string) => { runnerRef.current?.cancelSlot(id); dispatch({ type: "remove", id }); }, [dispatch]);
   const chooseTemplate = useCallback((id: string, choice: TemplateChoice) => dispatch({ type: "choose", id, choice }), [dispatch]);
   const chooseTiming = useCallback((id: string, timing: AnnouncementTiming) => dispatch({ type: "choose-timing", id, timing }), [dispatch]);
   const setScheduledAt = useCallback((id: string, raw: string) => dispatch({ type: "set-scheduled-at", id, raw }), [dispatch]);

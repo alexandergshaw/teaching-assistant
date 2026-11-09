@@ -1,3 +1,4 @@
+import { previousAnnouncementText } from "./announcement-library-rich-text";
 // Persistence for announcement_exemplars: a per-user, per-course store of
 // pasted announcement FORMAT exemplars, backing AC1 of
 // docs/announcement-from-walkthrough-acceptance-criteria.md. See
@@ -193,7 +194,7 @@ export async function deleteAnnouncementExemplar(
 // The service client bypasses RLS: every read/update/delete is owner AND course
 // scoped. A primary-key collision never grants access to a foreign row.
 function libraryEntry(row: Database["public"]["Tables"]["announcement_exemplars"]["Row"]): AnnouncementLibraryEntry {
-  return { ...mapAnnouncementExemplar(row), outline: deriveAnnouncementOutline(row.exemplar_text) };
+  return { ...mapAnnouncementExemplar(row), outline: deriveAnnouncementOutline(previousAnnouncementText(row.exemplar_text)) };
 }
 
 export async function listAnnouncementLibraryEntries(
@@ -216,7 +217,7 @@ export async function saveAnnouncementLibraryEntry(
   supabase: SupabaseClient<Database>, userId: string, input: SaveAnnouncementLibraryInput,
 ): Promise<AnnouncementLibraryResult<AnnouncementLibraryEntry>> {
   const desired = { exemplar_text: input.exemplarText, label: input.label,
-    outline: deriveAnnouncementOutline(input.exemplarText) as unknown as Json };
+    outline: deriveAnnouncementOutline(previousAnnouncementText(input.exemplarText)) as unknown as Json };
   if (input.expected === null) {
     const { data, error } = await supabase.from("announcement_exemplars")
       .insert({ id: input.id, user_id: userId, course_id: input.courseId, ...desired })

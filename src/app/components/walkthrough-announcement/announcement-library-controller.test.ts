@@ -1,3 +1,4 @@
+import { encodePreviousAnnouncementHtml, previousAnnouncementHtml } from "@/lib/announcement-library-rich-text";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAnnouncementLibraryController, importAnnouncementLibraryFiles, libraryValidation, type LibraryAdapters } from "./announcement-library-controller";
 import type { AnnouncementLibraryEntry, AnnouncementLibraryResult } from "@/lib/announcement-library-types";
@@ -23,6 +24,20 @@ function harness(overrides: Partial<LibraryAdapters> = {}) {
 }
 afterEach(() => vi.useRealTimers());
 describe("announcement library production controller", () => {
+  it("autosaves formatted paste and reloads the same visible formatting", async () => {
+    vi.useFakeTimers();
+    const body = encodePreviousAnnouncementHtml('<p><span style="color:#123456;font-size:18px"><strong>Hello</strong></span></p>');
+    let stored: AnnouncementLibraryEntry | null = null;
+    const adapters: Partial<LibraryAdapters> = {
+      save: async input => { stored = entry(input.id, input.exemplarText, input.label ?? ""); return { ok: true, value: stored }; },
+      list: async () => ({ ok: true, value: stored ? [stored] : [] }),
+    };
+    const first = harness(adapters); first.controller.add(body); await vi.advanceTimersByTimeAsync(11);
+    expect(first.controller.getState().cards[0].status).toBe("Saved"); first.controller.dispose();
+    const reopened = harness(adapters); await reopened.controller.load();
+    expect(previousAnnouncementHtml(reopened.controller.getState().cards[0].exemplarText)).toBe('<p><span style="color:#123456;font-size:18px"><strong>Hello</strong></span></p>');
+    reopened.controller.dispose();
+  });
   it("records timeout once and does not report a late response as a successful operation", async () => {
     vi.useFakeTimers(); const pending = deferred<AnnouncementLibraryResult<AnnouncementLibraryEntry[]>>();
     const onDiagnostic = vi.fn(); const { controller: c } = harness({ list: () => pending.promise, onDiagnostic });

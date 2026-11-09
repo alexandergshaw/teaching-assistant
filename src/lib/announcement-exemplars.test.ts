@@ -1,3 +1,4 @@
+import { encodePreviousAnnouncementHtml, previousAnnouncementText } from "./announcement-library-rich-text";
 import { describe, it, expect } from "vitest";
 import fs from "fs";
 import path from "path";
@@ -333,6 +334,16 @@ describe("announcement library storage", () => {
     expect(await saveAnnouncementLibraryEntry(db.client, "u1", libraryInput)).toEqual(first);
     expect(db.rows).toHaveLength(1);
     expect(db.rows[0]).toMatchObject({ id: "e1", user_id: "u1", course_id: "c1", outline: deriveAnnouncementOutline(libraryInput.exemplarText) });
+  });
+  it("stores formatted examples intact and derives the outline from visible content", async () => {
+    const db = libraryDatabase([]);
+    const body = encodePreviousAnnouncementHtml('<h2 style="color:red;font-size:18px">This week</h2><p>Read chapter one.</p>');
+    const saved = await saveAnnouncementLibraryEntry(db.client, "u1", { ...libraryInput, exemplarText: body });
+    expect(saved.ok).toBe(true);
+    expect(db.rows[0].exemplar_text).toBe(body);
+    expect(db.rows[0].outline).toEqual(deriveAnnouncementOutline(previousAnnouncementText(body)));
+    const entries = await listAnnouncementLibraryEntries(db.client, "u1", "c1");
+    expect(entries[0].exemplarText).toBe(body);
   });
   it("never acknowledges a foreign owner/course collision or different create payload", async () => {
     for (const existing of [row({ user_id: "foreign" }), row({ course_id: "foreign" }), row()]) {

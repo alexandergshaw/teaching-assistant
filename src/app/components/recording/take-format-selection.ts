@@ -1,3 +1,4 @@
+import { previousAnnouncementText } from "@/lib/announcement-library-rich-text";
 import { exampleFormatSymbols, exampleSymbolLayout, type ExampleSymbolPlacement } from "@/lib/take-announcement";
 import type { AnnouncementOutline } from "@/lib/announcement-outline-types";
 import type { LibraryState } from "../walkthrough-announcement/announcement-library-controller";
@@ -20,7 +21,7 @@ export function resolveTakeFormat(selection: TakeFormatSelection, scope: string,
   if (selection.scope !== scope || !enabled || state.load !== "loaded") return { ok: false as const };
   const card = state.cards.find((entry) => entry.acknowledged?.id === selection.id);
   if (!card?.acknowledged || card.status !== "Saved" || card.deleting) return { ok: false as const };
-  return { ok: true as const, example: { outline: card.acknowledged.outline, symbols: exampleFormatSymbols(card.acknowledged.exemplarText), symbolLayout: exampleSymbolLayout(card.acknowledged.exemplarText) } };
+  return { ok: true as const, example: { outline: card.acknowledged.outline, symbols: exampleFormatSymbols(previousAnnouncementText(card.acknowledged.exemplarText)), symbolLayout: exampleSymbolLayout(previousAnnouncementText(card.acknowledged.exemplarText)) } };
 }
 
 /** Resolve immediately before model dispatch, after any asynchronous transcription. */

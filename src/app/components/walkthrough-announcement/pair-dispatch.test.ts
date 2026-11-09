@@ -26,6 +26,23 @@ function harness(researchOn = true) {
 }
 
 describe("production pair runner", () => {
+  it.each(["reset", "slot removal"])("invalidates the provider fence during prompt review on %s", async operation => {
+    const h = harness(false);
+    const review = deferred<void>();
+    const provider = vi.fn();
+    h.draftOne.mockImplementation(async (_ctx, _outline, isCurrent) => {
+      await review.promise;
+      if (isCurrent?.()) provider();
+      return { error: "cancelled" };
+    });
+    const run = h.runner.retry("wta-slot-1");
+    await drain();
+    expect(h.draftOne).toHaveBeenCalledOnce();
+    if (operation === "reset") h.runner.invalidate(); else h.runner.cancelSlot("wta-slot-1");
+    review.resolve();
+    await run;
+    expect(provider).not.toHaveBeenCalled();
+  });
   it("does not dispatch a superseded pair after inputs return to their earlier value", async () => {
     const h = harness();
     const first = deferred<ResourceOutcome>();

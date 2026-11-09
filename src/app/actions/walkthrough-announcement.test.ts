@@ -61,6 +61,7 @@ import {
 import { createAnnouncementFromMarkdown } from "@/lib/canvas";
 import {
   draftWalkthroughAnnouncementAction,
+  prepareWalkthroughAnnouncementPromptAction,
   draftWalkthroughVideoScriptAction,
   gatherWalkthroughResourcesAction,
   listAnnouncementExemplarsAction,
@@ -95,6 +96,43 @@ const REALISTIC_OUTLINE = deriveAnnouncementOutline(
 // for tests that are not exercising the research/emoji features themselves.
 const NO_RESEARCH = { kind: "off" as const };
 const NO_RESEARCHED_RESOURCES: ReadonlyArray<{ title: string; url: string }> = [];
+
+describe("editable provider prompt", () => {
+  const input = { courseLabel: "Course", moduleLabel: "Week 2", materialsText: "Current class material", outline: EMPTY_ANNOUNCEMENT_OUTLINE,
+    coverageBlock: "Page one", notes: "Keep it brief", emojiPolicy: "forbidden" as const, timing: "midweek" as const,
+    researchedResources: [], researchOutcome: NO_RESEARCH };
+  it("previews the exact complete prompt and sends the edited text unchanged", async () => {
+    vi.mocked(getWritingStyleBlock).mockResolvedValue(" STYLE_SAMPLE");
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: '{"title":"Title","message":"Body"}' } as never);
+    const preview = await prepareWalkthroughAnnouncementPromptAction(input);
+    expect(preview).toHaveProperty("prompt");
+    if (!("prompt" in preview)) throw new Error("Missing prompt");
+    expect(preview.prompt).toContain("Current class material");
+    expect(preview.prompt).toContain("STYLE_SAMPLE");
+    expect(preview.prompt).toContain("Return ONLY valid JSON");
+    expect(callLlm).not.toHaveBeenCalled();
+    const edited = preview.prompt + "\nInstructor edit: make it concise.";
+    await draftWalkthroughAnnouncementAction({ ...input, promptOverride: edited, promptPreparedFor: preview.preparedFor });
+    expect((vi.mocked(callLlm).mock.calls[0][0].contents[0].parts[0] as { text: string }).text).toBe(edited);
+  });
+  it("rejects empty and oversized edited prompts without calling the provider", async () => {
+    for (const promptOverride of ["  ", "x".repeat(160001)]) {
+      const result = await draftWalkthroughAnnouncementAction({ ...input, promptOverride, promptPreparedFor: USER.id });
+      expect(result).toHaveProperty("error");
+    }
+    expect(callLlm).not.toHaveBeenCalled();
+  });
+  it("refuses a reviewed prompt from another account", async () => {
+    const result = await draftWalkthroughAnnouncementAction({ ...input, promptOverride: "text", promptPreparedFor: "different-user" });
+    expect(result).toHaveProperty("error");
+    expect(callLlm).not.toHaveBeenCalled();
+  });
+  it("authenticates before revealing a prompt", async () => {
+    vi.mocked(requireUser).mockRejectedValue(new Error("No session"));
+    expect(await prepareWalkthroughAnnouncementPromptAction(input)).toHaveProperty("error");
+    expect(getWritingStyleBlock).not.toHaveBeenCalled();
+  });
+});
 
 describe("draftWalkthroughAnnouncementAction", () => {
   it("the actual provider request excludes old body and factual headings and bounds target revision context", async () => {

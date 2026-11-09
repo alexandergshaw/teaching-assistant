@@ -68,6 +68,7 @@ import { useAnnouncementDraftSlots, type AnnouncementDraftRequestContext } from 
 import { MAX_NOTES_CHARS, useWalkthroughSetup } from "./useWalkthroughSetup";
 import { useWalkthroughAutoDraft } from "./useWalkthroughAutoDraft";
 import { useWalkthroughGenerationAdapters } from "./useWalkthroughGenerationAdapters";
+import { useWalkthroughPromptReview } from "./useWalkthroughPromptReview";
 import { resetCompletedRun, shouldWarnBeforeUnload } from "./walkthrough-run-decisions";
 import AnnouncementDraftSlot from "./AnnouncementDraftSlot";
 import AnnouncementCourseFieldset from "./AnnouncementCourseFieldset";
@@ -306,7 +307,8 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
 
   // Research / draft / post adapters (the literal server-action calls) live in
   // useWalkthroughGenerationAdapters.ts and are injected below.
-  const { fetchResources, researchFingerprint, draftOne, postDraft } = useWalkthroughGenerationAdapters(selectedCourse);
+  const promptReview = useWalkthroughPromptReview(library.scopeKey);
+  const { fetchResources, researchFingerprint, draftOne, postDraft } = useWalkthroughGenerationAdapters(selectedCourse, library.scopeKey, promptReview.review);
 
   const {
     slots,
@@ -458,6 +460,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
 
   return (
     <div className={`${styles.card} ${styles.form}`}>
+      {promptReview.dialog}
       <h2 className={annChat.title}>Announcement from a walkthrough</h2>
       <p className={styles.fieldHint}>
         Share your screen and click through a series of LMS pages - the app reads what is visible and drafts an

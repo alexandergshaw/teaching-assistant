@@ -1,3 +1,15 @@
+- id: 'WALKTHROUGH-PASTED-ANNOUNCEMENT-FORMATTING'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'walkthrough-announcement-surface'
+  title: 'Preserve visible formatting in pasted previous announcements.'
+  owns: ['src/app/components/walkthrough-announcement/AnnouncementLibrary.tsx', 'src/app/components/walkthrough-announcement/PreviousAnnouncementEditor.tsx', 'src/lib/announcement-library-rich-text.ts', 'src/lib/announcement-exemplars.ts', 'src/app/components/recording/take-format-selection.ts']
+  verify: 'npm.cmd run test:paths -- src/lib/announcement-library-rich-text.test.ts src/app/components/walkthrough-announcement/announcement-library-controller.test.ts'
+  blocked_by: []
+  instrument: 'Paste rich content containing font sizes, colors, bold and lists; verify the same safe visible formatting immediately and after course-scoped save and reload, preserving legacy plain examples and non-executable HTML. Browser verification must cover paste, keyboard focus and reopen.'
+  from: 'Owner request in this chat to preserve font size, color and styling in announcements pasted into the walkthrough page.'
+  note: 'Implemented visual rich paste with a safe versioned stored representation and legacy plain-text compatibility. Supports common inline font size, font family, color, emphasis and lists; arbitrary CSS, images and executable elements are excluded. Authenticated browser paste, keyboard focus, storage reopen and live model fidelity verification remain open.'
+  question: null
 - id: 'RECORDING-ANNOUNCEMENT-FORMAT-CONTROLS'
   state: 'actionable'
   kind: 'feature'

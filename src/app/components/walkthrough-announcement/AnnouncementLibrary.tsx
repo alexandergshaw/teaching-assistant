@@ -5,6 +5,7 @@ import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
 import { type AnnouncementLibraryController, type LibraryState, importAnnouncementLibraryFiles } from "./announcement-library-controller";
 import { useAnnouncementLibraryDeparture } from "./useAnnouncementLibrary";
+import PreviousAnnouncementEditor from "./PreviousAnnouncementEditor";
 import type { TemplateChoice } from "./announcement-draft-slots";
 export default function AnnouncementLibrary({ controller, state, enabled, canAddDraft, addDraft, onRemoved }: {
   controller: AnnouncementLibraryController; state: LibraryState; enabled: boolean; canAddDraft: boolean;
@@ -12,7 +13,7 @@ export default function AnnouncementLibrary({ controller, state, enabled, canAdd
 }) {
   const departure = useAnnouncementLibraryDeparture(controller);
   const addButton = useRef<HTMLButtonElement>(null);
-  const bodyInputs = useRef(new Map<string, HTMLTextAreaElement>());
+  const bodyInputs = useRef(new Map<string, HTMLDivElement>());
   const [armed, setArmed] = useState<string | null>(null);
   const [importErrors, setImportErrors] = useState<string[]>([]);
   function add() { const id = controller.add(); requestAnimationFrame(() => { if (id) bodyInputs.current.get(id)?.focus(); }); }
@@ -47,10 +48,9 @@ export default function AnnouncementLibrary({ controller, state, enabled, canAdd
       {state.cards.map((card, index) => <section className={`${styles.card} ${styles.form}`} key={card.id} aria-label={`Announcement ${index + 1}`}>
         <TextField fullWidth size="small" id={`library-label-${card.id}`} label={`Previous announcement ${index + 1} label (optional)`}
           value={card.label} disabled={card.deleting} onChange={e => controller.edit(card.id, "label", e.target.value)} />
-        <TextField fullWidth size="small" multiline minRows={6} id={`library-body-${card.id}`} label={`Paste previous announcement ${index + 1}`}
-          value={card.exemplarText} disabled={card.deleting}
-          inputRef={(node: HTMLTextAreaElement | null) => { if (node) bodyInputs.current.set(card.id, node); else bodyInputs.current.delete(card.id); }}
-          onChange={e => controller.edit(card.id, "exemplarText", e.target.value)} />
+        <PreviousAnnouncementEditor label={`Paste previous announcement ${index + 1}`} value={card.exemplarText} disabled={card.deleting}
+          inputRef={node => { if (node) bodyInputs.current.set(card.id, node); else bodyInputs.current.delete(card.id); }}
+          onChange={value => controller.edit(card.id, "exemplarText", value)} />
         <p role="status" aria-live="polite">{card.deleting ? "Removing..." : card.status}</p>
         {card.error && <p role="alert">{card.error}</p>}
         {card.status === "Could not save" && <Button size="small" variant="outlined" type="button" disabled={card.deleting} onClick={() => void controller.retry(card.id)}>Retry saving announcement {index + 1}</Button>}

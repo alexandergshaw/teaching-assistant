@@ -4,7 +4,7 @@ import { resolveChoice, type DraftSlot, type SlotsAction, type ResearchNotice, t
 import type { AnnouncementDraftRequestContext, AnnouncementDraftDispatchContext } from "./useAnnouncementDraftSlots";
 import { pairRole } from "./pair-preferences";
 import { recordWalkthroughDiagnostic } from "./walkthrough-diagnostics";
-type DraftAdapter = (ctx: AnnouncementDraftDispatchContext, outline: AnnouncementOutline) => Promise<{ title: string; message: string; researchNotice: ResearchNotice } | { error: string }>;
+type DraftAdapter = (ctx: AnnouncementDraftDispatchContext, outline: AnnouncementOutline, isCurrent?: () => boolean) => Promise<{ title: string; message: string; researchNotice: ResearchNotice } | { error: string }>;
 export async function dispatchResolvedAnnouncementDraft(ctx: AnnouncementDraftDispatchContext, resolved: ReturnType<typeof resolveChoice>, draftOne: DraftAdapter) {
   if (resolved.error) return { error: resolved.error };
   const result = await draftOne(ctx, promptSafeAnnouncementOutline(resolved.outline));
@@ -80,7 +80,8 @@ export function createPairDraftRunner(read: () => readonly DraftSlot[], dispatch
         const researchOutcome = api.researchFingerprint(ctx) === api.researchFingerprint(currentPair.snapshot) ? outcome : { kind: "off" as const };
         const revision = regenerate && slot.draft.phase === "drafted" ? { editedDraft: { title: slot.draft.draft.title, message: slot.draft.draft.message }, revisionNote: slot.revisionNote.slice(0, 2000) } : undefined;
         if (!resolved.error) currentPair.dispatched = true;
-        const result = await dispatchResolvedAnnouncementDraft({ ...ctx, timing: slot.timing, researchOutcome, revision }, resolved, api.draftOne);
+        const guardedDraft: DraftAdapter = (context, outline) => api.draftOne(context, outline, () => current() && reservations.get(slot.id) === token);
+        const result = await dispatchResolvedAnnouncementDraft({ ...ctx, timing: slot.timing, researchOutcome, revision }, resolved, guardedDraft);
         if (!current() || reservations.get(slot.id) !== token) return;
         if ("error" in result) failures += 1;
         dispatch({ type: "result", id: slot.id, result });
@@ -96,5 +97,6 @@ export function createPairDraftRunner(read: () => readonly DraftSlot[], dispatch
       }
     })).then(() => { if (current()) recordWalkthroughDiagnostic("pair", failures ? "failed" : "ok", Date.now() - started, "optional", selected.length, ctx.sourceKind); });
   }
-  return { invalidate, generate: () => run(read().filter(s => s.draft.phase === "empty").map(s => s.id)), retry: (id: string) => run([id]), regenerate: (id: string) => run([id], true) };
+  function cancelSlot(id: string) { reservations.delete(id); }
+  return { invalidate, cancelSlot, generate: () => run(read().filter(s => s.draft.phase === "empty").map(s => s.id)), retry: (id: string) => run([id]), regenerate: (id: string) => run([id], true) };
 }

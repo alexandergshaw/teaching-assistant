@@ -8,7 +8,7 @@
   blocked_by: []
   instrument: 'Verify the owner-scoped PostgREST candidate filter and bounded pagination against a real account with audio, video, generic MIME media, unrelated documents, and more than one page. In an authenticated browser confirm default selection, media opening, partial-results warning, sign-out/account switching, keyboard and focus behavior.'
   from: 'Live recording-announcement walkthrough 2026-11-08: the picker selected a non-media class-session file and drafting failed while reporting that its duration could not be determined.'
-  note: 'Candidate filters audio/video MIME and known media extensions for generic MIME, excludes bundles, pages the owner-scoped candidate query and indicates possible truncation. Focused mock-query and source tests pass; live PostgREST filter syntax and rendered picker remain unverified. Genuine media whose duration cannot be measured continues to refuse real-time extraction rather than risking an unbounded decode; investigate a safe bounded fallback separately if a real media file reproduces that case.'
+  note: 'Candidate filters audio/video MIME and known media extensions for generic MIME, excludes bundles, pages the owner-scoped candidate query and indicates possible truncation. Focused mock-query and source tests pass. The production deployment for b7db9bcd was READY and the authenticated browser showed the picker loading successfully and defaulting to an actual recording, exercising the live PostgREST query. Draft generation for that different recording was blocked by automatic approval review, so the downstream recording flow remains unverified. Genuine media whose duration cannot be measured continues to refuse real-time extraction rather than risking an unbounded decode; investigate a safe bounded fallback separately if a real media file reproduces that case.'
   question: null
 - id: 'RECORDING-ANNOUNCEMENT-AUDIT-FIXES'
   state: 'actionable'
@@ -27,12 +27,12 @@
   kind: 'bug'
   area: 'live-lms-student-messaging'
   title: 'Prevent duplicate recording-announcement posts across reloads and tabs.'
-  owns: ['src/app/components/RecordingTab.tsx', 'src/app/actions/recording-announcement-post.ts', 'src/lib/canvas/announcements.ts']
+  owns: ['src/app/actions/recording-announcement-post.ts', 'src/app/components/recording/RecordingPostReview.tsx', 'src/app/components/recording/useTakeAnnouncement.ts', 'src/lib/recording-post-dedup.ts', 'src/lib/recording-post-claims.ts', 'supabase/migrations/20261108000100_recording_announcement_post_claims.sql']
   verify: null
   blocked_by: []
   instrument: 'Reproduce a confirmed or ambiguous post across reload and two tabs; design and test a durable scoped duplicate guard without suppressing a legitimate new announcement. Verify authorization, concurrency, explicit refusal and ambiguous delivery with a disposable Canvas course.'
   from: 'Recording-announcement audit: postedByTakeId is in-memory and the client post lock cannot protect a second tab or reload.'
-  note: 'Client-side candidate lock prevents overlapping same-panel requests but cannot protect other sessions. Existing WA-POST-DEDUP records a related walkthrough residual; coordinate the shared Canvas seam rather than claiming a server-side guarantee.'
+  note: 'Unshipped default-off candidate uses an owner-scoped atomic claim for exact canonical course, title and body; image changes do not bypass it. It keeps pending and ambiguous outcomes blocked, and offers a separately acknowledged Canvas-check reconciliation for settled uncertain or confirmed claims using a claim revision and expected-state compare-and-set. Pending claims after a crash have no safe recovery yet and never auto-expire. Do not deploy the migration or enable the flag until pending recovery, independent security review, disposable Postgres RLS/concurrency verification and authenticated Canvas/browser verification pass. The guard does not promise exactly-once or catch semantic or cross-owner duplicates. Existing WA-POST-DEDUP records a related walkthrough residual.'
   question: null
 - id: 'RECORDING-ANNOUNCEMENT-SPA-NAVIGATION-GUARD'
   state: 'actionable'

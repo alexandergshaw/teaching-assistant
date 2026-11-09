@@ -47879,3 +47879,13 @@ existing `LENGTH_DEDUCTION_DIRECTIVE`, which asks for deductions when work is
 substantially shorter than the assignment appears to require. OFF appends
 nothing. There is no numeric shortfall threshold in that policy. This is
 prompt guidance, not deterministic word counting or measured live compliance.
+
+## Auto Build and walkthrough safeguards
+
+Auto Build is a sibling of New Build and Pre Built in Tools > Build Courses. It opens the existing Course Build workflow using the selected course tile's description. Its source choice is fixed to course description, its form values and disabled-step choices use separate storage, and the runner stays mounted after the first visit when the user navigates away so an in-progress run retains its controls. The normal Workflows selection and scheduled-run handoff remain separate.
+
+Walkthrough announcement posting binds a draft and its confirmation to the selected course. Posting, editing and regeneration are fenced while a post is in flight, and a late post result cannot update a reset run's reused slot. Starting another capture does not clear an edited or regenerating draft merely because an earlier version was posted. Screen-picker ownership is fenced across stop and teardown; extraction and script responses from earlier runs cannot populate a newer run. The unload warning covers an extraction in flight. Regenerating an existing script requires confirmation, and an edit made while generation is pending is retained. Announcement and script failures omit provider response bodies.
+
+Focused instruments include `src/app/components/workflows/auto-build.wiring.test.ts`, `src/app/components/manual/manual-rail.test.ts`, `src/app/url-state.test.ts`, `src/app/components/walkthrough-announcement/post-reset-hook.test.ts`, `src/app/components/walkthrough-announcement/walkthrough-async-execution.test.ts`, and `src/app/components/recording/useDiscussionCapture.teardown-race.test.ts`. The hook and callback instruments execute selected logic without rendering React; source-wiring checks do not prove a working rendered interface. A real-browser check is still needed for tab navigation and active-run continuity, screen-share picker behavior, and confirmation keyboard/focus behavior. A real provider and authorized LMS are needed to verify generation and posting end to end.
+
+The separate grading-chat lint repair keeps render-facing session details in state and fences repository adapters by the session that created them. `src/app/components/grading-chat/useContinuousGradingRun.reset-race.test.ts` exercises populated new-session rejection of stale adapters and preserves the rendered rubric snapshot across a setup correction. Its mocked hook dispatcher does not replace a browser concurrency check.

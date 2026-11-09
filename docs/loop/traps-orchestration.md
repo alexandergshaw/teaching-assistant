@@ -121,6 +121,49 @@ an automatic host wakeup. If no wait/resume capability exists, report the missin
 capability and outstanding handoff instead of promising background delivery.
 Evidence and limits: `docs/agnostic-manual-handoff-rca.md`.
 
+**The current request owns the critical path.** On 2026-11-08 the owner asked
+for Auto Build and walkthrough fixes. `git log --format="%h %ci %s"` shows
+Auto Build committed as `3e27c4d0` at 14:08 and the requested walkthrough fix as
+`4fd8a6ba` at 16:01. The later observed `git push origin HEAD:refs/heads/main`
+advanced main from `3ccc14de` to `7b1f41bc`, including those commits, after
+backlog and loop investigations competed with delivery. The full lint gate was a real
+pre-push requirement, and its grading repair was necessary to pass it; the
+failure was allowing work beyond that requirement to displace the request.
+Earlier status replies also ended while the requested work was unfinished.
+
+Before starting a new activity, name the requested outcome it advances and
+whether it is necessary to implement, review, verify, or safely publish that
+outcome. Finish that critical path first. Parallel backlog work may continue
+during genuine waits, provided it does not materially delay or block the
+requested outcome; stop or defer it when it does. An explicit user change of
+priority reorders the critical path. A status question or ordinary interrupt
+does not abandon the active request. Starting a worker, a long-running gate,
+a backlog row, or a report is not delivery.
+
+When a gate fails, do one focused triage and the necessary baseline comparison.
+Fix a failure caused by the candidate, or a defect that makes this particular
+delivery unsafe, before delivery. For an independently reproduced unrelated
+baseline failure, retain the actual failing result and exact evidence, record
+the unresolved item and its next step, and return to the requested outcome.
+Do not launch a new unrelated fix or repeat a broad suite merely to obtain a
+green report. A genuinely mandatory gate, safety rule, or unavailable evidence
+still blocks any claim it requires: report the last verified state rather than
+calling the gate passed or bypassing it. This checklist is host practice; it
+is not a Codex hook or a durable background controller.
+
+Before a candidate-bound run starts, freeze its source, test files and Git
+`HEAD` until the run ends; if any change during the run, label that result
+non-final and rerun against the frozen candidate. A comparison baseline must
+have its own correct Git metadata when tests inspect Git, and the dependencies
+its test configuration actually resolves. Confirm those facts before running
+the comparison; an archive nested inside another checkout is not an independent
+Git baseline. Workers must report a blocked command promptly with its exact
+failure and stop waiting for a permission response they cannot receive, so the
+host can run an already-authorized gate. Set bounded tool timeouts or yields
+where supported, poll running work without blocking communication for more than
+60 seconds, and report when a tool cannot be interrupted or bounded. These are
+operational instructions, not automatic enforcement.
+
 **A status report is not a completion boundary.** In the 2026-11-08 Codex
 session, the owner asked to finish in-flight work and then add Auto Build. The
 host ended one turn with the first task still running and ended the next after

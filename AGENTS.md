@@ -35,6 +35,12 @@ commands, the structural gates, and what this environment cannot verify),
 `docs/loop/seats.md`, `docs/loop/iteration-caps.md`, and four trap cards. Tier
 definitions are in `.claude/agents/`.
 
+The user's requested outcome owns the critical path. Background backlog work
+must not materially delay it; useful work may continue during genuine waits.
+Follow the incident-specific priority and baseline controls in
+`docs/loop/traps-orchestration.md` under "Never stall". This does not waive
+mandatory gates, safety rules, or honest reporting of unverified behavior.
+
 Two rules from it that apply to every agent, not just the orchestrator:
 
 - **Every quantity names the command that produced it.** Two line-counting

@@ -724,7 +724,7 @@ describe("generateGeminiImage", () => {
     process.env.GEMINI_API_KEY = "test-key";
     process.env.GEMINI_IMAGE_MODEL = "gemini-image-test-model";
     const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({ output_image: { data: "AAAA", mime_type: "image/png" } })
+      jsonResponse({ output_image: { data: "AAAA", mime_type: "image/jpeg" } })
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -745,7 +745,7 @@ describe("generateGeminiImage", () => {
     expect(sentBody).toEqual({
       model: "gemini-image-test-model",
       input: [{ type: "text", text: "a simple illustration of a library" }],
-      response_format: { type: "image", mime_type: "image/png" },
+      response_format: { type: "image", mime_type: "image/jpeg" },
     });
   });
 
@@ -770,7 +770,7 @@ describe("generateGeminiImage", () => {
     expect(result).toEqual({ ok: true, base64: "ZmFrZS1pbWFnZS1ieXRlcw==", mimeType: "image/jpeg" });
   });
 
-  it("defaults mimeType to image/png when output_image omits it", async () => {
+  it("uses the requested JPEG type when output_image omits its MIME type", async () => {
     process.env.GEMINI_API_KEY = "test-key";
     vi.stubGlobal(
       "fetch",
@@ -778,7 +778,17 @@ describe("generateGeminiImage", () => {
     );
 
     const result = await generateGeminiImage("a simple illustration");
-    expect(result).toEqual({ ok: true, base64: "AAAA", mimeType: "image/png" });
+    expect(result).toEqual({ ok: true, base64: "AAAA", mimeType: "image/jpeg" });
+  });
+
+  it("uses the requested JPEG type when a step image omits its MIME type", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({
+      steps: [{ type: "model_output", content: [{ type: "image", data: "BBBB" }] }],
+    })));
+
+    expect(await generateGeminiImage("a simple illustration"))
+      .toEqual({ ok: true, base64: "BBBB", mimeType: "image/jpeg" });
   });
 
   it("falls back to scanning steps[].content[] for an image block when output_image is absent", async () => {

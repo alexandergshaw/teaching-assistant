@@ -12,6 +12,7 @@ import {
   collectInteractionsText,
   findInteractionsFinishReason,
   findInteractionsImage,
+  GEMINI_IMAGE_OUTPUT_MIME,
   type InteractionsResponseBody,
 } from "./llm-interactions-response";
 import { redactSensitiveText } from "./lms-generation/generation-diag";
@@ -905,7 +906,7 @@ async function postInteraction(
  * from a bad response.
  *
  * Request body: `{ model, input: [{ type: "text", text: prompt }],
- * response_format: { type: "image", mime_type: "image/png" } }`.
+ * response_format: { type: "image", mime_type: "image/jpeg" } }`.
  * `response_format` is optional per the docs; `type: "image"` is what makes
  * this an image-generation call rather than a text one.
  *
@@ -922,7 +923,7 @@ export async function generateGeminiImage(prompt: string): Promise<LlmImageResul
   const body = JSON.stringify({
     model,
     input: [{ type: "text", text: prompt }],
-    response_format: { type: "image", mime_type: "image/png" },
+    response_format: { type: "image", mime_type: GEMINI_IMAGE_OUTPUT_MIME },
   });
 
   const result = await postInteraction(apiKey, body);

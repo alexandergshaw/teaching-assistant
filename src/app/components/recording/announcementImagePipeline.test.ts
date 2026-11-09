@@ -111,6 +111,20 @@ describe("O-3: a fast success and an {error} result are unchanged", () => {
     expect(calls.setImageError).toEqual([null]);
   });
 
+  it("preserves the provider's JPEG type for the generated image", async () => {
+    vi.mocked(generateAnnouncementImageAction).mockResolvedValue({
+      base64: "anBlZy1ieXRlcw==",
+      mimeType: "image/jpeg",
+    });
+    const { deps, calls } = makeDeps();
+
+    await generateImage(deps);
+
+    expect(calls.setImageState).toEqual(["generating", "ready"]);
+    expect(calls.setImageBase64).toEqual(["anBlZy1ieXRlcw=="]);
+    expect(calls.setImageMimeType).toEqual(["image/jpeg"]);
+  });
+
   it("a fast {error} result reaches failed with the action's own message, verbatim", async () => {
     vi.mocked(generateAnnouncementImageAction).mockResolvedValue({
       error: "Image generation failed: HTTP 429 - Quota exceeded",

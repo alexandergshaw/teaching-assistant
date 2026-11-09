@@ -14,6 +14,9 @@ interface InteractionsStep {
   finish_reason?: string;
 }
 
+/** Requested image type, also used when the response omits its MIME type. */
+export const GEMINI_IMAGE_OUTPUT_MIME = "image/jpeg";
+
 /** Shape of a Gemini `interactions` response body (image generation). */
 export interface InteractionsResponseBody {
   steps?: InteractionsStep[];
@@ -32,13 +35,13 @@ export function findInteractionsImage(
   data: InteractionsResponseBody
 ): { data: string; mimeType: string } | undefined {
   if (typeof data.output_image?.data === "string" && data.output_image.data) {
-    return { data: data.output_image.data, mimeType: data.output_image.mime_type || "image/png" };
+    return { data: data.output_image.data, mimeType: data.output_image.mime_type || GEMINI_IMAGE_OUTPUT_MIME };
   }
 
   for (const step of data.steps ?? []) {
     for (const block of step.content ?? []) {
       if (block.type === "image" && typeof block.data === "string" && block.data) {
-        return { data: block.data, mimeType: block.mime_type || "image/png" };
+        return { data: block.data, mimeType: block.mime_type || GEMINI_IMAGE_OUTPUT_MIME };
       }
     }
   }

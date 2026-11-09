@@ -5,7 +5,9 @@ import ts from "typescript";
 import { markSessionChanged, submitAssignedFiles, submitDropBatch, suggestFileGroups } from "./submissionDropRoutes";
 import { claimIntake, releaseIntake, resetIntake, type IntakeFence } from "./intakeFence";
 import type { SubmitOutcome } from "./useContinuousGradingRun";
-import { hasSubmissionContent, parsePastedSubmissions } from "./pastedSubmissions";
+import { hasSubmissionContent, isPastedDiscussionListing, parsePastedSubmissions } from "./pastedSubmissions";
+import { hasDiscussionResponseContent } from "./discussionListing";
+import { CHAT_LABEL_MAX_CHARS } from "./chatSubmissionIntake";
 
 type Node = { type: string; props: Record<string, any> };
 const slots: { value: any; deps?: unknown[] }[] = [];
@@ -18,9 +20,9 @@ const file = ts.createSourceFile("SubmissionDrop.tsx", source, ts.ScriptTarget.L
 const declarations = file.statements.filter((statement) => ts.isFunctionDeclaration(statement) && ["SubmissionDrop", "reconcileRowAfterReset"].includes(statement.name?.text ?? ""));
 const code = ts.transpileModule(declarations.map((d) => d.getText(file).replace(/^export\s+/, "")).join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS } }).outputText;
 const jsx = (type: string, props: Record<string, unknown>) => ({ type, props });
-const components = ["Alert", "Accordion", "AccordionDetails", "AccordionSummary", "Box", "Button", "Dialog", "DialogActions", "DialogContent", "DialogTitle", "FormControl", "FormControlLabel", "FormLabel", "Radio", "RadioGroup", "TextField", "Typography"];
-const factory = new Function("exports", "require", "useState", "useRef", "useEffect", "ROLE_FILE_LIMIT", "submitAssignedFiles", "submitDropBatch", "suggestFileGroups", "markSessionChanged", "claimIntake", "releaseIntake", "resetIntake", "parsePastedSubmissions", "hasSubmissionContent", "window", ...components, `${code}; return SubmissionDrop;`);
-const component = factory({}, (id: string) => id === "react/jsx-runtime" ? { jsx, jsxs: jsx } : {}, useState, useRef, useEffect, 40, submitAssignedFiles, submitDropBatch, suggestFileGroups, markSessionChanged, claimIntake, releaseIntake, resetIntake, parsePastedSubmissions, hasSubmissionContent, { addEventListener() {}, removeEventListener() {} }, ...components);
+const components = ["Alert", "Accordion", "AccordionDetails", "AccordionSummary", "Box", "Button", "Checkbox", "Dialog", "DialogActions", "DialogContent", "DialogTitle", "FormControl", "FormControlLabel", "FormLabel", "Radio", "RadioGroup", "TextField", "Typography"];
+const factory = new Function("exports", "require", "useState", "useRef", "useEffect", "ROLE_FILE_LIMIT", "submitAssignedFiles", "submitDropBatch", "suggestFileGroups", "markSessionChanged", "claimIntake", "releaseIntake", "resetIntake", "parsePastedSubmissions", "hasSubmissionContent", "isPastedDiscussionListing", "hasDiscussionResponseContent", "CHAT_LABEL_MAX_CHARS", "window", ...components, `${code}; return SubmissionDrop;`);
+const component = factory({}, (id: string) => id === "react/jsx-runtime" ? { jsx, jsxs: jsx } : {}, useState, useRef, useEffect, 40, submitAssignedFiles, submitDropBatch, suggestFileGroups, markSessionChanged, claimIntake, releaseIntake, resetIntake, parsePastedSubmissions, hasSubmissionContent, isPastedDiscussionListing, hasDiscussionResponseContent, CHAT_LABEL_MAX_CHARS, { addEventListener() {}, removeEventListener() {} }, ...components);
 function nodes(node: any): Node[] { if (Array.isArray(node)) return node.flatMap(nodes); if (!node || typeof node !== "object") return []; return [node, ...nodes(node.props?.children)]; }
 const text = (node: any): string => Array.isArray(node) ? node.map(text).join("") : typeof node === "string" ? node : !node || typeof node !== "object" ? "" : text(node.props?.children);
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
@@ -36,6 +38,40 @@ function harness(onOne = vi.fn(async () => ({ kind: "accepted", entryCount: 1 })
 const work = (name: string) => new File(["work"], name);
 
 describe("SubmissionDrop actual handlers", () => {
+  it("keeps a suspected whole board out of the single-student fallback", async () => {
+    const onText = vi.fn().mockResolvedValue({ kind: "accepted", entryCount: 1 });
+    const h = harness(undefined, undefined, onText); let tree = h.render();
+    h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "Discussion board\nUnread post\nPartial post without date" } });
+    tree = h.render(); expect(nodes(tree).some((n) => n.type === "TextField" && n.props.label === "Student for this text")).toBe(false);
+    expect(text(tree)).toContain("unassigned text"); h.button(tree, "Grade reviewed submissions").props.onClick(); await flush();
+    expect(onText).not.toHaveBeenCalled();
+  });
+  it("requires an explicit same-person confirmation before combining duplicate names", async () => {
+    const onText = vi.fn().mockResolvedValue({ kind: "accepted", entryCount: 1 });
+    const h = harness(undefined, undefined, onText); let tree = h.render();
+    h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "Alex Kim posted 10/1/2026\nInitial\nAlex Kim posted 10/2/2026\nReply" } });
+    tree = h.render(); for (const label of nodes(tree).filter((n) => n.type === "FormControlLabel" && String(n.props.label).startsWith("I checked author"))) label.props.control.props.onChange(null, true); tree = h.render(); h.button(tree, "Grade reviewed submissions").props.onClick(); await flush(); expect(onText).not.toHaveBeenCalled();
+    h.button(tree, "Combine entries").props.onClick(); tree = h.render(); h.button(tree, "Combine").props.onClick(); tree = h.render();
+    nodes(tree).find((n) => n.type === "FormControlLabel" && n.props.label === "I checked author and response 1")!.props.control.props.onChange(null, true); tree = h.render();
+    h.button(tree, "Grade reviewed submissions").props.onClick(); await flush();
+    expect(onText).toHaveBeenCalledTimes(1); expect(onText.mock.calls[0][1]).toContain("Initial\n\n---\n\nAlex Kim posted 10/2/2026\nReply");
+  });
+  it("cannot grade a dated header with only page controls even when reviewed", async () => {
+    const onText = vi.fn().mockResolvedValue({ kind: "accepted", entryCount: 1 }); const h = harness(undefined, undefined, onText); let tree = h.render();
+    h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "Ada Chen posted Sep 3, 2026\n2 replies\nGrace Vale posted Sep 4, 2026\nReal answer" } });
+    tree = h.render(); for (const label of nodes(tree).filter((n) => n.type === "FormControlLabel" && String(n.props.label).startsWith("I checked author"))) label.props.control.props.onChange(null, true); tree = h.render();
+    h.button(tree, "Grade reviewed submissions").props.onClick(); await flush(); expect(onText).not.toHaveBeenCalled();
+  });
+  it("rejects labels that the grading handoff would truncate", async () => {
+    const onText = vi.fn().mockResolvedValue({ kind: "accepted", entryCount: 1 }); const h = harness(undefined, undefined, onText); let tree = h.render();
+    h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: `Student: ${"A".repeat(501)}\nAnswer\nStudent: Bob\nAnswer` } });
+    tree = h.render(); h.button(tree, "Grade reviewed submissions").props.onClick(); await flush(); tree = h.render();
+    expect(onText).not.toHaveBeenCalled(); expect(text(tree)).toContain("at most 500 characters");
+  });
   it("does not grade a heading without student work", () => {
     const h = harness(); let tree = h.render(); h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
     nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "Student: Ada\nStudent: Bob\nB" } });

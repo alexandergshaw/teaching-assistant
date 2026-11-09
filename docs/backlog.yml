@@ -140,7 +140,19 @@
   blocked_by: []
   instrument: 'Exercise an anonymized fixture matching the owner''s example: repeated discussion titles and unread markers, an author followed by a posted date and time, multi-paragraph post bodies, and intervening unread/reply/view counts, profile-card text and last-post metadata. Identify the post author without treating a last-reply author or navigation metadata as a new submission; preserve every post body and do not silently discard ambiguous text. Cover multiple posts, duplicate authors, varied names and timestamps, missing metadata, body text resembling a heading, and malformed or partial listings. Show editable segmentation and identity for instructor review before grading, with explicit uncertainty and no duplicate dispatch on failure or retry. Verify the actual paste-to-review-to-grading flow and desktop/mobile keyboard and focus behavior.'
   from: 'Owner request in this chat, illustrated by a pasted discussion listing; fixture must be anonymized and must not reproduce student text.'
-  note: 'Owner: coordinator. Extend the existing multiple-student paste flow and coordinate with CHAT-SIMPLIFY-SUBMISSION-MODES; preserve its existing explicit-heading and separator behavior. Survey the current parser before implementation and treat listing metadata as untrusted input, not instructions.'
+  note: 'Owner: coordinator. Candidate recognizes dated author headers and holds unmatched listing text for review, while retaining explicit-heading and separator modes. Duplicate names require explicit confirmation before combining; instructors must review the inferred boundaries. Text-only grading does not populate discussionAxes, so replies are not scored as a separate axis: see CHAT-PASTED-DISCUSSION-AXES. Attachments, unloaded replies and model input limits require explicit disclosure. Browser and real LMS copy verification remain open.'
+  question: null
+- id: 'CHAT-PASTED-DISCUSSION-AXES'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'grading-setup-interaction-cost'
+  title: 'Preserve initial-post and reply axes when grading pasted discussion boards.'
+  owns: ['src/app/components/grading-chat/', 'src/app/api/grade-run-item/', 'src/lib/grade/']
+  verify: null
+  blocked_by: []
+  instrument: 'Review and explicitly label each pasted initial post and reply, retain all attributable text, and hand separate initialPostContent, replyContent and replyCount into the existing discussionAxes grading path. Cover duplicate names, ambiguous reply authors, missing or unloaded replies, unsupported attachments, truncation, repeated attempts, partial dispatch and reset. Verify the actual paste-to-grade result for an initial-plus-replies rubric and disclose uncertainty before paid dispatch; do not infer zero replies from an incomplete paste.'
+  from: 'Owner request to grade pasted discussion boards; review found the text submission route does not currently populate discussionAxes.'
+  note: 'Owner: coordinator. The first listing parser ships with a prominent text-only limitation rather than implying reply-axis grading works. Preserve this row until an end-to-end instrument proves both axes reach the grader. Browser and real LMS samples remain required.'
   question: null
 - id: 'AUTO-BUILD-COURSE-DESCRIPTION'
   state: 'actionable'

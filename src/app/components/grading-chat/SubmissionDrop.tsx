@@ -7,6 +7,7 @@ import AccordionDetails from "@mui/material/AccordionDetails";
 import AccordionSummary from "@mui/material/AccordionSummary";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import Checkbox from "@mui/material/Checkbox";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
@@ -23,11 +24,13 @@ import type { SubmitOutcome } from "./useContinuousGradingRun";
 import { ROLE_FILE_LIMIT } from "./chatFileRoles";
 import { markSessionChanged, submitAssignedFiles, submitDropBatch, suggestFileGroups } from "./submissionDropRoutes";
 import { claimIntake, releaseIntake, resetIntake, type IntakeFence } from "./intakeFence";
-import { hasSubmissionContent, parsePastedSubmissions } from "./pastedSubmissions";
+import { hasSubmissionContent, isPastedDiscussionListing, parsePastedSubmissions } from "./pastedSubmissions";
+import { hasDiscussionResponseContent } from "./discussionListing";
+import { CHAT_LABEL_MAX_CHARS } from "./chatSubmissionIntake";
 
 type State = "ready" | "refused" | "identity" | "queued" | "staged" | "uncertain";
 interface Row { id: number; file: File; state: State; reason?: string; assigned?: string }
-interface TextRow { student: string; content: string; state: "ready" | "queued" | "refused" | "uncertain"; reason?: string }
+interface TextRow { student: string; content: string; state: "ready" | "queued" | "refused" | "uncertain"; reason?: string; reviewed?: boolean }
 
 export function reconcileRowAfterReset(row: Row): Row {
   if (row.state !== "queued" && row.state !== "staged") return row;
@@ -58,6 +61,7 @@ export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, get
   const [pending, setPending] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [clearingText, setClearingText] = useState(false);
+  const [combineName, setCombineName] = useState<string | null>(null);
   const picker = useRef<HTMLInputElement | null>(null);
   const nextId = useRef(0), alive = useRef(true);
   const activeRows = useRef<ReadonlySet<number> | null>(null);
@@ -95,6 +99,8 @@ export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, get
   const unresolved = rows.some((row) => row.state === "uncertain");
   const queuedRows = rows.filter((row) => row.state === "queued");
   const attentionRows = rows.filter((row) => row.state !== "queued");
+  const isDiscussionListing = mode === "many" && isPastedDiscussionListing(submissionText);
+  const duplicateNames = textRows.filter((row, index) => row.student.trim() && textRows.findIndex((other) => other.student.trim().normalize("NFKC").toLocaleLowerCase() === row.student.trim().normalize("NFKC").toLocaleLowerCase()) !== index).map((row) => row.student.trim());
 
   function changeText(value: string) {
     setSubmissionText(value);
@@ -104,6 +110,8 @@ export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, get
   async function gradeTextRows() {
     if (busy || latch.busy || textRows.some((row) => row.state === "uncertain") || !textRows.some((row) => row.state === "ready" || row.state === "refused")) return;
     if (textRows.some((row) => (row.state === "ready" || row.state === "refused") && (!row.student.trim() || !hasSubmissionContent(row.content)))) { setError("Add a student name and submission text beyond the heading for every entry before grading."); return; }
+    if (isDiscussionListing && textRows.some((row) => (row.state === "ready" || row.state === "refused") && (!row.reviewed || !hasDiscussionResponseContent(row.content)))) { setError("Confirm each author and response, remove page controls, and include response text beyond the dated header before grading."); return; }
+    if (textRows.some((row) => row.student.trim().length > CHAT_LABEL_MAX_CHARS)) { setError(`Student names must be at most ${CHAT_LABEL_MAX_CHARS} characters. Shorten the name before grading.`); return; }
     const names = textRows.map((row) => row.student.trim().normalize("NFKC").toLocaleLowerCase());
     if (new Set(names).size !== names.length) { setError("Use a distinct student name for each submission before grading."); return; }
     const token = claimIntake(latch); if (token === null) return; textRowsEditedRef.current = true; setTextRowsEdited(true);
@@ -245,17 +253,20 @@ export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, get
           <Button size="small" variant="outlined" disabled={busy} onClick={() => picker.current?.click()}>Choose files</Button>
         </Box>
         <Box sx={{ display: "grid", gap: 1, alignContent: "start" }}>
-          <TextField label="Submission text" placeholder={mode === "many" ? "Paste submissions with Student: names" : "Paste a student's submission"} multiline minRows={3} fullWidth value={submissionText} disabled={busy || textRowsEdited || textRows.some((row) => row.state === "queued" || row.state === "uncertain")} onChange={(event) => { if (!textRowsEditedRef.current) changeText(event.target.value); }} helperText={textRowsEdited ? "The original paste is locked to preserve your review edits. Clear the text list to start over." : undefined} />
+          <TextField label="Submission text" placeholder={mode === "many" ? "Paste a discussion listing or submissions with Student: names" : "Paste a student's submission"} multiline minRows={mode === "many" ? 6 : 3} fullWidth value={submissionText} disabled={busy || textRowsEdited || textRows.some((row) => row.state === "queued" || row.state === "uncertain")} onChange={(event) => { if (!textRowsEditedRef.current) changeText(event.target.value); }} helperText={textRowsEdited ? "The original paste is locked to preserve your review edits. Clear the text list to start over." : undefined} />
+          {isDiscussionListing && <Alert severity="warning">Review the inferred author and complete text for every entry, including any unassigned text. Remove page controls only after checking them. Attachments, hidden or unloaded replies are not included by a text paste. Pasted text is graded as one submission per student; initial posts and replies are not scored as separate discussion axes. Grading length limits may truncate long submissions.</Alert>}
           {mode === "many" && textRows.length === 0 && <TextField size="small" label="Student for this text" value={textStudent} disabled={busy} onChange={(event) => setTextStudent(event.target.value)} helperText="For multiple students, start each submission with Student: and a name, or separate submissions with --- on its own line." />}
           {mode === "many" && textRows.length > 0 ? <>
-            <Alert severity="info">Review each name and submission before grading. Headings are inferred from the pasted text.</Alert>
+            <Alert severity="info">Review each name and submission before grading. Headings are inferred from the pasted text.{isDiscussionListing && " Remove page controls and confirm every author and boundary; quoted lines can resemble a new post."}</Alert>
             {textRows.map((row, index) => <Box key={index} sx={{ display: "grid", gap: 1 }}>
-              <TextField size="small" label={`Student ${index + 1}`} value={row.student} disabled={busy || row.state === "queued" || row.state === "uncertain"} onChange={(event) => { if (latch.busy) return; const value = event.target.value; textRowsEditedRef.current = true; setTextRowsEdited(true); setTextRows((previous) => previous.map((item, i) => i === index && (item.state === "ready" || item.state === "refused") ? { ...item, student: value } : item)); }} />
-              <TextField multiline size="small" label={`Submission ${index + 1}`} value={row.content} disabled={busy || row.state === "queued" || row.state === "uncertain"} onChange={(event) => { if (latch.busy) return; const value = event.target.value; textRowsEditedRef.current = true; setTextRowsEdited(true); setTextRows((previous) => previous.map((item, i) => i === index && (item.state === "ready" || item.state === "refused") ? { ...item, content: value } : item)); }} />
+              <TextField size="small" label={`Student ${index + 1}`} value={row.student} disabled={busy || row.state === "queued" || row.state === "uncertain"} onChange={(event) => { if (latch.busy) return; const value = event.target.value; textRowsEditedRef.current = true; setTextRowsEdited(true); setTextRows((previous) => previous.map((item, i) => i === index && (item.state === "ready" || item.state === "refused") ? { ...item, student: value, reviewed: false } : item)); }} />
+              <TextField multiline size="small" label={`Submission ${index + 1}`} value={row.content} disabled={busy || row.state === "queued" || row.state === "uncertain"} onChange={(event) => { if (latch.busy) return; const value = event.target.value; textRowsEditedRef.current = true; setTextRowsEdited(true); setTextRows((previous) => previous.map((item, i) => i === index && (item.state === "ready" || item.state === "refused") ? { ...item, content: value, reviewed: false } : item)); }} />
+              {isDiscussionListing && (row.state === "ready" || row.state === "refused") && <FormControlLabel control={<Checkbox checked={row.reviewed === true} disabled={busy} onChange={(_, checked) => setTextRows((previous) => previous.map((item, i) => i === index ? { ...item, reviewed: checked } : item))} />} label={`I checked author and response ${index + 1}`} />}
               <Typography variant="body2">{row.state === "queued" ? "Queued" : row.state === "uncertain" ? "Needs review" : row.state === "refused" ? "Not submitted" : "Ready"}{row.reason ? ` - ${row.reason}` : ""}</Typography>
               {(row.state === "ready" || row.state === "refused") && <Button size="small" disabled={busy} onClick={() => { if (latch.busy) return; textRowsEditedRef.current = textRows.length !== 1; if (textRows.length === 1) { setSubmissionText(""); setTextRowsEdited(false); } else setTextRowsEdited(true); setTextRows((previous) => previous.filter((_, i) => i !== index)); }}>Remove this entry</Button>}
               {row.state === "uncertain" && <Button size="small" disabled={busy} onClick={() => setTextRows((previous) => previous.map((item, i) => i === index ? { ...item, state: "refused", reason: undefined } : item))}>I checked results; allow retry</Button>}
             </Box>)}
+            {duplicateNames.length > 0 && <Alert severity="warning">Some entries have the same name. Confirm they are the same person and combine them, or correct their names before grading. <Button color="inherit" disabled={busy || textRows.some((row) => row.state === "queued" || row.state === "uncertain")} onClick={() => setCombineName(duplicateNames[0])}>Combine entries</Button></Alert>}
             <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}><Button size="small" variant="outlined" disabled={busy || textRows.some((row) => row.state === "uncertain") || !textRows.some((row) => row.state === "ready" || row.state === "refused")} onClick={() => void gradeTextRows()}>Grade reviewed submissions</Button><Button size="small" disabled={busy} onClick={() => setClearingText(true)}>Clear text list</Button></Box>
           </> : <Box><Button size="small" variant="outlined" disabled={busy || textUncertain || !submissionText.trim() || (mode === "many" && !textStudent.trim())} onClick={() => void gradeText()}>Grade text</Button></Box>}
         </Box>
@@ -292,6 +303,11 @@ export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, get
         <DialogTitle id="clear-text-list-title">Clear this text list?</DialogTitle>
         <DialogContent>Check queued and uncertain submissions in the results before submitting them again. Unsubmitted text will be removed.</DialogContent>
         <DialogActions><Button onClick={() => setClearingText(false)}>Keep text</Button><Button color="warning" onClick={() => { textRowsEditedRef.current = false; setTextRows([]); setTextRowsEdited(false); setSubmissionText(""); setError(null); setClearingText(false); }}>Clear list</Button></DialogActions>
+      </Dialog>
+      <Dialog open={combineName !== null} onClose={() => setCombineName(null)} aria-labelledby="combine-student-entries-title">
+        <DialogTitle id="combine-student-entries-title">Combine entries for {combineName}?</DialogTitle>
+        <DialogContent>Only combine these entries if they belong to the same student. The text of every entry will be retained in order. Different students with the same name need distinct labels.</DialogContent>
+        <DialogActions><Button onClick={() => setCombineName(null)}>Cancel</Button><Button onClick={() => { if (!combineName || latch.busy) return; const key = combineName.trim().normalize("NFKC").toLocaleLowerCase(); setTextRows((previous) => { const matches = previous.filter((row) => row.student.trim().normalize("NFKC").toLocaleLowerCase() === key); if (matches.length < 2 || matches.some((row) => row.state !== "ready" && row.state !== "refused")) return previous; let inserted = false; return previous.flatMap((row) => { if (row.student.trim().normalize("NFKC").toLocaleLowerCase() !== key) return [row]; if (inserted) return []; inserted = true; return [{ student: row.student, content: matches.map((item) => item.content).join("\n\n---\n\n"), state: "ready" as const }]; }); }); textRowsEditedRef.current = true; setTextRowsEdited(true); setCombineName(null); }}>Combine</Button></DialogActions>
       </Dialog>
     </Box>
   );

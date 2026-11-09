@@ -18,7 +18,7 @@
 // pipeline progress) resets cleanly when a different take is opened,
 // instead of this component trying to detect and reset that itself.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button, MenuItem, TextField } from "@mui/material";
 import LinearProgress from "@mui/material/LinearProgress";
 import styles from "../../page.module.css";
@@ -159,6 +159,8 @@ export default function TakeAnnouncementPanel({
     retryFromFailedChunk,
     startOver,
     retryDraft,
+    startDraft,
+    returnToSetup,
     retryAudio,
     backToReviewAfterPostFailure,
     courses,
@@ -205,6 +207,8 @@ export default function TakeAnnouncementPanel({
     },
   }), []);
   const library = useAnnouncementLibrary(courseId, libraryAdapters);
+  const latestScope = useRef(library.scopeKey);
+  useLayoutEffect(() => { latestScope.current = library.scopeKey; }, [library.scopeKey]);
   const [selectedFormat, setSelectedFormat] = useState<{ scope: string; id: string } | null>(null);
   const selectedFormatId = selectedFormat?.scope === library.scopeKey ? selectedFormat.id : "";
   const [formatError, setFormatError] = useState<string | null>(null);
@@ -233,15 +237,26 @@ export default function TakeAnnouncementPanel({
   // a fresh, un-edited draft is a one-click regenerate with nothing to lose.
   const [fieldsTouched, setFieldsTouched] = useState(false);
   const [regenArmed, setRegenArmed] = useState(false);
+  function selectedFormatResolver() {
+    const controller = library.controller, scope = library.scopeKey, selection = selectedFormat, enabled = library.enabled;
+    return () => controller.isDisposed() || latestScope.current !== scope ? { ok: false as const } : resolveTakeFormat(selection, scope, enabled, controller.getState());
+  }
   function handleRegenerateConfirm() {
-    const result = resolveTakeFormat(selectedFormat, library.scopeKey, library.enabled, library.state);
+    const resolve = selectedFormatResolver(), result = resolve();
     if (!result.ok) {
       setFormatError("The selected example is unavailable or has unsaved changes. Save it or choose another format.");
       return;
     }
     setFormatError(null);
-    retryDraft(result.example);
+    const snapshot = JSON.stringify(result.example);
+    retryDraft(result.example, () => { const latest = resolve(); return latest.ok && JSON.stringify(latest.example) === snapshot; });
     setRegenArmed(false);
+  }
+  function handleStartDraft() {
+    const resolve = selectedFormatResolver();
+    if (!resolve().ok) { setFormatError("The selected example is unavailable or has unsaved changes. Save it or choose another format."); return; }
+    setFormatError(null);
+    startDraft(resolve);
   }
 
   // Fixer pass finding 4: a new draft can also land via the failed-branch
@@ -420,9 +435,10 @@ export default function TakeAnnouncementPanel({
               </>
             )}
             {stage.stage === "draft" && (
-              <Button size="small" variant="contained" onClick={handleRetryDraft}>
-                Try again
-              </Button>
+              <>
+                <Button size="small" variant="contained" onClick={handleRetryDraft}>Try again</Button>
+                <Button size="small" variant="text" onClick={returnToSetup}>Back to setup</Button>
+              </>
             )}
             {stage.stage === "post" && (
               <Button size="small" variant="contained" onClick={backToReviewAfterPostFailure}>
@@ -442,7 +458,7 @@ export default function TakeAnnouncementPanel({
         </div>
       )}
 
-      {(stage.phase === "review" || stage.phase === "posting") && (
+      {(stage.phase === "idle" || stage.phase === "review" || stage.phase === "posting") && (
         <>
           {/* Fixer pass finding 1: "Post to" and "Announcement style" are
               SIBLING sections, not nested - the course picker is a
@@ -512,7 +528,7 @@ export default function TakeAnnouncementPanel({
             {formatError && <p role="alert">{formatError}</p>}
             <AnnouncementCompositionControls composition={composition} onChange={setComposition} disabled={busy || posting} />
             <TextField
-              label="Additional direction for regeneration"
+              label="Additional direction"
               value={instructorContext}
               onChange={(event) => setInstructorContext(event.target.value)}
               disabled={busy || posting}
@@ -520,9 +536,10 @@ export default function TakeAnnouncementPanel({
               minRows={2}
               fullWidth
               slotProps={{ htmlInput: { maxLength: 4000 } }}
-              helperText="Optional context to use when regenerating this announcement."
+              helperText="Optional context to use when drafting this announcement."
             />
             {regenerationError && <p role="alert">{regenerationError} Your previous draft is unchanged.</p>}
+            {stage.phase === "idle" ? <Button size="small" variant="contained" disabled={needsRealTimeConfirm} onClick={handleStartDraft}>Draft announcement</Button> : <>
             <div className={styles.ghActions}>
               {/* Fixer pass finding 4: ConfirmArmButtons stays mounted for
                   both the untouched and the touched case - swapping it for
@@ -557,10 +574,12 @@ export default function TakeAnnouncementPanel({
                 This replaces your edited subject and message.
               </p>
             )}
+            </>}
           </fieldset>
           <AnnouncementLibrary key={library.scopeKey} controller={library.controller} state={library.state} enabled={library.enabled}
             canAddDraft={false} addDraft={() => {}} onRemoved={(id) => { if (id === selectedFormatId) setSelectedFormat(null); }} />
 
+          {stage.phase !== "idle" && <>
           <TextField
             size="small"
             label="Subject"
@@ -717,6 +736,7 @@ export default function TakeAnnouncementPanel({
           </div>
           {postUnavailableReason && <p className={styles.fieldHint}>{postUnavailableReason}</p>}
           </div>
+          </>}
         </>
       )}
     </div>

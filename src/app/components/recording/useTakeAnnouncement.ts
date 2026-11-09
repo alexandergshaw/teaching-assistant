@@ -92,6 +92,7 @@ import type { AnnouncementOutline } from "@/lib/announcement-outline-types";
 import { recordingDraftToHtml } from "@/lib/recording-announcement-html";
 import { postRecordingAnnouncementAction } from "@/app/actions/recording-announcement-post";
 import { recordTakeDiagnostic } from "./take-announcement-diagnostics";
+import { awaitCurrentDraft, beginTakeDraft, dispatchInitialTakeDraft, initialTakeStage } from "./take-format-selection";
 
 export type { AnnouncementStage };
 export { decideRealTimeGuard };
@@ -168,7 +169,9 @@ export interface UseTakeAnnouncementReturn {
   failedChunkNumber: number | null;
   retryFromFailedChunk: () => void;
   startOver: () => void;
-  retryDraft: (example?: { outline: AnnouncementOutline; symbols: string[] } | null) => void;
+  retryDraft: (example?: { outline: AnnouncementOutline; symbols: string[] } | null, current?: () => boolean) => void;
+  startDraft: (resolve: () => { ok: true; example: { outline: AnnouncementOutline; symbols: string[] } | null } | { ok: false }) => void;
+  returnToSetup: () => void;
   retryAudio: () => void;
   backToReviewAfterPostFailure: () => void;
 
@@ -295,7 +298,10 @@ export function useTakeAnnouncement({
 }: UseTakeAnnouncementOptions): UseTakeAnnouncementReturn {
   const { active: activeInstitution } = useInstitutionSelection();
 
-  const [stage, setStage] = useState<AnnouncementStage>({ phase: "idle" });
+  const [stage, setStage] = useState<AnnouncementStage>(() => ({ phase: initialTakeStage(!!posted) }));
+  const initialStartLock = useRef(false);
+  useEffect(() => { if (stage.phase !== "idle") initialStartLock.current = false; }, [stage.phase]);
+  const initialFormatRef = useRef<(() => { ok: true; example: { outline: AnnouncementOutline; symbols: string[] } | null } | { ok: false }) | null>(null);
   const [liveRegionText, setLiveRegionText] = useState("");
   const [lastMessage, setLastMessage] = useState<string | null>(null);
   const [needsRealTimeConfirm, setNeedsRealTimeConfirm] = useState(false);
@@ -501,7 +507,7 @@ export function useTakeAnnouncement({
       take,
       setTakes,
       onTranscriptCached,
-      onTranscriptReady: runDraft,
+      onTranscriptReady: runInitialDraft,
       transcriptRef,
       cancelledRef,
       realTimeAbortRef,
@@ -522,7 +528,7 @@ export function useTakeAnnouncement({
     };
   }
 
-  async function runDraft(transcript: string, formatExample: { outline: AnnouncementOutline; symbols: string[] } | null = null) {
+  async function runDraft(transcript: string, formatExample: { outline: AnnouncementOutline; symbols: string[] } | null = null, current: () => boolean = () => true) {
     const hasPriorDraft = Boolean(subject.trim() || body.trim());
     const started = Date.now(), operation = hasPriorDraft ? "regenerate" : "draft";
     const diagnosticDetail = { hasExample: !!formatExample, hasInstructorContext: !!instructorContext.trim() };
@@ -545,10 +551,14 @@ export function useTakeAnnouncement({
       formatExample?.symbols ?? []
     );
     const provider = getStoredProvider();
-    let raw: Awaited<ReturnType<typeof draftAnnouncementAction>>;
-    try {
-      raw = await draftAnnouncementAction(instruction, provider, formatExample ? "structured" : "plain");
-    } catch {
+    const response = await awaitCurrentDraft(draftAnnouncementAction(instruction, provider, formatExample ? "structured" : "plain"), () => !cancelledRef.current && current());
+    if (response.kind === "stale") {
+      recordTakeDiagnostic(operation, false, started, diagnosticDetail);
+      if (hasPriorDraft) { setRegenerationError("The course or selected example changed. Review it and try again."); setStage({ phase: "review" }); }
+      else setStage({ phase: "failed", stage: "draft", message: "The course or selected example changed. Return to setup and choose it again." });
+      return;
+    }
+    if (response.kind === "failed") {
       recordTakeDiagnostic(operation, false, started, diagnosticDetail);
       const message = "Could not generate the announcement. Please try again.";
       setLogDraftAttempts((prev) => [...prev, { at: new Date().toISOString(), ok: false, error: message }]);
@@ -563,7 +573,7 @@ export function useTakeAnnouncement({
     }
     // Refuses the embedded scaffold, blank drafts, and invented URLs before
     // anything reaches review (take-announcement-draft.ts).
-    const result = finalizeTakeDraft(raw, {
+    const result = finalizeTakeDraft(response.value, {
       provider,
       transcript,
       instructorContext,
@@ -595,12 +605,7 @@ export function useTakeAnnouncement({
     setArmedFor(null);
     setFieldError(null);
     setPostError(null);
-    // A genuinely new draft lands here - reset the image companion so the
-    // auto-generation effect below fires again for the new subject/body,
-    // even if a prior draft's image was generated, regenerated, or
-    // explicitly discarded. See this file's header comment on imageState for
-    // why this is the deliberate behavior (a fresh draft gets a fresh image
-    // attempt) rather than carrying a discard decision across drafts.
+  // A new text draft gets a new image attempt.
     autoImageAttemptedRef.current = false;
     setImageState("idle");
     setImageBase64(null);
@@ -608,6 +613,11 @@ export function useTakeAnnouncement({
     setImageError(null);
     setStage({ phase: "review" });
     announce("Draft ready to review.");
+  }
+
+  async function runInitialDraft(transcript: string) {
+    await dispatchInitialTakeDraft(transcript, () => initialFormatRef.current?.() ?? { ok: false }, runDraft,
+      () => setStage({ phase: "failed", stage: "draft", message: "The course or selected example changed. Return to setup and choose it again." }));
   }
 
   function imageDeps(): AnnouncementImageDeps {
@@ -673,7 +683,7 @@ export function useTakeAnnouncement({
     setFieldError(null);
     if (transcriptRef.current) {
       setLogTranscriptionPath("cached");
-      void runDraft(transcriptRef.current);
+      void runInitialDraft(transcriptRef.current);
       return;
     }
     if (take.audioSegments && take.audioSegments.length > 0) {
@@ -685,27 +695,9 @@ export function useTakeAnnouncement({
     void beginRealTimeGuardCheck(pipelineDeps());
   }
 
-  // Auto-start the moment the panel opens for a take that has not already
-  // been posted (AC15c/minimize-clicks: the "Draft announcement" click that
-  // opened this surface IS the start click, nothing further to press). The
-  // first setState is deferred past a microtask so it is never reached
-  // synchronously from the effect body itself.
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      await Promise.resolve();
-      if (cancelled) return;
-      if (posted) {
-        setStage({ phase: "review" });
-        return;
-      }
-      start();
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  function startDraft(resolve: () => { ok: true; example: { outline: AnnouncementOutline; symbols: string[] } | null } | { ok: false }) {
+    beginTakeDraft(initialStartLock, !!posted, () => { cancelledRef.current = false; initialFormatRef.current = resolve; start(); });
+  }
 
   function confirmRealTimeExtraction() {
     setNeedsRealTimeConfirm(false);
@@ -713,6 +705,7 @@ export function useTakeAnnouncement({
   }
 
   function cancelRealTimeConfirm() {
+    initialStartLock.current = false;
     setNeedsRealTimeConfirm(false);
   }
 
@@ -741,8 +734,12 @@ export function useTakeAnnouncement({
     void proceedToTranscription(0, pipelineDeps());
   }
 
-  function retryDraft(example: { outline: AnnouncementOutline; symbols: string[] } | null = null) {
-    if (transcriptRef.current) void runDraft(transcriptRef.current, example);
+  function retryDraft(example: { outline: AnnouncementOutline; symbols: string[] } | null = null, current: () => boolean = () => true) {
+    cancelledRef.current = false;
+    if (transcriptRef.current) {
+      if (!subject.trim() && !body.trim()) void runInitialDraft(transcriptRef.current);
+      else void runDraft(transcriptRef.current, example, current);
+    }
   }
 
   function retryAudio() {
@@ -954,6 +951,8 @@ export function useTakeAnnouncement({
     retryFromFailedChunk,
     startOver,
     retryDraft,
+    startDraft,
+    returnToSetup: () => setStage({ phase: "idle" }),
     retryAudio,
     backToReviewAfterPostFailure,
 

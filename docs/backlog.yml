@@ -1,3 +1,15 @@
+- id: 'PRESENTATIONS-PIPELINE-TEMPLATES-AUDIT'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'presentations-authoring'
+  title: 'Audit and fix blockers and usability issues in Slide Deck Pipeline and PowerPoint Templates.'
+  owns: ['src/app/components/presentations/', 'src/app/components/powerpoint-templates/', 'src/app/actions/powerpoint-template-library.ts']
+  verify: null
+  blocked_by: []
+  instrument: 'Trace each workflow and its failure, retry, persistence, file, authentication, and generation paths; assess desktop and mobile layout, keyboard and focus; measure clicks, pointer travel, and scroll distance for representative tasks in a rendered browser. Record and fix actionable findings, and distinguish mocked checks from live provider and file verification.'
+  from: 'Owner request in this chat: deep dive Slide Deck Pipeline and PowerPoint Templates for blockers, edge cases, usability, click distance, click numbers, and scroll distance; add to backlog.'
+  note: 'Source review found Pipeline async state overwrites, stale source context, unguarded stage navigation and unclear prerequisite failures; fix and verify edits during generation and apply. PowerPoint Templates review found account-switch state leakage, unsaved definition loss on replacement or navigation, reuse of saved sources without reflecting unsaved role edits, image-only limitations, no manual classification fallback, and expensive library listing. Record rendered click and scroll measurements separately from source review and live provider verification.'
+  question: null
 - id: 'DISCUSSIONS-REPLY-USABILITY-AUDIT'
   state: 'actionable'
   kind: 'bug'

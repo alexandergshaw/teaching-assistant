@@ -30,6 +30,7 @@ import type { Database } from "@/lib/supabase/types";
 import { checkWireBudget, formatMB, maxFileBytesForWireBudget, UPLOAD_WIRE_BUDGET_BYTES } from "@/lib/upload-budget";
 import { ZipCapError } from "@/lib/zip-caps";
 import { assertPptxContainer } from "@/lib/decks/pptx-validate";
+import { inventorySlides } from "@/lib/powerpoint-template-library/inventory";
 import { parseOfficeParagraphs } from "@/lib/office-edit";
 import {
   fillOfficeTemplate,
@@ -111,7 +112,8 @@ export async function listDeckTemplateFilesAction(): Promise<
 export async function uploadDeckTemplateFileAction(
   name: string,
   fileName: string,
-  base64: string
+  base64: string,
+  allowTextlessForReview = false
 ): Promise<{ template: DeckTemplateFileMeta } | { error: string }> {
   try {
     const user = await requireUser();
@@ -126,11 +128,12 @@ export async function uploadDeckTemplateFileAction(
     // sha256 and the insert, so a rejected file is cheap and never persisted.
     await assertPptxContainer(buffer);
     const paragraphs = await parseOfficeParagraphs("pptx", buffer);
-    if (paragraphs.length === 0) {
+    if (paragraphs.length === 0 && allowTextlessForReview !== true) {
       return {
         error: "Could not read any slide text from that file. Upload a PowerPoint .pptx with at least one slide of text.",
       };
     }
+    if (paragraphs.length === 0) await inventorySlides(buffer);
 
     const templateSha256 = createHash("sha256").update(buffer).digest("hex");
     const row: DeckTemplateFilesTable["Insert"] = {

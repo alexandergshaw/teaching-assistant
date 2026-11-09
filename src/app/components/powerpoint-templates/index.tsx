@@ -31,11 +31,12 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
   const [sourceId, setSourceId] = useState("");
   const [savedId, setSavedId] = useState<string | null>(null);
   const [definition, setDefinition] = useState<LibraryDefinition | null>(null);
+  const [manualReview, setManualReview] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<TemplateFailure | null>(null);
   const [status, setStatus] = useState("");
   const [dirty, setDirty] = useState(false);
-  const [pending, setPending] = useState<{ kind: "file"; file: File } | { kind: "open"; id: string } | { kind: "analyze" } | null>(null);
+  const [pending, setPending] = useState<{ kind: "file"; file: File } | { kind: "open"; id: string } | { kind: "analyze"; mode: "auto" | "manual" } | null>(null);
   const alive = useRef(true);
   const generation = useRef(0);
   const listGeneration = useRef(0);
@@ -95,7 +96,7 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
     if ("error" in result) throw result;
     return result as Exclude<T, TemplateFailure>;
   }
-  async function analyze() {
+  async function analyze(mode: "auto" | "manual" = "auto") {
     await handleOperation("analyze", async current => {
       const started = templateOperationStartedAt();
       let id = sourceId;
@@ -110,10 +111,10 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
         if (!current()) return;
         setSourceId(id);
       }
-      const result = requireSuccess(await analyzePowerPointTemplateAction(id));
+      const result = requireSuccess(await analyzePowerPointTemplateAction(id, mode));
       diagnostic("analyze", started);
       if (!current()) return;
-      setDefinition(result.definition); setSlidePage(1); setDirty(true); setStatus("Review the source slides and classifications, then save.");
+      setDefinition(result.definition); setManualReview(result.manual); setSlidePage(1); setDirty(true); setStatus(result.manual ? `${mode === "auto" ? "Automatic classification was unavailable. " : ""}Manual review: all slides start as other. Assign roles, then save. Textless slides have no image preview and cannot be filled by the positional writer.` : "Review the source slides and classifications, then save.");
     });
   }
   async function open(id: string) {
@@ -123,7 +124,7 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
       diagnostic("load", started);
       if (!current()) return;
       setSavedId(result.library.id); setSourceId(result.library.sourceFileId);
-      setName(result.library.name); setDefinition(result.library.definition); setSlidePage(1);
+      setName(result.library.name); setDefinition(result.library.definition); setManualReview(false); setSlidePage(1);
       setFile(null); setConfirmed(false); setDirty(false); setStatus("Saved library reopened.");
     });
   }
@@ -166,7 +167,7 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
   function selectFile(next: File) {
     const preserveName = !file && !sourceId && !definition && name.trim();
     generation.current++; setFile(next); setConfirmed(false); setSourceId(""); setSavedId(null);
-    setDefinition(null); setError(null); setStatus(""); setDirty(true);
+    setDefinition(null); setManualReview(false); setError(null); setStatus(""); setDirty(true);
     if (!preserveName) setName(next.name.replace(/\.pptx$/i, "").slice(0, 160));
   }
   return <div className={styles.page}>
@@ -185,9 +186,10 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
           {file && <p className={styles.helperText}>Selected: {file.name}</p>}
           {file && <FormControlLabel control={<Checkbox checked={confirmed} disabled={busy} onChange={event => setConfirmed(event.target.checked)} />} label="Use this upload as a template" />}
           {savedId && !file && <p className={styles.helperText}>Using the source saved with this library. Choose a file to start a different template.</p>}
-          <Button variant={definition ? "outlined" : "contained"} type="button" disabled={busy || (!sourceId && (!file || !confirmed)) || !name.trim()} aria-describedby={busy ? "ppt-template-status" : "ppt-analyze-reason"} onClick={() => { if (definition && dirty) setPending({ kind: "analyze" }); else void analyze(); }}>
+          <Button variant={definition ? "outlined" : "contained"} type="button" disabled={busy || (!sourceId && (!file || !confirmed)) || !name.trim()} aria-describedby={busy ? "ppt-template-status" : "ppt-analyze-reason"} onClick={() => { if (definition && dirty) setPending({ kind: "analyze", mode: "auto" }); else void analyze(); }}>
             {savedId ? "Reanalyze saved source" : sourceId ? "Retry analysis" : "Upload and analyze"}
           </Button>
+          <Button variant="outlined" type="button" disabled={busy || (!sourceId && (!file || !confirmed)) || !name.trim()} onClick={() => { if (definition && dirty) setPending({ kind: "analyze", mode: "manual" }); else void analyze("manual"); }}>Classify manually</Button>
           <p id="ppt-analyze-reason" className={styles.helperText}>{sourceId ? "Reanalysis uses the existing source and replaces the current classifications." : "To analyze, choose a .pptx file, confirm it as a template, and enter a name."}</p>
         </div>
       </section>
@@ -210,14 +212,15 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
           <div><h2 id="ppt-review-heading" className={styles.panelTitle}>Review source slides</h2><p className={styles.panelDescription}>Assign a role to each slide. Saving updates the library; the manifest download creates a local JSON copy.</p></div>
           <p className={styles.roleSummary}>Absent roles: {absentRoles(definition).join(", ") || "none"}.</p>
         </header>
+        {manualReview && <Alert severity="info">All slides started as other for manual review. Assign the roles you want before saving.</Alert>}
         <p className={styles.helperText}>Showing slides {(slidePage - 1) * 6 + 1}-{Math.min(slidePage * 6, definition.slides.length)} of {definition.slides.length}.</p>
         <div className={styles.slideGrid}>{sourceSlidePage(definition.slides, slidePage).map(slide => <article className={styles.slideCard} key={slide.id}>
           <div className={styles.slideHeading}><h3>Source slide {slide.ordinal}</h3><small>{slide.id}</small></div>
           <pre className={styles.slideText}>{slide.text || "No extracted text. Visual content has not been classified."}</pre>
-          <TextField select fullWidth label={`Role for source slide ${slide.ordinal}`} slotProps={{ select: { "aria-describedby": busy ? "ppt-template-status" : !slide.text.trim() ? `ppt-role-reason-${slide.ordinal}` : undefined } }} disabled={busy || !slide.text.trim()} value={slide.role} onChange={event => {
+          <TextField select fullWidth label={`Role for source slide ${slide.ordinal}`} slotProps={{ select: { "aria-describedby": busy ? "ppt-template-status" : !slide.text.trim() ? `ppt-role-reason-${slide.ordinal}` : undefined } }} disabled={busy} value={slide.role} onChange={event => {
             setDefinition(previous => previous && ({ ...previous, slides: previous.slides.map(item => item.id === slide.id ? { ...item, role: event.target.value as typeof item.role } : item) })); setDirty(true);
           }}>{SLIDE_ROLES.map(role => <MenuItem key={role} value={role}>{role}</MenuItem>)}</TextField>
-          {!slide.text.trim() && <p id={`ppt-role-reason-${slide.ordinal}`} className={styles.helperText}>This slide has no extracted text, so its role cannot be classified here.</p>}
+          {!slide.text.trim() && <p id={`ppt-role-reason-${slide.ordinal}`} className={styles.helperText}>No text or image preview is available. You may assign a role, but this slide cannot be filled by the positional writer.</p>}
         </article>)}</div>
         {definition.slides.length > 6 && <Pagination count={Math.ceil(definition.slides.length / 6)} page={slidePage} onChange={(_, page) => setSlidePage(page)} disabled={busy} aria-label="Source slide pages" />}
         <div className={styles.actionRow}>
@@ -243,6 +246,6 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
     </div>
     <p id="ppt-template-status" className={styles.status} role="status" aria-live="polite">{busy ? "Working..." : status}</p>
     {error && <p className={styles.error} role="alert">{error.error} ({error.code})</p>}
-    <Dialog open={Boolean(pending)} onClose={() => setPending(null)} aria-labelledby="ppt-discard-title"><DialogTitle id="ppt-discard-title">Discard unsaved changes?</DialogTitle><DialogContent>The current template name and slide classifications have unsaved changes.</DialogContent><DialogActions><Button onClick={() => setPending(null)}>Cancel</Button><Button variant="contained" onClick={() => { const next = pending; setPending(null); if (!next) return; if (next.kind === "file") selectFile(next.file); else if (next.kind === "open") void open(next.id); else void analyze(); }}>Discard changes</Button></DialogActions></Dialog>
+    <Dialog open={Boolean(pending)} onClose={() => setPending(null)} aria-labelledby="ppt-discard-title"><DialogTitle id="ppt-discard-title">Discard unsaved changes?</DialogTitle><DialogContent>The current template name and slide classifications have unsaved changes.</DialogContent><DialogActions><Button onClick={() => setPending(null)}>Cancel</Button><Button variant="contained" onClick={() => { const next = pending; setPending(null); if (!next) return; if (next.kind === "file") selectFile(next.file); else if (next.kind === "open") void open(next.id); else void analyze(next.mode); }}>Discard changes</Button></DialogActions></Dialog>
   </div>;
 }

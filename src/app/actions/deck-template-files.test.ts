@@ -183,6 +183,11 @@ beforeEach(() => {
 });
 
 describe("uploadDeckTemplateFileAction", () => {
+  it("keeps ordinary template uploads text-required unless review is explicitly enabled", async () => {
+    const textless = await realPptxBase64({ "ppt/slides/slide1.xml": slideXml("") });
+    expect(await uploadDeckTemplateFileAction("T", "deck.pptx", textless)).toHaveProperty("error", expect.stringContaining("at least one slide of text"));
+    expect(h.state.inserted).toHaveLength(0);
+  });
   it("accepts a genuine .pptx and persists it under the session user", async () => {
     const result = await uploadDeckTemplateFileAction("My template", "deck.pptx", await realPptxBase64());
     expect("template" in result).toBe(true);

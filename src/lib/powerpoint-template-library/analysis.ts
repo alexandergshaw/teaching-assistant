@@ -10,8 +10,6 @@ export function validateAssignments(raw: unknown, source: SourceSlide[]): Librar
     if (!row || typeof row !== "object") throw new TemplateError("PPT_MODEL");
     const { id, role } = row as { id?: unknown; role?: unknown };
     if (typeof id !== "string" || !source.some(s => s.id === id) || roles.has(id) || !SLIDE_ROLES.includes(role as SlideRole)) throw new TemplateError("PPT_MODEL");
-    const original = source.find(s => s.id === id)!;
-    if (!original.text.trim() && role !== "other") throw new TemplateError("PPT_MODEL");
     roles.set(id, role as SlideRole);
   }
   return { version: 1, slides: source.map(slide => ({ ...slide, role: roles.get(slide.id)! })) };
@@ -26,6 +24,8 @@ export async function analyzeSlides(source: SourceSlide[]): Promise<LibraryDefin
       generationConfig: { responseMimeType: "application/json", maxOutputTokens: 10000 },
     });
     if (!result.ok || result.text.length > 24000) throw new TemplateError("PPT_MODEL");
-    return validateAssignments(JSON.parse(result.text), source);
+    const definition = validateAssignments(JSON.parse(result.text), source);
+    if (definition.slides.some((slide) => !slide.text.trim() && slide.role !== "other")) throw new TemplateError("PPT_MODEL");
+    return definition;
   } catch { throw new TemplateError("PPT_MODEL"); }
 }

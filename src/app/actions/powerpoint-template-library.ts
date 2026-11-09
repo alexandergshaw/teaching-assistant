@@ -14,23 +14,33 @@ export async function uploadPowerPointTemplateAction(name: string, fileName: str
   try {
     libraryName(name);
     if (confirmed !== true || typeof fileName !== "string" || fileName.length > 240 || !/\.pptx$/i.test(fileName)) throw new TemplateError("PPT_INVALID");
-    const inventory = await inventorySlides(decodeSource(base64));
-    if (!inventory.some(slide => slide.text.trim())) throw new TemplateError("PPT_INVALID");
-    const uploaded = await uploadDeckTemplateFileAction(name, fileName, base64);
+    await inventorySlides(decodeSource(base64));
+    const uploaded = await uploadDeckTemplateFileAction(name, fileName, base64, true);
     if ("error" in uploaded) throw new TemplateError("PPT_STORAGE");
     await getSource(user.id, uploaded.template.id);
     return { sourceFileId: uploaded.template.id };
   } catch (error) { return failure(error, "PPT_STORAGE"); }
 }
-export async function analyzePowerPointTemplateAction(sourceFileId: string) {
+export async function analyzePowerPointTemplateAction(sourceFileId: string, mode: "auto" | "manual" = "auto") {
   let user;
   try { user = await requireUser(); } catch { return failure(null, "PPT_AUTH"); }
   try {
     const source = await getSource(user.id, sourceFileId);
     const inventory = await inventorySlides(decodeSource(source.content));
-    const definition = await analyzeSlides(inventory);
+    if (mode !== "auto" && mode !== "manual") throw new TemplateError("PPT_INVALID");
+    let manual = mode === "manual" || !inventory.some((slide) => slide.text.trim());
+    let definition: LibraryDefinition;
+    if (manual) definition = { version: 1, slides: inventory.map((slide) => ({ ...slide, role: "other" })) };
+    else {
+      try { definition = await analyzeSlides(inventory); }
+      catch (error) {
+        if (!(error instanceof TemplateError) || (error.code !== "PPT_MODEL" && error.code !== "PPT_LIMIT")) throw error;
+        manual = true;
+        definition = { version: 1, slides: inventory.map((slide) => ({ ...slide, role: "other" })) };
+      }
+    }
     await getSource(user.id, sourceFileId);
-    return { definition };
+    return { definition, manual };
   } catch (error) { return failure(error, "PPT_STORAGE"); }
 }
 export async function listPowerPointTemplateLibrariesAction() {

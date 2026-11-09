@@ -52,6 +52,13 @@ describe("PowerPoint template UI wiring (source, not rendering)", () => {
     expect(source).toContain('classifications do not control slide mapping');
     expect(source).toContain('Slides need editable text');
   });
+  it("offers manual classification and states textless fill limits", () => {
+    expect(source).toContain('Classify manually');
+    expect(source).toContain('analyzePowerPointTemplateAction(id, mode)');
+    expect(source).toContain('Automatic classification was unavailable.');
+    expect(source).toContain('You may assign a role, but this slide cannot be filled');
+    expect(source).not.toContain('disabled={busy || !slide.text.trim()}');
+  });
   it("gates account-owned state and protects unsaved edits before replacement", () => {
     expect(source).toContain('if (loading) return');
     expect(source).toContain('if (!user) return');

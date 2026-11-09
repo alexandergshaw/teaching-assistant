@@ -158,7 +158,10 @@ describe("authenticated PowerPoint library flow", () => {
   it("keeps previous source and definition on provider/validation/save failures with fixed private-safe errors", async () => {
     const own = await saved(); const original = JSON.stringify(h.tables);
     h.model.mockResolvedValue({ ok: true, text: '{"slides":[]}' });
-    expect(await analyzePowerPointTemplateAction(sourceId)).toMatchObject({ code: "PPT_MODEL" });
+    const fallback = await analyzePowerPointTemplateAction(sourceId);
+    expect(fallback).toMatchObject({ manual: true });
+    if ("error" in fallback) throw fallback;
+    expect(fallback.definition.slides.every((slide) => slide.role === "other")).toBe(true);
     const invalid = { ...own.definition, slides: own.definition.slides.slice(1) };
     expect(await savePowerPointTemplateLibraryAction(own.id, sourceId, "Bad", invalid)).toMatchObject({ code: "PPT_MODEL" });
     h.failSave = true;
@@ -168,6 +171,36 @@ describe("authenticated PowerPoint library flow", () => {
     h.failSave = false;
     expect(await savePowerPointTemplateLibraryAction(own.id, sourceId, "Retry", own.definition)).toHaveProperty("library");
   });
+  it("allows manual roles on textless source slides and skips the model when requested", async () => {
+    h.model.mockClear();
+    const draft = await analyzePowerPointTemplateAction(sourceId, "manual");
+    if ("error" in draft) throw draft;
+    expect(draft.manual).toBe(true);
+    expect(h.model).not.toHaveBeenCalled();
+    const edited = { ...draft.definition, slides: draft.definition.slides.map((slide) => !slide.text ? { ...slide, role: "closing" as const } : slide) };
+    const save = await savePowerPointTemplateLibraryAction(null, sourceId, "Manual", edited);
+    if ("error" in save) throw save;
+    const reopened = await getPowerPointTemplateLibraryAction(save.library.id);
+    if ("error" in reopened) throw reopened;
+    expect(reopened.library.definition.slides.find((slide) => !slide.text)?.role).toBe("closing");
+  });
+  it("uploads a wholly textless deck for manual review but does not claim it can be filled", async () => {
+    const bytes = await pptFixture(["", ""]);
+    const uploaded = await uploadPowerPointTemplateAction("Image deck", "image.pptx", bytes.toString("base64"), true);
+    if ("error" in uploaded) throw uploaded;
+    h.model.mockClear();
+    const draft = await analyzePowerPointTemplateAction(uploaded.sourceFileId);
+    if ("error" in draft) throw draft;
+    expect(draft.manual).toBe(true);
+    expect(h.model).not.toHaveBeenCalled();
+    const edited = { ...draft.definition, slides: draft.definition.slides.map((slide, index) => ({ ...slide, role: index ? "closing" as const : "title" as const })) };
+    const saved = await savePowerPointTemplateLibraryAction(null, uploaded.sourceFileId, "Image deck", edited);
+    if ("error" in saved) throw saved;
+    const reopened = await getPowerPointTemplateLibraryAction(saved.library.id);
+    if ("error" in reopened) throw reopened;
+    expect(reopened.library.definition.slides.map((slide) => slide.role)).toEqual(["title", "closing"]);
+    expect(await fillDeckTemplateFileAction(uploaded.sourceFileId, { presentationTitle: "Lesson", slides: [{ title: "Title", bullets: [] }] })).toHaveProperty("error");
+  });
   it("rechecks ownership after model calls", async () => {
     h.model.mockImplementation(async () => { h.tables.deck_template_files = []; return { ok: true, text: JSON.stringify({ slides: [
       { id: "ppt/slides/slide4.xml", role: "other" }, { id: "ppt/slides/slide3.xml", role: "content" },
@@ -175,6 +208,10 @@ describe("authenticated PowerPoint library flow", () => {
     ] }) }; });
     expect(await analyzePowerPointTemplateAction(sourceId)).toMatchObject({ code: "PPT_NOT_FOUND" });
     expect(h.tables.powerpoint_template_libraries).toEqual([]);
+  });
+  it("rechecks ownership even when the model fails into manual review", async () => {
+    h.model.mockImplementation(async () => { h.tables.deck_template_files = []; return { ok: false }; });
+    expect(await analyzePowerPointTemplateAction(sourceId)).toMatchObject({ code: "PPT_NOT_FOUND" });
   });
   it("requires RLS and a composite owner-source constraint in migration code", () => {
     const sql = readFileSync("supabase/migrations/20261030000000_powerpoint_template_libraries.sql", "utf8");

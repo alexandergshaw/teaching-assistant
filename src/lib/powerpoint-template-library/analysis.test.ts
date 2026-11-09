@@ -13,11 +13,16 @@ describe("closed classification boundary", () => {
     expect(definition.slides[0].role).toBe("title");
     expect(absentRoles(definition)).toEqual(["section-divider", "content", "closing"]);
   });
-  it("rejects duplicates, missing/foreign IDs, unknown roles and invented textless roles", () => {
+  it("rejects duplicates, missing/foreign IDs and unknown roles", () => {
     for (const raw of [null, {}, { slides: [] }, { slides: [valid.slides[0], valid.slides[0]] },
       { slides: [{ id: "foreign", role: "title" }, valid.slides[1]] },
-      { slides: [{ ...valid.slides[0], role: "hero" }, valid.slides[1]] },
-      { slides: [valid.slides[0], { ...valid.slides[1], role: "closing" }] }]) expect(() => validateAssignments(raw, source)).toThrow("PPT_MODEL");
+      { slides: [{ ...valid.slides[0], role: "hero" }, valid.slides[1]] }]) expect(() => validateAssignments(raw, source)).toThrow("PPT_MODEL");
+  });
+  it("accepts instructor-set roles on textless slides but rejects model inventions", async () => {
+    const edited = { slides: [valid.slides[0], { ...valid.slides[1], role: "closing" }] };
+    expect(validateAssignments(edited, source).slides[1].role).toBe("closing");
+    h.call.mockResolvedValue({ ok: true, text: JSON.stringify(edited) });
+    await expect(analyzeSlides(source)).rejects.toMatchObject({ code: "PPT_MODEL" });
   });
   it("uses one model call with bounded output and quoted source", async () => {
     h.call.mockResolvedValue({ ok: true, text: JSON.stringify(valid) });

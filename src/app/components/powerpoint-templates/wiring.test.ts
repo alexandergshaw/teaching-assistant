@@ -3,6 +3,12 @@ import { readFileSync } from "node:fs";
 import { stripComments } from "@/app/components/ui/modalAdoptionSourceScan";
 describe("PowerPoint template UI wiring (source, not rendering)", () => {
   const source = stripComments(readFileSync("src/app/components/powerpoint-templates/index.tsx", "utf8"));
+  it("offers searchable paged library results without changing the open action", () => {
+    expect(source).toContain('label="Search saved libraries"');
+    expect(source).toContain("filterLibraryPage(libraries, libraryQuery, libraryPage)");
+    expect(source).toContain('aria-label="Saved library pages"');
+    expect(source).toContain('setPending({ kind: "open", id: library.id })');
+  });
   it("exposes upload intent, analysis, editing, saving, reopening, reuse and both downloads", () => {
     for (const operation of ["uploadPowerPointTemplateAction", "analyzePowerPointTemplateAction", "savePowerPointTemplateLibraryAction",
       "getPowerPointTemplateLibraryAction", "listPowerPointTemplateLibrariesAction", "reusePowerPointTemplateLibraryAction", "downloadPowerPointTemplateLibraryAction"]) expect(source).toContain(operation);

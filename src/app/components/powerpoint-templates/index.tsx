@@ -7,7 +7,7 @@ import { uploadPowerPointTemplateAction, analyzePowerPointTemplateAction, listPo
   downloadPowerPointTemplateLibraryAction } from "@/app/actions/powerpoint-template-library";
 import { SLIDE_ROLES, absentRoles, failure, type LibraryDefinition, type LibraryMeta, type TemplateFailure } from "@/lib/powerpoint-template-library/types";
 import { checkFileWireBudget } from "@/lib/upload-budget";
-import { recordPowerPointDiagnostic as diagnostic, templateOperationStartedAt, handoffTemplate, readTemplateFile, downloadTemplate, sourceSlidePage } from "./panel-logic";
+import { recordPowerPointDiagnostic as diagnostic, templateOperationStartedAt, handoffTemplate, readTemplateFile, downloadTemplate, filterLibraryPage, libraryDisplayName, sourceSlidePage } from "./panel-logic";
 import TabHeader from "../TabHeader";
 import styles from "../template-tools.module.css";
 import { useSupabase } from "@/context/SupabaseProvider";
@@ -21,6 +21,9 @@ export default function PowerPointTemplates({ onUseInSlideDeckCreation, active =
 
 function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUseInSlideDeckCreation?: () => void; active: boolean }) {
   const [libraries, setLibraries] = useState<LibraryMeta[]>([]);
+  const [libraryQuery, setLibraryQuery] = useState("");
+  const [libraryPage, setLibraryPage] = useState(1);
+  const libraryResults = filterLibraryPage(libraries, libraryQuery, libraryPage);
   const [librariesLoading, setLibrariesLoading] = useState(true);
   const [librariesLoaded, setLibrariesLoaded] = useState(false);
   const [librariesError, setLibrariesError] = useState("");
@@ -202,9 +205,13 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
         {librariesLoading && <p className={styles.helperText} role="status">Loading saved libraries...</p>}
         {librariesError && <Alert severity="error">{librariesError}</Alert>}
         {!librariesLoading && librariesLoaded && !libraries.length && <p className={styles.emptyState}>No saved libraries yet.</p>}
-        {!!libraries.length && <ul className={styles.libraryList}>{libraries.map(library => <li key={library.id}>
-          <Button variant="text" fullWidth type="button" disabled={busy} aria-describedby={busy ? "ppt-template-status" : undefined} onClick={() => { if (dirty) setPending({ kind: "open", id: library.id }); else void open(library.id); }}>{library.name} - Open</Button>
+        {!!libraries.length && <TextField label="Search saved libraries" value={libraryQuery} onChange={(event) => { setLibraryQuery(event.target.value); setLibraryPage(1); }} size="small" fullWidth />}
+        {!!libraries.length && <p className={styles.helperText} role="status">{libraryResults.matches} matching {libraryResults.matches === 1 ? "library" : "libraries"}.</p>}
+        {!!libraries.length && libraryResults.matches === 0 && <p className={styles.emptyState}>No libraries match this search.</p>}
+        {!!libraryResults.items.length && <ul className={styles.libraryList}>{libraryResults.items.map(library => <li key={library.id}>
+          <Button variant="text" fullWidth type="button" disabled={busy} aria-describedby={busy ? "ppt-template-status" : undefined} onClick={() => { if (dirty) setPending({ kind: "open", id: library.id }); else void open(library.id); }}>{libraryDisplayName(library, libraries)} - Open</Button>
         </li>)}</ul>}
+        {libraryResults.pages > 1 && <Pagination count={libraryResults.pages} page={libraryResults.current} onChange={(_, page) => setLibraryPage(page)} disabled={busy} aria-label="Saved library pages" />}
       </section>
 
       {definition && <section className={`${styles.panel} ${styles.reviewPanel}`} aria-labelledby="ppt-review-heading">

@@ -1,6 +1,16 @@
 import { resetSessionDiagnosticLogForTests, readSessionDiagnosticLogState } from "@/lib/session-diagnostic-log";
 import { describe, it, expect, vi } from "vitest";
-import { handoffTemplate, SELECTED_TEMPLATE_KEY, SELECTED_ROLE_LIBRARY_KEY, recordPowerPointDiagnostic, sourceSlidePage } from "./panel-logic";
+import { filterLibraryPage, libraryDisplayName, handoffTemplate, SELECTED_TEMPLATE_KEY, SELECTED_ROLE_LIBRARY_KEY, recordPowerPointDiagnostic, sourceSlidePage } from "./panel-logic";
+it("filters names without conflating duplicate library identities and clamps the page after a refresh", () => {
+  const entries = Array.from({ length: 13 }, (_, i) => ({ id: String(i), name: i < 2 ? "Résumé" : `Class ${i}` }));
+  expect(filterLibraryPage(entries, " re\u0301sume\u0301 ", 1).items.map((item) => item.id)).toEqual(["0", "1"]);
+  expect(filterLibraryPage(entries, "CLASS", 2).items.map((item) => item.id)).toEqual(["12"]);
+  expect(filterLibraryPage(entries.slice(0, 2), "", 9)).toMatchObject({ matches: 2, current: 1, pages: 1 });
+  expect(filterLibraryPage(entries, "missing", 1)).toMatchObject({ matches: 0, items: [] });
+  expect(libraryDisplayName(entries[0], entries)).toBe("Résumé (0)");
+  expect(libraryDisplayName(entries[1], entries)).toBe("Résumé (1)");
+  expect(libraryDisplayName(entries[2], entries)).toBe("Class 2");
+});
 it("pages all source slides in order without dropping the last partial page", () => {
   const slides = Array.from({ length: 14 }, (_, i) => i + 1);
   expect(sourceSlidePage(slides, 1)).toEqual([1, 2, 3, 4, 5, 6]);

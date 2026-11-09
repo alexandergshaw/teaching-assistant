@@ -1,3 +1,15 @@
+- id: 'DISCUSSIONS-REPLY-USABILITY-AUDIT'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'discussion-reply-grading'
+  title: 'Remove barriers and unsafe assumptions in the Discussions reply workflow.'
+  owns: ['src/app/components/discussions/', 'src/lib/discussions-tool.ts', 'src/app/actions/discussions-tool.ts']
+  verify: 'npm.cmd run test:paths src/lib/discussions-tool.test.ts src/app/components/discussions/discussions-tool.wiring.test.ts'
+  blocked_by: []
+  instrument: 'Test pasted and model-generated templates with missing placeholders and fixed names; roster duplicates, CSV and columns; state loss on initial auth and reload; copy feedback and search with large rosters; and inspect actual mobile/desktop keyboard, clicks and scrolling. Verify actual provider output separately.'
+  from: 'Owner requested a deep dive into blockers, usability, clicks and scrolling for the Discussions tool.'
+  note: 'Candidate warns about duplicates and possible columns, requires review of a personalized template preview and rejects templates without a name token or with an obvious fixed greeting. Review cannot detect all hardcoded names or claims about student posts. Other residuals include limited roster import, always-expanded model prompt, potentially lost work on reload or initial auth transition, and distant copy feedback. Rendered and model-provider verification remain required.'
+  question: null
 - id: 'DISCUSSIONS-GENERIC-ROSTER-REPLIES'
   state: 'actionable'
   kind: 'feature'

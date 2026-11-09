@@ -35,6 +35,7 @@ import { useLmsSubmissionPicker } from "./useLmsSubmissionPicker";
 import { LMS_ASSIGNMENT_COPY, LMS_COURSE_COPY, LMS_INSTITUTION_COPY, lmsFieldIndication } from "./lmsPickerState";
 import { SubmissionDrop } from "./SubmissionDrop";
 import type { DirectFileOutcome } from "./chatDirectFileIntake";
+import type { ReviewedPastedDiscussion } from "@/lib/grade/reviewed-pasted-discussion";
 import type { SubmitOutcome } from "./useContinuousGradingRun";
 import { submitOneFileGroup } from "./submissionDropRoutes";
 import { dispatchComposite } from "./compositeSubmission";
@@ -74,6 +75,7 @@ export interface ChatComposerProps {
   readonly onSubmitFiles: (files: File[], label?: string) => Promise<DirectFileOutcome[]>;
   readonly onSubmitUrl: (url: string, label?: string) => Promise<SubmitOutcome>;
   readonly onSubmitComposite: (student: string, parts: CompositePartInput[]) => Promise<SubmitOutcome>;
+  readonly onSubmitReviewed?: (student: string, content: string, discussion: ReviewedPastedDiscussion) => Promise<SubmitOutcome>;
 }
 
 // Tray row text for one pending part. Pure and short: the tray shows what was
@@ -84,7 +86,7 @@ function describePart(part: CompositePartInput): string {
   return `URL: ${part.url}`;
 }
 
-export function ChatComposer({ disabled, sharedLatch, reviewFiles = false, getSessionEpoch, sessionEpoch, onSubmitFiles, onSubmitUrl, onSubmitComposite }: ChatComposerProps) {
+export function ChatComposer({ disabled, sharedLatch, reviewFiles = false, getSessionEpoch, sessionEpoch, onSubmitFiles, onSubmitUrl, onSubmitComposite, onSubmitReviewed }: ChatComposerProps) {
   const [mode, setMode] = useState<InputMode>(() => loadInputMode());
   const [text, setText] = useState("");
   const [label, setLabel] = useState("");
@@ -299,7 +301,7 @@ export function ChatComposer({ disabled, sharedLatch, reviewFiles = false, getSe
     <div className={chatStyles.composer} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
       <SubmissionDrop disabled={controlsDisabled} sharedLatch={intakeLatch} reviewFiles={reviewFiles} getSessionEpoch={getSessionEpoch} sessionEpoch={sessionEpoch} onMany={(files) => onSubmitFiles(files)}
         onOne={(name, files) => submitOneFileGroup(name, files, onSubmitFiles, onSubmitComposite)}
-        onText={(name, content) => onSubmitComposite(name, [{ kind: "text", content }])} />
+        onText={(name, content) => onSubmitComposite(name, [{ kind: "text", content }])} onReviewed={onSubmitReviewed} />
       {dropNotice && <span role="status">Drop files in the submission area above.</span>}
       <Accordion>
         <AccordionSummary expandIcon={<span aria-hidden="true">+</span>}>More submission options</AccordionSummary>

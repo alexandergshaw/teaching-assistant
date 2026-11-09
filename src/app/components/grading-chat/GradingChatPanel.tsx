@@ -1,4 +1,5 @@
 "use client";
+import type { ReviewedPastedDiscussion } from "@/lib/grade/reviewed-pasted-discussion";
 
 // GRADING-CHAT wave 1 (docs/grading-chat-waves.md section 4a, N4a). The new
 // sixth Grading sub-tab: instructions + rubric set once (AC-17), then a
@@ -631,6 +632,14 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       return outcome;
     });
 
+  const handleSubmitReviewed = (student: string, content: string, reviewedDiscussion: ReviewedPastedDiscussion) =>
+    withPreparing(async () => {
+      if (!(await ensureSession())) return { kind: "refused" as const, reason: sessionRefusalRef.current ?? "Session setup was not completed." };
+      const outcome = await driver.submit({ kind: "text", label: student, content, reviewedDiscussion });
+      setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
+      return outcome;
+    });
+
   // Clear controls: uncommitted draft text only, so no confirm. Pre-lock only;
   // the setup fields do not exist once the session is ready.
   const handleClearInstructions = () => setInstructions("");
@@ -935,6 +944,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           sessionEpoch={visibleDropEpoch}
           onSubmitText={handleSubmitText} onSubmitFiles={handleSubmitFiles} onSubmitUrl={handleSubmitUrl}
           onSubmitComposite={handleSubmitComposite}
+          onSubmitReviewed={handleSubmitReviewed}
         />
       </div>
     </div>

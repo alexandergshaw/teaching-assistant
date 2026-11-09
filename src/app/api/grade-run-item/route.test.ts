@@ -187,6 +187,8 @@ import { gradeEntries } from "@/lib/grade/engine";
 import { raceWithTimeout } from "@/lib/bounded-race";
 import { resolveEntryLinks } from "@/lib/grade/extraction";
 import { POST } from "./route";
+import { ITEM_REQUEST_BYTE_BUDGET, estimateNeededWireBytes } from "@/app/components/grading/incrementalRunPlan";
+import { getGeminiMaxCharsPerSubmission } from "@/lib/gemini";
 
 const mockRequireUser = vi.mocked(requireAppOwner);
 const mockGradeEntries = vi.mocked(gradeEntries);
@@ -218,6 +220,54 @@ beforeEach(() => {
 });
 
 describe("POST /api/grade-run-item (behavioral, mocked seam)", () => {
+  it("passes explicit discussion axes to the grading engine", async () => {
+    const discussionAxes = { initialPostContent: "=== INITIAL POST ===\nInitial work", replyContent: "A reply", replyCount: 1 };
+    mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
+    mockRaceWithTimeout.mockImplementationOnce(async (work) => ({ kind: "settled", value: await work } as never));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, content: `${discussionAxes.initialPostContent}\n\n${discussionAxes.replyContent}`, discussionAxes } }) as any);
+    expect(res.status).toBe(200);
+    expect(mockGradeEntries.mock.calls[0][0][0].discussionAxes).toEqual(discussionAxes);
+  });
+
+  it("rejects axes from a different displayed submission", async () => {
+    const discussionAxes = { initialPostContent: "=== INITIAL POST ===\nOther student", replyContent: "", replyCount: 0 };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, discussionAxes } }) as any);
+    expect(res.status).toBe(400);
+    expect(mockGradeEntries).not.toHaveBeenCalled();
+  });
+
+  it.each(["=== INITIAL POST ===\n", `=== INITIAL POST ===\n${"x".repeat(getGeminiMaxCharsPerSubmission())}`])("rejects empty or over-engine-limit initial evidence", async (initialPostContent) => {
+    const discussionAxes = { initialPostContent, replyContent: "", replyCount: 0 };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, content: initialPostContent, discussionAxes } }) as any);
+    expect(res.status).toBe(400);
+    expect(mockGradeEntries).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    null,
+    { initialPostContent: "Initial", replyContent: "Reply", replyCount: 0 },
+    { initialPostContent: "Initial", replyContent: "", replyCount: 1 },
+    { initialPostContent: "Initial", replyContent: "Reply", replyCount: -1 },
+    { initialPostContent: "Initial", replyContent: "Reply", replyCount: 1.5 },
+  ])("rejects malformed discussion axes before grading: %j", async (discussionAxes) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, discussionAxes } }) as any);
+    expect(res.status).toBe(400);
+    expect(mockGradeEntries).not.toHaveBeenCalled();
+  });
+
+  it("includes axis text in the entry estimate and rejects an oversized wire request", async () => {
+    const discussionAxes = { initialPostContent: `=== INITIAL POST ===\n${"文".repeat(Math.ceil(ITEM_REQUEST_BYTE_BUDGET / 3))}`, replyContent: "", replyCount: 0 };
+    const entry = { ...VALID_BODY.entry, content: discussionAxes.initialPostContent, discussionAxes };
+    expect(estimateNeededWireBytes(entry)).toBeGreaterThan(ITEM_REQUEST_BYTE_BUDGET);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await POST(jsonRequest({ ...VALID_BODY, entry }) as any);
+    expect(res.status).toBe(400);
+    expect(mockGradeEntries).not.toHaveBeenCalled();
+  });
   it("401s before reading the body when requireUser rejects", async () => {
     mockRequireUser.mockRejectedValueOnce(new Error("not signed in"));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -18,6 +18,8 @@
 import type { StudentSubmissionEntry, SubmissionZipClassification, SubmittedFileInfo } from "@/lib/grade/types";
 import { assignUnclaimedLabel } from "@/lib/grade/utils";
 import type { VideoFailureClass } from "@/lib/grade/video-failure";
+import { buildReviewedPastedDiscussion, type ReviewedPastedDiscussion } from "@/lib/grade/reviewed-pasted-discussion";
+import { getGeminiMaxCharsPerSubmission } from "@/lib/gemini";
 
 /** The owner's "text submissions, zip submissions, url submissions, other
  * file submissions" taxonomy. `file` covers a single supported file OR a
@@ -25,7 +27,7 @@ import type { VideoFailureClass } from "@/lib/grade/video-failure";
  * server-side by extension (N2), so the composer needs one file control, not
  * two. */
 export type ChatSubmissionInput =
-  | { readonly kind: "text"; readonly label?: string; readonly content: string }
+  | { readonly kind: "text"; readonly label?: string; readonly content: string; readonly reviewedDiscussion?: ReviewedPastedDiscussion }
   | { readonly kind: "file"; readonly file: File; readonly label?: string }
   | { readonly kind: "url"; readonly url: string; readonly label?: string }
   | { readonly kind: "composite"; readonly student: string; readonly parts: readonly CompositePartInput[] }
@@ -141,6 +143,11 @@ export function buildTextEntry(input: { readonly label?: string; readonly conten
     mergedFileCount: 0,
     submittedFiles: [],
   };
+}
+
+export function buildReviewedTextEntry(input: { readonly label?: string; readonly reviewedDiscussion: ReviewedPastedDiscussion }, ordinal: number): StudentSubmissionEntry | null {
+  const reviewed = buildReviewedPastedDiscussion(input.reviewedDiscussion, getGeminiMaxCharsPerSubmission());
+  return reviewed.ok ? { ...buildTextEntry({ label: input.label, content: reviewed.content }, ordinal), discussionAxes: reviewed.discussionAxes } : null;
 }
 
 const COMPOSITE_PART_SEPARATOR = "\n\n---\n\n";

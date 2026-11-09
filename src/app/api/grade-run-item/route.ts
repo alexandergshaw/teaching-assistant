@@ -6,13 +6,14 @@ import { requireAppOwner } from "@/lib/supabase/auth";
 import { normalizeProvider } from "@/lib/llm";
 import { raceWithTimeout } from "@/lib/bounded-race";
 import { gradeEntries } from "@/lib/grade/engine";
+import { discussionAxesMatchContent } from "@/lib/grade/discussion-axes-consistency";
 import { resolveEntryLinks } from "@/lib/grade/extraction";
 import { VIDEO_EXTENSIONS, VIDEO_GRADING_ENABLED } from "@/lib/grade/constants";
 import { isVideoName } from "@/lib/grade/video-grading";
 import { OMITTED_CANVAS_ATTACHMENT_MIME, UNREADABLE_CANVAS_ATTACHMENT_MIME, safeCanvasLabel } from "@/lib/canvas/omitted-video";
 import { videoFilesOf, videoRefsOwnedBy, withEntryVideos, type VideoSeamDeps } from "@/lib/grade/video-grade-seam";
 import { createGeminiFilesClient } from "@/lib/gemini-files";
-import { getGeminiApiKey, getGeminiModel } from "@/lib/gemini";
+import { getGeminiApiKey, getGeminiModel, getGeminiMaxCharsPerSubmission } from "@/lib/gemini";
 import {
   buildGradeItemDiagnostic,
   createGradeCallSink,
@@ -178,7 +179,23 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
 
   if (rawEntry.repositoryInventories !== undefined && !isSubmissionFileInventories(rawEntry.repositoryInventories)) return null;
 
+  const axes = rawEntry.discussionAxes;
+  if (axes !== undefined && (
+    !isRecord(axes) ||
+    typeof axes.initialPostContent !== "string" || axes.initialPostContent.length > MAX_CONTENT_CHARS ||
+    typeof axes.replyContent !== "string" || axes.replyContent.length > MAX_CONTENT_CHARS ||
+    typeof axes.replyCount !== "number" || !Number.isSafeInteger(axes.replyCount) || axes.replyCount < 0 ||
+    (axes.replyCount === 0) !== (axes.replyContent.trim().length === 0)
+  )) return null;
+  if (axes !== undefined && !discussionAxesMatchContent(rawEntry.content, axes as NonNullable<StudentSubmissionEntry["discussionAxes"]>)) return null;
+  if (axes !== undefined) {
+    const reviewedAxes = axes as NonNullable<StudentSubmissionEntry["discussionAxes"]>;
+    const limit = getGeminiMaxCharsPerSubmission();
+    if (rawEntry.content.length > limit || reviewedAxes.initialPostContent.length > limit || reviewedAxes.replyContent.length > limit) return null;
+  }
+
   const entry: StudentSubmissionEntry = {
+    ...(axes !== undefined ? { discussionAxes: axes as NonNullable<StudentSubmissionEntry["discussionAxes"]> } : {}),
     ...(rawEntry.repositoryInventories !== undefined ? { repositoryInventories: rawEntry.repositoryInventories as StudentSubmissionEntry["repositoryInventories"] } : {}),
     student: rawEntry.student,
     content: rawEntry.content,
@@ -196,7 +213,7 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
   };
 
   if (estimateNeededWireBytes(entry) > ITEM_REQUEST_BYTE_BUDGET) return null;
-  if (entry.submittedFiles.some(f => f.documentVisuals) && new TextEncoder().encode(JSON.stringify(body)).byteLength > ITEM_REQUEST_BYTE_BUDGET) return null;
+  if ((entry.discussionAxes || entry.submittedFiles.some(f => f.documentVisuals)) && new TextEncoder().encode(JSON.stringify(body)).byteLength > ITEM_REQUEST_BYTE_BUDGET) return null;
 
   if (typeof body.assignmentInstructions !== "string" || body.assignmentInstructions.length > MAX_INSTRUCTIONS_CHARS) {
     return null;

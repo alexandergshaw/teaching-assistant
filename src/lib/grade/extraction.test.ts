@@ -12,6 +12,7 @@ vi.mock("./repo-content", () => ({
 }));
 
 import { canvasWorkToEntry, extractSubmissions, extractStudentEntries, disambiguateCanvasEntries } from "./extraction";
+import { discussionAxesMatchContent } from "./discussion-axes-consistency";
 import { fetchGradableRepoContent } from "./repo-content";
 import type { CanvasStudentWork, DiscussionActivity, DiscussionPost } from "../canvas/discussions";
 import type { StudentSubmissionEntry } from "./types";
@@ -401,6 +402,15 @@ describe("canvasWorkToEntry - discussion recognition (A8 wave 2)", () => {
   const FIX_G: CanvasStudentWork = discussionWork({
     initialPosts: [initialPost("INITIALSENTINEL_alpha")],
     replies: [reply("REPLYSENTINEL_bravo", "Dr. Alan Turing")],
+  });
+
+  it("checks reconstructed axes against actual Canvas extraction and refuses missing initials", async () => {
+    for (const work of [FIX_A, FIX_B, FIX_C, FIX_F, FIX_G]) {
+      const entry = await canvasWorkToEntry(work);
+      expect(entry.discussionAxes && discussionAxesMatchContent(entry.content, entry.discussionAxes)).toBe(true);
+    }
+    const missing = await canvasWorkToEntry(FIX_E);
+    expect(missing.discussionAxes && discussionAxesMatchContent(missing.content, missing.discussionAxes)).toBe(false);
   });
 
   // --- REQ-1 (AC-1): the entry carries the initial/reply distinction as files

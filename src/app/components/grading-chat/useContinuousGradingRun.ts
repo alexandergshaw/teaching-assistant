@@ -23,7 +23,7 @@ import {
   prepareChatSubmissionAction,
   prepareCompositeSubmissionAction,
 } from "@/app/actions/grading-chat-intake";
-import { buildTextEntry, CHAT_LABEL_MAX_CHARS, type ChatSubmissionInput } from "./chatSubmissionIntake";
+import { buildTextEntry, buildReviewedTextEntry, CHAT_LABEL_MAX_CHARS, type ChatSubmissionInput } from "./chatSubmissionIntake";
 import type {
   GradeHarshness,
   GradeResult,
@@ -668,7 +668,11 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         return { kind: "refused", reason: "This submission is empty." };
       }
       ordinalRef.current += 1;
-      entries = [buildTextEntry({ label: input.label, content: input.content }, ordinalRef.current)];
+      if (input.reviewedDiscussion) {
+        const reviewed = buildReviewedTextEntry({ label: input.label, reviewedDiscussion: input.reviewedDiscussion }, ordinalRef.current);
+        if (!reviewed) return { kind: "refused", reason: "The reviewed discussion is incomplete, lacks an initial post, or exceeds the grading limit." };
+        entries = [reviewed];
+      } else entries = [buildTextEntry({ label: input.label, content: input.content }, ordinalRef.current)];
     } else {
       if (input.kind === "url" && detectCanvasUrlKind(input.url) !== null) {
         // F3=A: one Canvas URL per session; a different one needs a new session.

@@ -8,6 +8,8 @@ import type { SubmitOutcome } from "./useContinuousGradingRun";
 import { hasSubmissionContent, isPastedDiscussionListing, parsePastedSubmissions } from "./pastedSubmissions";
 import { hasDiscussionResponseContent } from "./discussionListing";
 import { CHAT_LABEL_MAX_CHARS } from "./chatSubmissionIntake";
+import { buildReviewedDiscussionGroups } from "@/lib/grade/reviewed-discussion-groups";
+import { getGeminiMaxCharsPerSubmission } from "@/lib/gemini";
 
 type Node = { type: string; props: Record<string, any> };
 const slots: { value: any; deps?: unknown[] }[] = [];
@@ -21,15 +23,15 @@ const declarations = file.statements.filter((statement) => ts.isFunctionDeclarat
 const code = ts.transpileModule(declarations.map((d) => d.getText(file).replace(/^export\s+/, "")).join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS } }).outputText;
 const jsx = (type: string, props: Record<string, unknown>) => ({ type, props });
 const components = ["Alert", "Accordion", "AccordionDetails", "AccordionSummary", "Box", "Button", "Checkbox", "Dialog", "DialogActions", "DialogContent", "DialogTitle", "FormControl", "FormControlLabel", "FormLabel", "Radio", "RadioGroup", "TextField", "Typography"];
-const factory = new Function("exports", "require", "useState", "useRef", "useEffect", "ROLE_FILE_LIMIT", "submitAssignedFiles", "submitDropBatch", "suggestFileGroups", "markSessionChanged", "claimIntake", "releaseIntake", "resetIntake", "parsePastedSubmissions", "hasSubmissionContent", "isPastedDiscussionListing", "hasDiscussionResponseContent", "CHAT_LABEL_MAX_CHARS", "window", ...components, `${code}; return SubmissionDrop;`);
-const component = factory({}, (id: string) => id === "react/jsx-runtime" ? { jsx, jsxs: jsx } : {}, useState, useRef, useEffect, 40, submitAssignedFiles, submitDropBatch, suggestFileGroups, markSessionChanged, claimIntake, releaseIntake, resetIntake, parsePastedSubmissions, hasSubmissionContent, isPastedDiscussionListing, hasDiscussionResponseContent, CHAT_LABEL_MAX_CHARS, { addEventListener() {}, removeEventListener() {} }, ...components);
+const factory = new Function("exports", "require", "useState", "useRef", "useEffect", "ROLE_FILE_LIMIT", "submitAssignedFiles", "submitDropBatch", "suggestFileGroups", "markSessionChanged", "claimIntake", "releaseIntake", "resetIntake", "parsePastedSubmissions", "hasSubmissionContent", "isPastedDiscussionListing", "hasDiscussionResponseContent", "CHAT_LABEL_MAX_CHARS", "buildReviewedDiscussionGroups", "getGeminiMaxCharsPerSubmission", "window", ...components, `${code}; return SubmissionDrop;`);
+const component = factory({}, (id: string) => id === "react/jsx-runtime" ? { jsx, jsxs: jsx } : {}, useState, useRef, useEffect, 40, submitAssignedFiles, submitDropBatch, suggestFileGroups, markSessionChanged, claimIntake, releaseIntake, resetIntake, parsePastedSubmissions, hasSubmissionContent, isPastedDiscussionListing, hasDiscussionResponseContent, CHAT_LABEL_MAX_CHARS, buildReviewedDiscussionGroups, getGeminiMaxCharsPerSubmission, { addEventListener() {}, removeEventListener() {} }, ...components);
 function nodes(node: any): Node[] { if (Array.isArray(node)) return node.flatMap(nodes); if (!node || typeof node !== "object") return []; return [node, ...nodes(node.props?.children)]; }
 const text = (node: any): string => Array.isArray(node) ? node.map(text).join("") : typeof node === "string" ? node : !node || typeof node !== "object" ? "" : text(node.props?.children);
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 beforeEach(() => { slots.length = 0; cursor = 0; });
-function harness(onOne = vi.fn(async () => ({ kind: "accepted", entryCount: 1 })), onMany = vi.fn(async () => [] as any[]), onText: (student: string, content: string) => Promise<SubmitOutcome> = vi.fn(async (): Promise<SubmitOutcome> => ({ kind: "accepted", entryCount: 1 })), sharedLatch?: IntakeFence, reviewFiles = false) {
+function harness(onOne = vi.fn(async () => ({ kind: "accepted", entryCount: 1 })), onMany = vi.fn(async () => [] as any[]), onText: (student: string, content: string) => Promise<SubmitOutcome> = vi.fn(async (): Promise<SubmitOutcome> => ({ kind: "accepted", entryCount: 1 })), sharedLatch?: IntakeFence, reviewFiles = false, onReviewed?: (...args: any[]) => Promise<SubmitOutcome>) {
   let epoch = 0;
-  const render = () => { cursor = 0; return component({ disabled: false, sharedLatch, reviewFiles, onOne, onMany, onText, getSessionEpoch: () => epoch, sessionEpoch: epoch }); };
+  const render = () => { cursor = 0; return component({ disabled: false, sharedLatch, reviewFiles, onOne, onMany, onText, onReviewed, getSessionEpoch: () => epoch, sessionEpoch: epoch }); };
   const find = (tree: Node, type: string) => nodes(tree).find((node) => node.type === type)!;
   const button = (tree: Node, label: string) => nodes(tree).find((node) => node.type === "Button" && text(node) === label)!;
   const reset = () => { epoch++; };
@@ -38,6 +40,55 @@ function harness(onOne = vi.fn(async () => ({ kind: "accepted", entryCount: 1 })
 const work = (name: string) => new File(["work"], name);
 
 describe("SubmissionDrop actual handlers", () => {
+  it("clears discussion attestations after editing source and when starting a new paste", () => {
+    const h = harness(undefined, undefined, undefined, undefined, false, vi.fn()); let tree = h.render();
+    h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    const paste = (value: string) => { nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value } }); tree = h.render(); };
+    paste("Ada Chen posted Sep 3, 2026\nFirst answer");
+    nodes(tree).find((n) => n.type === "FormControlLabel" && n.props.label === "Classify initial posts and replies for separate grading")!.props.control.props.onChange(null, true); tree = h.render();
+    const labels = ["I verified entries assigned to each group belong to the same person", "I verified all initial posts and replies for these students are included", "I accounted for any attachments"];
+    const affirm = () => { for (const label of labels) nodes(tree).find((n) => n.type === "FormControlLabel" && n.props.label === label)!.props.control.props.onChange(null, true); tree = h.render(); };
+    const expectCleared = () => { for (const label of labels) expect(nodes(tree).find((n) => n.type === "FormControlLabel" && n.props.label === label)!.props.control.props.checked).toBe(false); };
+    affirm(); nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission 1")!.props.onChange({ target: { value: "Changed answer" } }); tree = h.render(); expectCleared();
+    affirm(); h.button(tree, "Clear text list").props.onClick(); tree = h.render(); nodes(tree).filter((n) => n.type === "Button" && text(n) === "Clear list").at(-1)!.props.onClick(); tree = h.render();
+    paste("Grace Vale posted Sep 4, 2026\nNew answer"); expectCleared();
+  });
+  it.each([false, true])("blocks normalized duplicate groups including already queued identities (queued=%s)", async (queued) => {
+    const onReviewed = vi.fn().mockResolvedValueOnce({ kind: "accepted", entryCount: 1 }).mockResolvedValueOnce({ kind: "refused", reason: "not ready" });
+    const h = harness(undefined, undefined, undefined, undefined, false, onReviewed); let tree = h.render();
+    h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "Ada Chen posted Sep 3, 2026\nFirst answer\nGrace Vale posted Sep 4, 2026\nSecond answer" } });
+    tree = h.render(); nodes(tree).find((n) => n.type === "FormControlLabel" && n.props.label === "Classify initial posts and replies for separate grading")!.props.control.props.onChange(null, true); tree = h.render();
+    for (let i = 1; i <= 2; i++) {
+      nodes(tree).find((n) => n.type === "FormControlLabel" && n.props.label === `I checked author and response ${i}`)!.props.control.props.onChange(null, true);
+      nodes(tree).find((n) => n.type === "TextField" && n.props.label === `Student group for entry ${i}`)!.props.onChange({ target: { value: i === 1 ? "Ada" : queued ? "Grace" : "ＡＤＡ" } });
+      nodes(tree).find((n) => n.type === "RadioGroup" && n.props.value === "unassigned")!.props.onChange({ target: { value: "initial" } }); tree = h.render();
+    }
+    const affirm = () => { for (const label of ["I verified entries assigned to each group belong to the same person", "I verified all initial posts and replies for these students are included", "I accounted for any attachments"]) nodes(tree).find((n) => n.type === "FormControlLabel" && n.props.label === label)!.props.control.props.onChange(null, true); tree = h.render(); };
+    affirm(); h.button(tree, "Grade reviewed submissions").props.onClick(); await flush(); tree = h.render();
+    if (!queued) { expect(onReviewed).not.toHaveBeenCalled(); return; }
+    expect(onReviewed).toHaveBeenCalledTimes(2);
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Student group for entry 2")!.props.onChange({ target: { value: "ＡＤＡ" } }); tree = h.render(); affirm();
+    h.button(tree, "Grade reviewed submissions").props.onClick(); await flush(); tree = h.render();
+    expect(onReviewed).toHaveBeenCalledTimes(2); expect(text(tree)).toContain("already submitted");
+  });
+  it("marks an in-flight discussion group uncertain on reset and does not dispatch the next group", async () => {
+    let finish!: (value: SubmitOutcome) => void;
+    const onReviewed = vi.fn(() => new Promise<SubmitOutcome>((resolve) => { finish = resolve; }));
+    const h = harness(undefined, undefined, undefined, undefined, false, onReviewed); let tree = h.render();
+    h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "Ada Chen posted Sep 3, 2026\nFirst answer\nGrace Vale posted Sep 4, 2026\nSecond answer" } });
+    tree = h.render(); nodes(tree).find((n) => n.type === "FormControlLabel" && n.props.label === "Classify initial posts and replies for separate grading")!.props.control.props.onChange(null, true); tree = h.render();
+    for (let i = 1; i <= 2; i++) {
+      nodes(tree).find((n) => n.type === "FormControlLabel" && n.props.label === `I checked author and response ${i}`)!.props.control.props.onChange(null, true);
+      nodes(tree).find((n) => n.type === "TextField" && n.props.label === `Student group for entry ${i}`)!.props.onChange({ target: { value: i === 1 ? "Ada" : "Grace" } });
+      nodes(tree).find((n) => n.type === "RadioGroup" && n.props.value === "unassigned")!.props.onChange({ target: { value: "initial" } }); tree = h.render();
+    }
+    for (const label of ["I verified entries assigned to each group belong to the same person", "I verified all initial posts and replies for these students are included", "I accounted for any attachments"]) nodes(tree).find((n) => n.type === "FormControlLabel" && n.props.label === label)!.props.control.props.onChange(null, true);
+    tree = h.render(); h.button(tree, "Grade reviewed submissions").props.onClick(); h.reset(); tree = h.render(); finish({ kind: "accepted", entryCount: 1 }); await flush(); tree = h.render();
+    expect(onReviewed).toHaveBeenCalledTimes(1); expect(text(tree)).toContain("Needs review");
+    expect(nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission 2")!.props.value).toContain("Second answer");
+  });
   it("keeps a suspected whole board out of the single-student fallback", async () => {
     const onText = vi.fn().mockResolvedValue({ kind: "accepted", entryCount: 1 });
     const h = harness(undefined, undefined, onText); let tree = h.render();

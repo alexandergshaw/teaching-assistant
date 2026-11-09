@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   exampleFormatSymbols,
+  exampleSymbolLayout,
+  MAX_EXAMPLE_SYMBOL_OCCURRENCES,
   truncateTranscriptForPrompt,
   buildTakeAnnouncementInstruction,
   buildAnnouncementImagePrompt,
@@ -54,6 +56,27 @@ describe("truncateTranscriptForPrompt", () => {
 });
 
 describe("buildTakeAnnouncementInstruction", () => {
+  it("preserves repeated symbols and placement without copying example prose", () => {
+    const symbol = String.fromCodePoint(0x1f4cc), other = String.fromCodePoint(0x1f4a1);
+    const layout = exampleSymbolLayout(`${symbol}${symbol} PRIVATE_TITLE\nprivate ${other} content\nprivate ${symbol}\n${other}`);
+    expect(layout).toEqual([
+      { symbol, line: 1, position: "start" }, { symbol, line: 1, position: "start" },
+      { symbol: other, line: 2, position: "inline" }, { symbol, line: 3, position: "end" },
+      { symbol: other, line: 4, position: "standalone" },
+    ]);
+    expect(JSON.stringify(layout)).not.toContain("PRIVATE_TITLE");
+    const prompt = buildTakeAnnouncementInstruction("selected transcript", baseContext, undefined, "", { sections: [], hasGreeting: false, hasSignOff: false, dueDateSectionIndex: null, todoSectionIndex: null, hasLinks: false }, [symbol, other], layout);
+    expect(prompt).toContain(`Line 1, start: ${symbol}\nLine 1, start: ${symbol}`);
+    expect(prompt).toContain(`Line 2, inline: ${other}`);
+    expect(prompt).not.toContain("PRIVATE_TITLE");
+  });
+  it("bounds the number of symbol placement instructions", () => {
+    const symbol = String.fromCodePoint(0x1f4cc);
+    const layout = exampleSymbolLayout(symbol.repeat(MAX_EXAMPLE_SYMBOL_OCCURRENCES + 20));
+    expect(layout).toHaveLength(MAX_EXAMPLE_SYMBOL_OCCURRENCES);
+    const prompt = buildTakeAnnouncementInstruction("transcript", baseContext, undefined, "", { sections: [], hasGreeting: false, hasSignOff: false, dueDateSectionIndex: null, todoSectionIndex: null, hasLinks: false }, [symbol], layout);
+    expect(prompt).toContain("Additional symbol occurrences may be omitted");
+  });
   it("carries format symbols without copying example prose", () => {
     const symbol = String.fromCodePoint(0x1f4cc);
     const symbols = exampleFormatSymbols(`private example words ${symbol} ${symbol}`);

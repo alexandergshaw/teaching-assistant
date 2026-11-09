@@ -88,7 +88,7 @@ import {
   type TranscriptionPipelineDeps,
 } from "./takeAnnouncementTranscription";
 import type { Take } from "./types";
-import type { AnnouncementOutline } from "@/lib/announcement-outline-types";
+import type { TakeFormatExample } from "./take-format-selection";
 import { recordingDraftToHtml } from "@/lib/recording-announcement-html";
 import { postRecordingAnnouncementAction } from "@/app/actions/recording-announcement-post";
 import { recordTakeDiagnostic } from "./take-announcement-diagnostics";
@@ -169,8 +169,8 @@ export interface UseTakeAnnouncementReturn {
   failedChunkNumber: number | null;
   retryFromFailedChunk: () => void;
   startOver: () => void;
-  retryDraft: (example?: { outline: AnnouncementOutline; symbols: string[] } | null, current?: () => boolean) => void;
-  startDraft: (resolve: () => { ok: true; example: { outline: AnnouncementOutline; symbols: string[] } | null } | { ok: false }) => void;
+  retryDraft: (example?: TakeFormatExample | null, current?: () => boolean) => void;
+  startDraft: (resolve: () => { ok: true; example: TakeFormatExample | null } | { ok: false }) => void;
   returnToSetup: () => void;
   retryAudio: () => void;
   backToReviewAfterPostFailure: () => void;
@@ -301,7 +301,7 @@ export function useTakeAnnouncement({
   const [stage, setStage] = useState<AnnouncementStage>(() => ({ phase: initialTakeStage(!!posted) }));
   const initialStartLock = useRef(false);
   useEffect(() => { if (stage.phase !== "idle") initialStartLock.current = false; }, [stage.phase]);
-  const initialFormatRef = useRef<(() => { ok: true; example: { outline: AnnouncementOutline; symbols: string[] } | null } | { ok: false }) | null>(null);
+  const initialFormatRef = useRef<(() => { ok: true; example: TakeFormatExample | null } | { ok: false }) | null>(null);
   const [liveRegionText, setLiveRegionText] = useState("");
   const [lastMessage, setLastMessage] = useState<string | null>(null);
   const [needsRealTimeConfirm, setNeedsRealTimeConfirm] = useState(false);
@@ -528,7 +528,7 @@ export function useTakeAnnouncement({
     };
   }
 
-  async function runDraft(transcript: string, formatExample: { outline: AnnouncementOutline; symbols: string[] } | null = null, current: () => boolean = () => true) {
+  async function runDraft(transcript: string, formatExample: TakeFormatExample | null = null, current: () => boolean = () => true) {
     const hasPriorDraft = Boolean(subject.trim() || body.trim());
     const started = Date.now(), operation = hasPriorDraft ? "regenerate" : "draft";
     const diagnosticDetail = { hasExample: !!formatExample, hasInstructorContext: !!instructorContext.trim() };
@@ -548,7 +548,8 @@ export function useTakeAnnouncement({
       composition,
       instructorContext,
       formatExample?.outline ?? null,
-      formatExample?.symbols ?? []
+      formatExample?.symbols ?? [],
+      formatExample?.symbolLayout ?? []
     );
     const provider = getStoredProvider();
     const response = await awaitCurrentDraft(draftAnnouncementAction(instruction, provider, formatExample ? "structured" : "plain"), () => !cancelledRef.current && current());
@@ -695,7 +696,7 @@ export function useTakeAnnouncement({
     void beginRealTimeGuardCheck(pipelineDeps());
   }
 
-  function startDraft(resolve: () => { ok: true; example: { outline: AnnouncementOutline; symbols: string[] } | null } | { ok: false }) {
+  function startDraft(resolve: () => { ok: true; example: TakeFormatExample | null } | { ok: false }) {
     beginTakeDraft(initialStartLock, !!posted, () => { cancelledRef.current = false; initialFormatRef.current = resolve; start(); });
   }
 
@@ -734,7 +735,7 @@ export function useTakeAnnouncement({
     void proceedToTranscription(0, pipelineDeps());
   }
 
-  function retryDraft(example: { outline: AnnouncementOutline; symbols: string[] } | null = null, current: () => boolean = () => true) {
+  function retryDraft(example: TakeFormatExample | null = null, current: () => boolean = () => true) {
     cancelledRef.current = false;
     if (transcriptRef.current) {
       if (!subject.trim() && !body.trim()) void runInitialDraft(transcriptRef.current);

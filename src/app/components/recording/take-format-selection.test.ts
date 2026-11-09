@@ -22,7 +22,7 @@ describe("take format selection", () => {
   it("sends the selected saved example on the first draft", async () => {
     const draft = vi.fn().mockResolvedValue(undefined), invalid = vi.fn();
     await dispatchInitialTakeDraft("selected transcript", () => resolveTakeFormat(selection, "owner:course", true, state([card])), draft, invalid);
-    expect(draft).toHaveBeenCalledWith("selected transcript", { outline: EMPTY_ANNOUNCEMENT_OUTLINE, symbols: [emoji] }, expect.any(Function));
+    expect(draft).toHaveBeenCalledWith("selected transcript", { outline: EMPTY_ANNOUNCEMENT_OUTLINE, symbols: [emoji], symbolLayout: [{ symbol: emoji, line: 1, position: "end" }] }, expect.any(Function));
     expect(invalid).not.toHaveBeenCalled();
   });
   it("discards a deferred response after its scope or selected example changes", async () => {
@@ -53,7 +53,7 @@ describe("take format selection", () => {
     expect(draft).not.toHaveBeenCalled(); expect(invalid).toHaveBeenCalledTimes(2);
   });
   it("uses the current saved example and preserves its literal symbol", () => {
-    expect(resolveTakeFormat(selection, "owner:course", true, state([card]))).toEqual({ ok: true, example: { outline: EMPTY_ANNOUNCEMENT_OUTLINE, symbols: [emoji] } });
+    expect(resolveTakeFormat(selection, "owner:course", true, state([card]))).toEqual({ ok: true, example: { outline: EMPTY_ANNOUNCEMENT_OUTLINE, symbols: [emoji], symbolLayout: [{ symbol: emoji, line: 1, position: "end" }] } });
   });
   it("blocks a different owner or course, unavailable library and missing card", () => {
     expect(resolveTakeFormat(selection, "other:course", true, state([card])).ok).toBe(false);

@@ -553,7 +553,7 @@ export default function PipelineTab() {
       {pipelineError && <Alert severity="warning" role="status">{pipelineError}</Alert>}
       {sourcesDirty && <Alert severity="warning">Source changes are not committed. Commit sources before running or downloading the deck.</Alert>}
 
-      <Card variant="outlined">
+      <Card variant="outlined" role="tabpanel" id="pipeline-stage-panel" aria-labelledby={`pipeline-stage-tab-${activeStage}`}>
         <CardContent style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
           <Typography variant="h6">{STAGE_LABELS[activeStage]}</Typography>
           <Divider />

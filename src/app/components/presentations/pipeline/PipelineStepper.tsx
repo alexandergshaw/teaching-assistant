@@ -8,7 +8,7 @@
 // the strip always reflects the real dependency order the invalidation graph
 // (pipeline.ts) walks.
 
-import { Chip } from "@mui/material";
+import { Tab, Tabs } from "@mui/material";
 import { ALL_STAGE_IDS, canRunStage, type PipelineState, type StageId } from "@/lib/presentations/pipeline";
 
 export const STAGE_LABELS: Record<StageId, string> = {
@@ -24,16 +24,11 @@ export const STAGE_LABELS: Record<StageId, string> = {
   polish: "Polish",
 };
 
-const STATUS_COLOR: Record<
-  PipelineState[StageId]["status"],
-  "default" | "primary" | "success" | "warning" | "error"
-> = {
-  idle: "default",
-  running: "primary",
-  done: "success",
-  stale: "warning",
-  error: "error",
-};
+export function stageNavigationLabel(state: PipelineState, stage: StageId): string {
+  const status = state[stage].status;
+  const suffix = status !== "idle" ? ` (${status})` : canRunStage(state, stage) ? "" : " (needs prerequisites)";
+  return `${STAGE_LABELS[stage]}${suffix}`;
+}
 
 export default function PipelineStepper({
   state,
@@ -45,27 +40,25 @@ export default function PipelineStepper({
   onSelectStage: (stage: StageId) => void;
 }) {
   return (
-    <div
-      role="tablist"
+    <Tabs
+      value={activeStage}
+      onChange={(_, stage: StageId) => onSelectStage(stage)}
       aria-label="Pipeline stages"
-      style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}
+      variant="scrollable"
+      scrollButtons="auto"
+      allowScrollButtonsMobile
+      selectionFollowsFocus
     >
-      {ALL_STAGE_IDS.map((stage) => {
-        const stageState = state[stage];
-        const runnable = stageState.status !== "done" && canRunStage(state, stage);
-        return (
-          <Chip
+      {ALL_STAGE_IDS.map((stage) => (
+          <Tab
             key={stage}
-            role="tab"
-            aria-selected={stage === activeStage}
-            clickable
-            variant={stage === activeStage ? "filled" : "outlined"}
-            color={STATUS_COLOR[stageState.status]}
-            label={`${STAGE_LABELS[stage]}${stageState.status !== "idle" ? ` (${stageState.status})` : runnable ? "" : " - locked"}`}
-            onClick={() => onSelectStage(stage)}
+            value={stage}
+            id={`pipeline-stage-tab-${stage}`}
+            aria-controls="pipeline-stage-panel"
+            label={stageNavigationLabel(state, stage)}
+            sx={{ textTransform: "none" }}
           />
-        );
-      })}
-    </div>
+      ))}
+    </Tabs>
   );
 }

@@ -7,8 +7,8 @@ import { type AnnouncementLibraryController, type LibraryState, importAnnounceme
 import { useAnnouncementLibraryDeparture } from "./useAnnouncementLibrary";
 import PreviousAnnouncementEditor from "./PreviousAnnouncementEditor";
 import type { TemplateChoice } from "./announcement-draft-slots";
-export default function AnnouncementLibrary({ controller, state, enabled, canAddDraft, addDraft, onRemoved }: {
-  controller: AnnouncementLibraryController; state: LibraryState; enabled: boolean; canAddDraft: boolean;
+export default function AnnouncementLibrary({ controller, state, enabled, canAddDraft, showAddDraft = true, addDraft, onRemoved }: {
+  controller: AnnouncementLibraryController; state: LibraryState; enabled: boolean; canAddDraft: boolean; showAddDraft?: boolean;
   addDraft: (choice: TemplateChoice) => void; onRemoved: (id: string) => void;
 }) {
   const departure = useAnnouncementLibraryDeparture(controller);
@@ -54,9 +54,9 @@ export default function AnnouncementLibrary({ controller, state, enabled, canAdd
         <p role="status" aria-live="polite">{card.deleting ? "Removing..." : card.status}</p>
         {card.error && <p role="alert">{card.error}</p>}
         {card.status === "Could not save" && <Button size="small" variant="outlined" type="button" disabled={card.deleting} onClick={() => void controller.retry(card.id)}>Retry saving announcement {index + 1}</Button>}
-        <Button size="small" variant="outlined" type="button" aria-label={`Add a draft from this announcement ${index + 1}`} disabled={!canAddDraft || card.status !== "Saved" || card.deleting} onClick={() => {
+        {showAddDraft && <Button size="small" variant="outlined" type="button" aria-label={`Add a draft from this announcement ${index + 1}`} disabled={!canAddDraft || card.status !== "Saved" || card.deleting} onClick={() => {
           const entry = card.acknowledged; if (entry) addDraft({ kind: "saved", exemplarId: entry.id, label: entry.label || "Untitled announcement", outline: entry.outline });
-        }}>Add a draft from this</Button>
+        }}>Add a draft from this</Button>}
         {armed === card.id ? <>
           <p>Remove this announcement from your saved library?</p>
           <Button size="small" variant="outlined" type="button" disabled={card.deleting} onClick={() => void remove(card.id)}>Confirm remove announcement {index + 1}</Button>

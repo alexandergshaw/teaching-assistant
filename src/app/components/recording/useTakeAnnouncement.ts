@@ -24,12 +24,15 @@
 // re-exported below so no existing importer's path changes.
 
 import { useEffect, useRef, useState } from "react";
+import { useTakeCourses } from "./useTakeCourses";
+import { acquireExclusive, createTakeOperationLock } from "./take-operation-lock";
+import { useRecordingDraftGuard } from "./useRecordingDraftGuard";
+import { useRecordingImageAccountFence } from "./useRecordingImageAccountFence";
 import {
   draftAnnouncementAction,
   saveMessageDraftAction,
   updateMessageDraftPayloadAction,
   markMessageDraftReviewedAction,
-  listCourseHubAction,
 } from "../../actions";
 import { runTakeDraftSave, runTakeDraftPostCleanup } from "@/lib/take-draft-lifecycle";
 import { useDraftedGradesInbox } from "../DraftedGradesInbox";
@@ -177,6 +180,9 @@ export interface UseTakeAnnouncementReturn {
 
   courses: AnnCourseOption[] | null;
   coursesError: string | null;
+  coursesLoading: boolean; coursesNeedSignIn: boolean;
+  retryCourses: () => void;
+  confirmLeave: () => boolean;
   courseId: string;
   setCourseId: (id: string) => void;
 
@@ -306,8 +312,7 @@ export function useTakeAnnouncement({
   const [lastMessage, setLastMessage] = useState<string | null>(null);
   const [needsRealTimeConfirm, setNeedsRealTimeConfirm] = useState(false);
 
-  const [courses, setCourses] = useState<AnnCourseOption[] | null>(null);
-  const [coursesError, setCoursesError] = useState<string | null>(null);
+  const { courses, coursesError, coursesLoading, coursesNeedSignIn, retryCourses } = useTakeCourses();
   const [courseId, setCourseId] = useState<string>(() => {
     if (typeof window === "undefined") return "";
     return window.localStorage.getItem("ta-rec-ann-course") ?? "";
@@ -358,12 +363,16 @@ export function useTakeAnnouncement({
   // manual) starts, and reset to false only when runDraft lands a genuinely
   // new draft (see runDraft's own reset of this ref).
   const autoImageAttemptedRef = useRef(false);
+  const imageRequestEpochRef = useRef(0);
+  useRecordingImageAccountFence(imageRequestEpochRef, autoImageAttemptedRef, () => { setImageState("idle"); setImageBase64(null); setImageMimeType(null); setImageError(null); });
 
   const [armedFor, setArmedFor] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
+  const [postLock] = useState(createTakeOperationLock), [saveLock] = useState(createTakeOperationLock);
+  const [savedSignature, setSavedSignature] = useState("");
   const [postError, setPostError] = useState<string | null>(null);
-
   const [savingDraft, setSavingDraft] = useState(false);
+  const draftGuard = useRecordingDraftGuard({ subject, body, courseId, posted: !!posted, savingDraft, posting, isPostingNow: () => postLock.isHeld() && !posted });
   const [draftSaved, setDraftSaved] = useState(false);
   const [draftSavedHadCourse, setDraftSavedHadCourse] = useState(false);
   const savedDraftIdRef = useRef<string | null>(null);
@@ -410,41 +419,6 @@ export function useTakeAnnouncement({
   const [logImageAttempts, setLogImageAttempts] = useState<AnnouncementLogImageAttempt[]>([]);
   const [logPostAttempts, setLogPostAttempts] = useState<AnnouncementLogPostAttempt[]>([]);
 
-  // Load the owner's courses once, filtering out export-only tiles
-  // (canvasUrl: null) up front - they cannot be posted to, so offering them
-  // in the picker would let someone choose one and fail later instead of
-  // never seeing it. listCourseHubAction is called directly (not
-  // useCoursesData(), which additionally fires several list actions per
-  // course on mount - absurd for a small recording-tab picker).
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const result = await listCourseHubAction();
-        if (cancelled) return;
-        if ("error" in result) {
-          setCoursesError(result.error);
-          return;
-        }
-        const options: AnnCourseOption[] = result.courses
-          .filter((c) => Boolean(c.canvasUrl))
-          .map((c) => ({
-            id: c.id,
-            name: c.name,
-            canvasUrl: c.canvasUrl as string,
-            institution: c.institution ?? null,
-          }));
-        setCourses(options);
-        setCoursesError(null);
-      } catch (err) {
-        if (!cancelled) setCoursesError(err instanceof Error ? err.message : "Could not load your courses.");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   // B4 fix: TakeAnnouncementPanel mounts this hook conditionally, so "Back
   // to takes" unmounts it while a pipeline may still be in flight. Without
   // this, closing during the real-time fallback left extractAudioOnly
@@ -459,6 +433,9 @@ export function useTakeAnnouncement({
   useEffect(() => {
     return () => {
       cancelledRef.current = true;
+      // The current request epoch must be invalidated at unmount.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      imageRequestEpochRef.current++;
       // Deliberately read at CLEANUP time, not snapshotted at mount: these
       // are AbortController/AudioContext handles the transcription pipeline
       // (takeAnnouncementTranscription.ts) writes via TranscriptionPipelineDeps
@@ -607,6 +584,7 @@ export function useTakeAnnouncement({
     setFieldError(null);
     setPostError(null);
   // A new text draft gets a new image attempt.
+    imageRequestEpochRef.current++;
     autoImageAttemptedRef.current = false;
     setImageState("idle");
     setImageBase64(null);
@@ -633,7 +611,14 @@ export function useTakeAnnouncement({
       setImageError,
       setLogImageAttempts,
       autoImageAttemptedRef,
+      imageRequestEpochRef,
     };
+  }
+
+  function invalidateImage() {
+    imageRequestEpochRef.current++;
+    autoImageAttemptedRef.current = true;
+    setImageState("idle"); setImageBase64(null); setImageMimeType(null); setImageError(null);
   }
 
   function generateImage() {
@@ -765,6 +750,7 @@ export function useTakeAnnouncement({
       : null;
 
   function handlePostButtonClick() {
+    if (saveLock.isHeld()) return;
     setFieldError(null);
     if (!currentArmSignature) { recordTakeDiagnostic("post", false, Date.now(), { delivery: "refused" }); return; }
     if (!subject.trim()) {
@@ -789,7 +775,7 @@ export function useTakeAnnouncement({
   }
 
   async function commitPost() {
-    if (!selectedCourse) return;
+    if (!selectedCourse || !acquireExclusive(postLock, saveLock)) return;
     const started = Date.now();
     setPosting(true);
     setPostError(null);
@@ -817,6 +803,7 @@ export function useTakeAnnouncement({
     ).catch(() => ({ transport: true as const }));
     setPosting(false);
     if ("error" in result || "transport" in result) {
+      postLock.release();
       recordTakeDiagnostic("post", false, started, { delivery: "delivery" in result && result.delivery === "refused" ? "refused" : "uncertain" });
       const outcome = resolveTakePostFailure(result);
       const message = outcome.message;
@@ -852,6 +839,7 @@ export function useTakeAnnouncement({
       },
     });
     if ("error" in cleaned) {
+      setLastMessage((previous) => [previous, `Posted, but the saved draft could not be cleared - ${cleaned.error}`].filter(Boolean).join(" "));
       announce(`Posted, but the saved draft could not be cleared - ${cleaned.error}`);
     } else {
       refreshDraftsBadge();
@@ -859,16 +847,21 @@ export function useTakeAnnouncement({
   }
 
   function saveDraft() {
+    if (!acquireExclusive(saveLock, postLock)) return;
     setFieldError(null);
     setDraftError(null);
     if (!subject.trim()) {
       setFieldError("Enter a subject - an announcement cannot be posted without one.");
+      saveLock.release();
       return;
     }
     if (!body.trim()) {
       setFieldError("Enter a message - an announcement cannot be posted without one.");
+      saveLock.release();
       return;
     }
+    const signature = JSON.stringify([subject, body, courseId, institution]);
+    const draftSnapshot = draftGuard.captureSnapshot();
     void (async () => {
       const started = Date.now();
       setSavingDraft(true);
@@ -894,10 +887,13 @@ export function useTakeAnnouncement({
       ).catch(() => ({ error: "Could not save the draft. Please try again." }));
       recordTakeDiagnostic("edit_save", !("error" in result), started);
       setSavingDraft(false);
+      saveLock.release();
       if ("error" in result) {
         setDraftError(result.error);
         return;
       }
+      draftGuard.markSaved(draftSnapshot);
+      setSavedSignature(signature);
       setDraftSavedHadCourse(Boolean(selectedCourse));
       setDraftSaved(true);
       refreshDraftsBadge();
@@ -959,13 +955,16 @@ export function useTakeAnnouncement({
 
     courses,
     coursesError,
+    coursesLoading, coursesNeedSignIn,
+    retryCourses,
+    confirmLeave: draftGuard.confirmLeave,
     courseId,
-    setCourseId,
+    setCourseId: (value) => { if (value !== courseId) invalidateImage(); setCourseId(value); },
 
     subject,
-    setSubject,
+    setSubject: (value) => { if (value !== subject) invalidateImage(); setSubject(value); },
     body,
-    setBody,
+    setBody: (value) => { if (value !== body) invalidateImage(); setBody(value); },
     fieldError,
 
     armed,
@@ -977,7 +976,7 @@ export function useTakeAnnouncement({
 
     saveDraft,
     savingDraft,
-    draftSaved,
+    draftSaved: draftSaved && savedSignature === JSON.stringify([subject, body, courseId, institution]),
     draftSavedHadCourse,
     draftError,
 

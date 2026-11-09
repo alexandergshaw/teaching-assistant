@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { Box, Button, Stack } from "@mui/material";
-import { sanitizeRecordingAnnouncementHtml } from "@/lib/recording-announcement-html";
+import { recordingClipboardContent, sanitizeRecordingAnnouncementHtml } from "@/lib/recording-announcement-html";
 
 /** Edits the same allowlisted HTML that the posting action sends to Canvas. */
 export default function RecordingAnnouncementEditor({ value, onChange, disabled = false }: { value: string; onChange: (html: string) => void; disabled?: boolean }) {
@@ -52,7 +52,7 @@ export default function RecordingAnnouncementEditor({ value, onChange, disabled 
     </Stack>
     <Box component="div" ref={ref} contentEditable={!disabled} suppressContentEditableWarning role="textbox" aria-label="Announcement message" aria-multiline="true" aria-disabled={disabled}
       onInput={emit} onKeyUp={rememberSelection} onMouseUp={rememberSelection} onBlur={() => { rememberSelection(); emit(); }}
-      onPaste={event => { event.preventDefault(); document.execCommand("insertText", false, event.clipboardData.getData("text/plain")); emit(); }}
+      onPaste={event => { event.preventDefault(); const content = recordingClipboardContent(event.clipboardData.getData("text/html"), event.clipboardData.getData("text/plain")); document.execCommand(content.command, false, content.value); emit(); }}
       onDrop={event => event.preventDefault()}
       sx={{ minHeight: 180, border: 1, borderColor: "divider", borderRadius: 1, p: 1.5, overflowWrap: "anywhere" }} />
   </Box>;

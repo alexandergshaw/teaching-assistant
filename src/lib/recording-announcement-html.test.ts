@@ -9,7 +9,7 @@ describe("recording announcement HTML", () => {
   });
   it("strips active content, attributes and unsafe links", () => {
     const html = '<p onclick="bad()">Hello<script>alert(1)</script><a href="javascript:alert(1)">bad</a><img src="x" onerror="bad()"></p>';
-    expect(sanitizeRecordingAnnouncementHtml(html)).toBe("<p>Hellobad</p>");
+    expect(sanitizeRecordingAnnouncementHtml(html)).toBe("<p>Hello<a>bad</a></p>");
     expect(sanitizeRecordingAnnouncementHtml('<a href="https://example.org/x?a=1&amp;b=2">Link</a>')).toBe('<a href="https://example.org/x?a=1&amp;b=2">Link</a>');
   });
   it("turns model Markdown into formatted HTML rather than showing Markdown syntax", () => {

@@ -1,3 +1,39 @@
+- id: 'RECORDING-ANNOUNCEMENT-AUDIT-FIXES'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'live-lms-student-messaging'
+  title: 'Remove recording announcement blockers and reduce setup travel.'
+  owns: ['src/app/components/RecordingTab.tsx', 'src/app/components/recording/', 'src/app/components/walkthrough-announcement/AnnouncementLibrary.tsx', 'src/lib/recording-announcement-html.ts']
+  verify: 'npm.cmd run test:paths -- src/app/components/recording/open-scoped-recording.test.ts src/app/components/recording/take-operation-lock.test.ts src/app/components/recording/useRecordingDraftGuard.test.ts src/lib/recording-announcement-paste.test.ts src/app/components/recording/announcementImagePipeline.test.ts src/file-size-ceiling.structure.test.ts'
+  blocked_by: []
+  instrument: 'Exercise library loading, timeout, retry, account switch and stale download; same-tick duplicate post and save; course errors and retry; unsaved back, unload and saving; rich clipboard paste and Canvas-safe formatting; stale image results; missing-image and save-cleanup reporting. Verify click, cursor and scroll changes in an authenticated browser at desktop and narrow widths, including focus and keyboard navigation.'
+  from: 'Owner requested an exhaustive announcement-from-recording usability and click-distance/scroll-distance audit on 2026-11-08.'
+  note: 'Candidate changes under review address an endless library spinner with retry, scoped library selection and download, post and save locks, course retry, unsaved draft safeguards, rich paste, stale image results and hidden post warnings. They place the saved-recording picker earlier and collapse example management. Implemented in the release candidate; verify the deployment and authenticated browser behavior after delivery. Browser walk must measure clicks and cursor/scroll distances; no rendered component is exercised by Vitest.'
+  question: null
+- id: 'RECORDING-ANNOUNCEMENT-CROSS-SESSION-DEDUP'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'live-lms-student-messaging'
+  title: 'Prevent duplicate recording-announcement posts across reloads and tabs.'
+  owns: ['src/app/components/RecordingTab.tsx', 'src/app/actions/recording-announcement-post.ts', 'src/lib/canvas/announcements.ts']
+  verify: null
+  blocked_by: []
+  instrument: 'Reproduce a confirmed or ambiguous post across reload and two tabs; design and test a durable scoped duplicate guard without suppressing a legitimate new announcement. Verify authorization, concurrency, explicit refusal and ambiguous delivery with a disposable Canvas course.'
+  from: 'Recording-announcement audit: postedByTakeId is in-memory and the client post lock cannot protect a second tab or reload.'
+  note: 'Client-side candidate lock prevents overlapping same-panel requests but cannot protect other sessions. Existing WA-POST-DEDUP records a related walkthrough residual; coordinate the shared Canvas seam rather than claiming a server-side guarantee.'
+  question: null
+- id: 'RECORDING-ANNOUNCEMENT-SPA-NAVIGATION-GUARD'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'live-lms-student-messaging'
+  title: 'Protect unsaved recording announcements during client-side route navigation.'
+  owns: ['src/app/components/recording/useRecordingDraftGuard.ts', 'src/app/components/recording/TakeAnnouncementPanel.tsx', 'src/app/page.tsx']
+  verify: null
+  blocked_by: []
+  instrument: 'Walk Back to takes, reload, browser back and forward, same-origin route links, and normal app tab switching with a changed draft and an in-flight save/post. Keep mounted tabs non-disruptive; prevent silent data loss on true unmount and verify keyboard/focus in a real browser.'
+  from: 'Recording-announcement audit: beforeunload does not intercept Next client-side pathname or history navigation.'
+  note: 'Candidate safeguards cover Back to takes and browser unload; normal app tabs hide the mounted recording surface rather than unmounting it. Same-origin SPA route and browser history transitions still require an appropriate router-level guard; avoid intercepting unrelated links globally.'
+  question: null
 - id: 'WALKTHROUGH-PASTED-ANNOUNCEMENT-FORMATTING'
   state: 'actionable'
   kind: 'feature'

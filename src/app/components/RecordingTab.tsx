@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button, MenuItem, TextField } from "@mui/material";
+import { openScopedRecording } from "./recording/open-scoped-recording";
 import { REC_VIEWS, type RecView } from "./recording/rec-views";
 import { REC_VIEW_CHANGE_EVENT, normalizeRecView, resolveRecViewFromUrl, parseUrlState } from "../url-state";
 import { buildTabHref, isPlainLeftClick } from "./tabs/tab-link";
@@ -432,30 +433,49 @@ export default function RecordingTab({
   // AC26 reachability: recordings from before this page load live only in
   // the library. Loaded lazily, once, the same way useVideoImport does for
   // Caption Studio.
-  const [libraryFiles, setLibraryFiles] = useState<RecordingFile[] | null>(null);
+  const [libraryResult, setLibraryResult] = useState<{ owner: string; files: RecordingFile[] } | null>(null);
   const [libraryBusy, setLibraryBusy] = useState(false);
   const [libraryError, setLibraryError] = useState<string | null>(null);
   const [selectedLibraryFileId, setSelectedLibraryFileId] = useState("");
   const [libraryActionBusy, setLibraryActionBusy] = useState<"walkthrough" | "announcement" | null>(null);
 
+  const [libraryRetry, setLibraryRetry] = useState(0);
+  const libraryOwnerId = user?.id;
+  const libraryFiles = libraryResult && libraryResult.owner === libraryOwnerId ? libraryResult.files : null;
+  const libraryOpenEpoch = useRef(0);
+  const libraryOpenBusy = useRef(false);
+  const libraryScope = useRef<{ owner: string | undefined; fileId: string } | null>(null);
+
   useEffect(() => {
-    if (!user || libraryFiles !== null || libraryBusy) return;
     let cancelled = false;
-    (async () => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    async function load() {
+      setLibraryResult(null);
+      setLibraryActionBusy(null);
+      setSelectedLibraryFileId("");
+      setLibraryError(null);
+      if (!libraryOwnerId) { setLibraryBusy(false); return; }
       setLibraryBusy(true);
+      timer = setTimeout(() => {
+        if (cancelled || settled) return;
+        settled = true;
+        setLibraryError("Loading your recording library timed out. Please try again.");
+        setLibraryBusy(false);
+      }, 15000);
       try {
-        const files = await listRecordingFiles(supabase, user.id);
-        if (!cancelled) setLibraryFiles(files);
-      } catch (err) {
-        if (!cancelled) setLibraryError(err instanceof Error ? err.message : "Could not load your recording library.");
+        const files = await listRecordingFiles(supabase, libraryOwnerId);
+        if (!cancelled && !settled) { settled = true; setLibraryResult({ owner: libraryOwnerId, files }); }
+      } catch {
+        if (!cancelled && !settled) { settled = true; setLibraryError("Could not load your recording library. Please try again."); }
       } finally {
-        if (!cancelled) setLibraryBusy(false);
+        if (timer) clearTimeout(timer);
+        if (!cancelled && settled) setLibraryBusy(false);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [supabase, user, libraryFiles, libraryBusy]);
+    }
+    void load();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, [supabase, libraryOwnerId, libraryRetry]);
 
   // Auto-picks the first library file once the list loads (minimize-clicks),
   // derived at render time rather than set-state-in-an-effect - the picker's
@@ -464,6 +484,13 @@ export default function RecordingTab({
   const effectiveLibraryFileId =
     selectedLibraryFileId || (libraryFiles && libraryFiles.length > 0 ? libraryFiles[0].id : "");
   const selectedLibraryFile = libraryFiles?.find((f) => f.id === effectiveLibraryFileId) ?? null;
+  useLayoutEffect(() => {
+    const scope = { owner: libraryOwnerId, fileId: effectiveLibraryFileId };
+    libraryScope.current = scope;
+    const epochRef = libraryOpenEpoch;
+    const busyRef = libraryOpenBusy;
+    return () => { libraryScope.current = null; epochRef.current++; busyRef.current = false; };
+  }, [libraryOwnerId, effectiveLibraryFileId]);
 
   async function buildTakeFromLibraryFile(file: RecordingFile): Promise<Take> {
     const blob = await downloadRecordingFile(supabase, file);
@@ -499,33 +526,27 @@ export default function RecordingTab({
       durationSec,
       createdAt: new Date(file.createdAt).getTime(),
     };
-    libraryDerivedUrlsRef.current.set(take.id, url);
     return take;
   }
 
-  async function handleLibraryTalkThrough(file: RecordingFile, sourceEl: HTMLElement) {
+  async function openLibraryRecording(file: RecordingFile, sourceEl: HTMLElement, kind: "walkthrough" | "announcement") {
+    const scope = libraryScope.current;
+    if (!scope?.owner || scope.fileId !== file.id || libraryOpenBusy.current) return;
+    libraryOpenBusy.current = true;
+    const epoch = ++libraryOpenEpoch.current;
+    const current = () => libraryScope.current === scope && libraryOpenEpoch.current === epoch;
     setLibraryError(null);
-    setLibraryActionBusy("walkthrough");
+    setLibraryActionBusy(kind);
     try {
-      const take = await buildTakeFromLibraryFile(file);
-      openWalkthrough(take, sourceEl);
-    } catch (err) {
-      setLibraryError(err instanceof Error ? err.message : "Could not load that recording.");
+      await openScopedRecording(() => buildTakeFromLibraryFile(file), current, (take) => {
+        libraryDerivedUrlsRef.current.set(take.id, take.url);
+        if (kind === "walkthrough") openWalkthrough(take, sourceEl);
+        else openAnnouncement(take, sourceEl);
+      }, (take) => URL.revokeObjectURL(take.url));
+    } catch {
+      if (current()) setLibraryError("Could not load that recording. Please try again.");
     } finally {
-      setLibraryActionBusy(null);
-    }
-  }
-
-  async function handleLibraryDraftAnnouncement(file: RecordingFile, sourceEl: HTMLElement) {
-    setLibraryError(null);
-    setLibraryActionBusy("announcement");
-    try {
-      const take = await buildTakeFromLibraryFile(file);
-      openAnnouncement(take, sourceEl);
-    } catch (err) {
-      setLibraryError(err instanceof Error ? err.message : "Could not load that recording.");
-    } finally {
-      setLibraryActionBusy(null);
+      if (current()) { libraryOpenBusy.current = false; setLibraryActionBusy(null); }
     }
   }
 
@@ -587,6 +608,71 @@ export default function RecordingTab({
       libraryUrls.clear();
     };
   }, [rec.stopEverythingRef, avatarStudio.stopEverythingRef, takes.takesRef, bg.segmenterRef]);
+
+  const savedRecordingPicker = (
+    <div className={styles.adaptPanel}>
+      <div className={styles.adaptPanelHeader}>
+        <h2 className={styles.adaptPanelTitle}>Narrate or announce a saved recording</h2>
+        <p className={styles.adaptPanelSubtitle}>
+          Pick anything already in your recording library - including a captioned or narrated file - to talk over it or draft an announcement from it.
+        </p>
+      </div>
+      {libraryError && <p role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>{libraryError}</p>}
+      {libraryError && !libraryBusy && libraryFiles === null && libraryOwnerId && (
+        <Button size="small" variant="outlined" onClick={() => setLibraryRetry((value) => value + 1)}>Retry loading recordings</Button>
+      )}
+      {!libraryOwnerId ? <p className={styles.fieldHint}>Sign in to load your recording library.</p> : libraryBusy && libraryFiles === null ? (
+        <p role="status" aria-live="polite" className={controls.loadingLine}>
+          <span className={styles.spinner} aria-hidden="true" /> Loading your recording library…
+        </p>
+      ) : !libraryFiles ? null : libraryFiles.length === 0 ? (
+        <p className={styles.fieldHint}>Nothing in your recording library yet.</p>
+      ) : (
+        <div className={styles.adaptRow}>
+          <TextField
+            select
+            label="Library recording"
+            size="small"
+            className={controls.fieldMd}
+            value={effectiveLibraryFileId}
+            onChange={(e) => { libraryOpenEpoch.current++; libraryOpenBusy.current = false; setLibraryActionBusy(null); setSelectedLibraryFileId(e.target.value); }}
+          >
+            {(libraryFiles ?? []).map((f) => (
+              <MenuItem key={f.id} value={f.id}>
+                {f.name} ({f.kind})
+              </MenuItem>
+            ))}
+          </TextField>
+          {selectedLibraryFile && !selectedLibraryFile.mimeType.startsWith("audio/") && (
+            <Button
+              size="small"
+              variant="outlined"
+              className={controls.fieldRowButton}
+              loading={libraryActionBusy === "walkthrough"}
+              loadingPosition="start"
+              disabled={crossTakeBusy || libraryActionBusy !== null}
+              onClick={(e) => void openLibraryRecording(selectedLibraryFile, e.currentTarget, "walkthrough")}
+            >
+              {libraryActionBusy === "walkthrough" ? "Loading…" : "Talk through this"}
+            </Button>
+          )}
+          {selectedLibraryFile && (
+            <Button
+              size="small"
+              variant="outlined"
+              className={controls.fieldRowButton}
+              loading={libraryActionBusy === "announcement"}
+              loadingPosition="start"
+              disabled={crossTakeBusy || libraryActionBusy !== null}
+              onClick={(e) => void openLibraryRecording(selectedLibraryFile, e.currentTarget, "announcement")}
+            >
+              {libraryActionBusy === "announcement" ? "Loading…" : "Draft announcement"}
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <TabShell
@@ -688,6 +774,7 @@ export default function RecordingTab({
             leaving the Record sub-tab, and still never unmounts it, since the
             whole subtree above is only ever display:none-toggled. */}
         <div style={{ display: walkthroughTake || announcementTake ? "none" : undefined }}>
+          {announcementsActive && savedRecordingPicker}
           <SourceDevicesPanel
             devices={dev.devices}
             requestAccess={dev.requestAccess}
@@ -778,70 +865,7 @@ export default function RecordingTab({
             containerRef={takesPanelContainerRef}
           />
 
-          {/* AC26: reach recordings made before this page load - a library
-              file is not a Take, so it is downloaded and wrapped as one here,
-              then handed to the same openWalkthrough/openAnnouncement entry
-              points a session take uses. Neither sibling surface knows the
-              difference. */}
-          <div className={styles.adaptPanel}>
-            <div className={styles.adaptPanelHeader}>
-              <h2 className={styles.adaptPanelTitle}>Narrate or announce a saved recording</h2>
-              <p className={styles.adaptPanelSubtitle}>
-                Pick anything already in your recording library - including a captioned or narrated file - to talk over it or draft an announcement from it.
-              </p>
-            </div>
-            {libraryError && <p role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>{libraryError}</p>}
-            {libraryBusy && libraryFiles === null ? (
-              <p role="status" aria-live="polite" className={controls.loadingLine}>
-                <span className={styles.spinner} aria-hidden="true" /> Loading your recording library…
-              </p>
-            ) : libraryFiles && libraryFiles.length === 0 ? (
-              <p className={styles.fieldHint}>Nothing in your recording library yet.</p>
-            ) : (
-              <div className={styles.adaptRow}>
-                <TextField
-                  select
-                  label="Library recording"
-                  size="small"
-                  className={controls.fieldMd}
-                  value={effectiveLibraryFileId}
-                  onChange={(e) => setSelectedLibraryFileId(e.target.value)}
-                >
-                  {(libraryFiles ?? []).map((f) => (
-                    <MenuItem key={f.id} value={f.id}>
-                      {f.name} ({f.kind})
-                    </MenuItem>
-                  ))}
-                </TextField>
-                {selectedLibraryFile && !selectedLibraryFile.mimeType.startsWith("audio/") && (
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    className={controls.fieldRowButton}
-                    loading={libraryActionBusy === "walkthrough"}
-                    loadingPosition="start"
-                    disabled={crossTakeBusy || libraryActionBusy !== null}
-                    onClick={(e) => void handleLibraryTalkThrough(selectedLibraryFile, e.currentTarget)}
-                  >
-                    {libraryActionBusy === "walkthrough" ? "Loading…" : "Talk through this"}
-                  </Button>
-                )}
-                {selectedLibraryFile && (
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    className={controls.fieldRowButton}
-                    loading={libraryActionBusy === "announcement"}
-                    loadingPosition="start"
-                    disabled={crossTakeBusy || libraryActionBusy !== null}
-                    onClick={(e) => void handleLibraryDraftAnnouncement(selectedLibraryFile, e.currentTarget)}
-                  >
-                    {libraryActionBusy === "announcement" ? "Loading…" : "Draft announcement"}
-                  </Button>
-                )}
-              </div>
-            )}
-          </div>
+          {!announcementsActive && savedRecordingPicker}
         </div>
 
         <div style={{ display: walkthroughTake ? undefined : "none" }}>

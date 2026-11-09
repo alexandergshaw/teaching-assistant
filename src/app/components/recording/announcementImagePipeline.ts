@@ -75,6 +75,7 @@ export interface AnnouncementImageDeps {
     update: (prev: AnnouncementLogImageAttempt[]) => AnnouncementLogImageAttempt[]
   ) => void;
   autoImageAttemptedRef: React.MutableRefObject<boolean>;
+  imageRequestEpochRef: React.MutableRefObject<number>;
 }
 
 /**
@@ -87,10 +88,13 @@ export interface AnnouncementImageDeps {
  * the drafted announcement text itself is completely untouched either way.
  */
 export async function generateImage(deps: AnnouncementImageDeps): Promise<void> {
+  const requestEpoch = ++deps.imageRequestEpochRef.current;
   deps.setImageState("generating");
   deps.setImageError(null);
   const prompt = buildAnnouncementImagePrompt(deps.subject, deps.body);
   const outcome = await raceWithTimeout(generateAnnouncementImageAction(prompt), CLIENT_PATIENCE_MS);
+
+  if (deps.imageRequestEpochRef.current !== requestEpoch) return;
 
   // Branch on outcome.kind FIRST, before ever looking for an "error" key -
   // the {kind:"failed", error: unknown} outcome ALSO carries an "error" key,
@@ -141,6 +145,7 @@ export function regenerateImage(deps: AnnouncementImageDeps): void {
  * post (or save to drafts) with no image at all; this is the control that
  * makes that a real choice rather than only a byproduct of a failure. */
 export function discardImage(deps: AnnouncementImageDeps): void {
+  deps.imageRequestEpochRef.current++;
   deps.autoImageAttemptedRef.current = true;
   deps.setLogImageAttempts((prev) => [...prev, { at: new Date().toISOString(), outcome: "discarded", error: "" }]);
   deps.setImageState("idle");

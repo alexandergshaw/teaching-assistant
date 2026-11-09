@@ -19,7 +19,7 @@
 // instead of this component trying to detect and reset that itself.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Button, MenuItem, TextField } from "@mui/material";
+import { Accordion, AccordionDetails, AccordionSummary, Button, MenuItem, TextField } from "@mui/material";
 import LinearProgress from "@mui/material/LinearProgress";
 import styles from "../../page.module.css";
 import controls from "./RecordingControls.module.css";
@@ -165,6 +165,9 @@ export default function TakeAnnouncementPanel({
     backToReviewAfterPostFailure,
     courses,
     coursesError,
+    coursesLoading, coursesNeedSignIn,
+    retryCourses,
+    confirmLeave,
     courseId,
     setCourseId,
     subject,
@@ -326,10 +329,11 @@ export default function TakeAnnouncementPanel({
         <p role="status" aria-live="polite" className={annChat.setupSummary}>
           Posted to {posted.course}. Students can see it now.
         </p>
+        {lastMessage && <p role="alert">{lastMessage}</p>}
         <p className={styles.previewMeta}>Subject: {posted.subject}</p>
         <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Announcement posted</span>
         <div>
-          <Button size="small" variant="text" onClick={onClose}>
+          <Button size="small" variant="text" onClick={() => { if (confirmLeave()) onClose(); }}>
             Back to takes
           </Button>
         </div>
@@ -347,7 +351,7 @@ export default function TakeAnnouncementPanel({
       </h2>
 
       <div>
-        <Button size="small" variant="text" onClick={onClose}>
+        <Button size="small" variant="text" onClick={() => { if (confirmLeave()) onClose(); }}>
           Back to takes
         </Button>
       </div>
@@ -491,9 +495,12 @@ export default function TakeAnnouncementPanel({
             </div>
             <p className={styles.fieldHint}>Only courses linked to Canvas can be posted to.</p>
             </div>
+            {coursesLoading && <p role="status">Loading courses...</p>}
+            {coursesNeedSignIn && <p role="status">Sign in to load your courses.</p>}
             {coursesError && (
               <div role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
                 {coursesError}
+                <Button size="small" onClick={retryCourses}>Retry loading courses</Button>
               </div>
             )}
           </fieldset>
@@ -576,8 +583,10 @@ export default function TakeAnnouncementPanel({
             )}
             </>}
           </fieldset>
-          <AnnouncementLibrary key={library.scopeKey} controller={library.controller} state={library.state} enabled={library.enabled}
-            canAddDraft={false} addDraft={() => {}} onRemoved={(id) => { if (id === selectedFormatId) setSelectedFormat(null); }} />
+          <Accordion disableGutters><AccordionSummary>Manage previous announcements</AccordionSummary><AccordionDetails>
+            <AnnouncementLibrary key={library.scopeKey} controller={library.controller} state={library.state} enabled={library.enabled}
+              canAddDraft={false} showAddDraft={false} addDraft={() => {}} onRemoved={(id) => { if (id === selectedFormatId) setSelectedFormat(null); }} />
+          </AccordionDetails></Accordion>
 
           {stage.phase !== "idle" && <>
           <TextField
@@ -606,8 +615,7 @@ export default function TakeAnnouncementPanel({
               This image DOES post with the announcement now (see the note
               above imageState in useTakeAnnouncement.ts): a "ready" image at
               post time is uploaded to Canvas and embedded in the posted
-              HTML with alt text, while the Subject/Message fields above stay
-              plain text either way. If the upload fails, the announcement
+              HTML with alt text, without changing the Subject/Message fields. If the upload fails, the announcement
               still posts as text only, and lastMessage (rendered below the
               controls) tells the instructor why. The line right below states
               this for every state (generating/ready/failed/idle), not just
@@ -619,8 +627,7 @@ export default function TakeAnnouncementPanel({
             <legend className={controls.sectionLegend}>Image</legend>
             <p className={styles.fieldHint}>
               A ready image posts with the announcement automatically (with
-              alt text for screen readers) - the Subject and Message fields
-              above stay plain text either way. If the upload to Canvas
+              alt text for screen readers) without changing the subject or formatted message. If the upload to Canvas
               fails, the announcement still posts as text only, and you will
               be told why below. You can also download the image and attach
               it yourself wherever you are posting.
@@ -714,7 +721,7 @@ export default function TakeAnnouncementPanel({
               idleVariant="contained"
               loading={posting}
               loadingLabel="Posting…"
-              disabled={busy || Boolean(postUnavailableReason)}
+              disabled={busy || savingDraft || Boolean(postUnavailableReason)}
               onArm={handlePostButtonClick}
               onConfirm={handlePostButtonClick}
               onCancel={cancelPostConfirm}

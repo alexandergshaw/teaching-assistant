@@ -10,7 +10,7 @@ vi.mock("@/app/actions/announcement-image", () => ({
 }));
 
 import { generateAnnouncementImageAction } from "@/app/actions/announcement-image";
-import { generateImage, CLIENT_PATIENCE_MS, type AnnouncementImageDeps } from "./announcementImagePipeline";
+import { discardImage, generateImage, CLIENT_PATIENCE_MS, type AnnouncementImageDeps } from "./announcementImagePipeline";
 
 function makeDeps(overrides: Partial<AnnouncementImageDeps> = {}): {
   deps: AnnouncementImageDeps;
@@ -33,6 +33,7 @@ function makeDeps(overrides: Partial<AnnouncementImageDeps> = {}): {
     setImageError: (v) => calls.setImageError.push(v),
     setLogImageAttempts: () => {},
     autoImageAttemptedRef: { current: false },
+    imageRequestEpochRef: { current: 0 },
     ...overrides,
   };
   return { deps, calls };
@@ -122,5 +123,32 @@ describe("O-3: a fast success and an {error} result are unchanged", () => {
     expect(calls.setImageError).toEqual([null, "Image generation failed: HTTP 429 - Quota exceeded"]);
     expect(calls.setImageBase64).toEqual([null]);
     expect(calls.setImageMimeType).toEqual([null]);
+  });
+});
+
+
+describe("image request fencing", () => {
+  beforeEach(() => vi.resetAllMocks());
+  it("does not restore an image after it was removed while generation was pending", async () => {
+    let resolve!: (value: { base64: string; mimeType: string }) => void;
+    vi.mocked(generateAnnouncementImageAction).mockImplementation(() => new Promise((r) => { resolve = r; }));
+    const { deps, calls } = makeDeps();
+    const pending = generateImage(deps);
+    discardImage(deps);
+    resolve({ base64: "old", mimeType: "image/png" });
+    await pending;
+    expect(calls.setImageState).toEqual(["generating", "idle"]);
+    expect(calls.setImageBase64).toEqual([null]);
+  });
+  it("ignores an older request after a newer one completes", async () => {
+    let resolve!: (value: { base64: string; mimeType: string }) => void;
+    vi.mocked(generateAnnouncementImageAction).mockImplementationOnce(() => new Promise((r) => { resolve = r; }))
+      .mockResolvedValueOnce({ base64: "new", mimeType: "image/png" });
+    const { deps, calls } = makeDeps();
+    const old = generateImage(deps);
+    await generateImage(deps);
+    resolve({ base64: "old", mimeType: "image/png" });
+    await old;
+    expect(calls.setImageBase64).toEqual(["new"]);
   });
 });

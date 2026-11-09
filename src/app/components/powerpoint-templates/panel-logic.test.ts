@@ -1,6 +1,6 @@
 import { resetSessionDiagnosticLogForTests, readSessionDiagnosticLogState } from "@/lib/session-diagnostic-log";
 import { describe, it, expect, vi } from "vitest";
-import { filterLibraryPage, libraryDisplayName, handoffTemplate, SELECTED_TEMPLATE_KEY, SELECTED_ROLE_LIBRARY_KEY, recordPowerPointDiagnostic, sourceSlidePage } from "./panel-logic";
+import { filterLibraryPage, libraryDisplayName, filterTemplateSlides, handoffTemplate, SELECTED_TEMPLATE_KEY, SELECTED_ROLE_LIBRARY_KEY, recordPowerPointDiagnostic, sourceSlidePage } from "./panel-logic";
 it("filters names without conflating duplicate library identities and clamps the page after a refresh", () => {
   const entries = Array.from({ length: 13 }, (_, i) => ({ id: String(i), name: i < 2 ? "Résumé" : `Class ${i}` }));
   expect(filterLibraryPage(entries, " re\u0301sume\u0301 ", 1).items.map((item) => item.id)).toEqual(["0", "1"]);
@@ -11,12 +11,21 @@ it("filters names without conflating duplicate library identities and clamps the
   expect(libraryDisplayName(entries[1], entries)).toBe("Résumé (1)");
   expect(libraryDisplayName(entries[2], entries)).toBe("Class 2");
 });
+
 it("pages all source slides in order without dropping the last partial page", () => {
   const slides = Array.from({ length: 14 }, (_, i) => i + 1);
   expect(sourceSlidePage(slides, 1)).toEqual([1, 2, 3, 4, 5, 6]);
   expect(sourceSlidePage(slides, 2)).toEqual([7, 8, 9, 10, 11, 12]);
   expect(sourceSlidePage(slides, 3)).toEqual([13, 14]);
   expect(sourceSlidePage(slides, 0)).toEqual(sourceSlidePage(slides, 1));
+});
+it("finds source slides without mutating or dropping the underlying items", () => {
+  const slides = [{ id: "a", ordinal: 1, text: "Welcome", role: "title" as const }, { id: "b", ordinal: 2, text: "Deep review", role: "content" as const }];
+  expect(filterTemplateSlides(slides, "REVIEW").map((item) => item.id)).toEqual(["b"]);
+  expect(filterTemplateSlides(slides, "1").map((item) => item.id)).toEqual(["a"]);
+  expect(filterTemplateSlides(slides, "missing")).toEqual([]);
+  expect(filterTemplateSlides(slides, "")).toEqual(slides);
+  expect(slides).toHaveLength(2);
 });
 describe("synchronous template selection handoff", () => {
   it("commits the JSON source identity before navigation and destination reopen", () => {

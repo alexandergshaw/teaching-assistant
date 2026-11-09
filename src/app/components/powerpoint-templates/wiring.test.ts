@@ -53,10 +53,15 @@ describe("PowerPoint template UI wiring (source, not rendering)", () => {
     expect(source).toContain('Loading saved libraries...');
     expect(source).toContain('librariesLoaded && !libraries.length');
     expect(source).toContain('librariesError && <Alert');
-    expect(source).toContain('sourceSlidePage(definition.slides, slidePage)');
+    expect(source).toContain('sourceSlidePage(visibleSlides, effectiveSlidePage)');
     expect(source).toContain('aria-label="Source slide pages"');
     expect(source).toContain('choose Match slides by role in Slide Deck Creation to use your classifications');
     expect(source).toContain('Slides need editable text');
+  });
+  it("provides slide search without replacing the saved definition", () => {
+    expect(source).toContain('label="Search source slides"');
+    expect(source).toContain('setSlideQuery(event.target.value); setSlidePage(1)');
+    expect(source).toContain('No slides match this search.');
   });
   it("offers manual classification and states textless fill limits", () => {
     expect(source).toContain('Classify manually');

@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, MenuItem, Pagination, TextField } from "@mui/material";
 import { uploadPowerPointTemplateAction, analyzePowerPointTemplateAction, listPowerPointTemplateLibrariesAction,
   getPowerPointTemplateLibraryAction, savePowerPointTemplateLibraryAction, reusePowerPointTemplateLibraryAction,
   downloadPowerPointTemplateLibraryAction } from "@/app/actions/powerpoint-template-library";
 import { SLIDE_ROLES, absentRoles, failure, type LibraryDefinition, type LibraryMeta, type TemplateFailure } from "@/lib/powerpoint-template-library/types";
 import { checkFileWireBudget } from "@/lib/upload-budget";
-import { recordPowerPointDiagnostic as diagnostic, templateOperationStartedAt, handoffTemplate, readTemplateFile, downloadTemplate, filterLibraryPage, libraryDisplayName, sourceSlidePage } from "./panel-logic";
+import { recordPowerPointDiagnostic as diagnostic, templateOperationStartedAt, handoffTemplate, readTemplateFile, downloadTemplate, filterLibraryPage, libraryDisplayName, filterTemplateSlides, sourceSlidePage } from "./panel-logic";
 import TabHeader from "../TabHeader";
 import styles from "../template-tools.module.css";
 import { useSupabase } from "@/context/SupabaseProvider";
@@ -28,6 +28,7 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
   const [librariesLoaded, setLibrariesLoaded] = useState(false);
   const [librariesError, setLibrariesError] = useState("");
   const [slidePage, setSlidePage] = useState(1);
+  const [slideQuery, setSlideQuery] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [name, setName] = useState("");
@@ -44,6 +45,8 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
   const generation = useRef(0);
   const listGeneration = useRef(0);
   const locked = useRef(false);
+  const visibleSlides = useMemo(() => filterTemplateSlides(definition?.slides ?? [], slideQuery), [definition, slideQuery]);
+  const effectiveSlidePage = Math.min(slidePage, Math.max(1, Math.ceil(visibleSlides.length / 6)));
   async function handleOperation(operation: "load" | "analyze" | "save" | "reuse" | "download", job: (current: () => boolean) => Promise<void>) {
     if (locked.current) return;
     locked.current = true;
@@ -117,7 +120,7 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
       const result = requireSuccess(await analyzePowerPointTemplateAction(id, mode));
       diagnostic("analyze", started);
       if (!current()) return;
-      setDefinition(result.definition); setManualReview(result.manual); setSlidePage(1); setDirty(true); setStatus(result.manual ? `${mode === "auto" ? "Automatic classification was unavailable. " : ""}Manual review: all slides start as other. Assign roles, then save. Textless slides have no image preview and cannot be filled by the positional writer.` : "Review the source slides and classifications, then save.");
+      setDefinition(result.definition); setManualReview(result.manual); setSlidePage(1); setSlideQuery(""); setDirty(true); setStatus(result.manual ? `${mode === "auto" ? "Automatic classification was unavailable. " : ""}Manual review: all slides start as other. Assign roles, then save. Textless slides have no image preview and cannot be filled by the positional writer.` : "Review the source slides and classifications, then save.");
     });
   }
   async function open(id: string) {
@@ -127,7 +130,7 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
       diagnostic("load", started);
       if (!current()) return;
       setSavedId(result.library.id); setSourceId(result.library.sourceFileId);
-      setName(result.library.name); setDefinition(result.library.definition); setManualReview(false); setSlidePage(1);
+      setName(result.library.name); setDefinition(result.library.definition); setManualReview(false); setSlidePage(1); setSlideQuery("");
       setFile(null); setConfirmed(false); setDirty(false); setStatus("Saved library reopened.");
     });
   }
@@ -220,8 +223,9 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
           <p className={styles.roleSummary}>Absent roles: {absentRoles(definition).join(", ") || "none"}.</p>
         </header>
         {manualReview && <Alert severity="info">All slides started as other for manual review. Assign the roles you want before saving.</Alert>}
-        <p className={styles.helperText}>Showing slides {(slidePage - 1) * 6 + 1}-{Math.min(slidePage * 6, definition.slides.length)} of {definition.slides.length}.</p>
-        <div className={styles.slideGrid}>{sourceSlidePage(definition.slides, slidePage).map(slide => <article className={styles.slideCard} key={slide.id}>
+        <TextField label="Search source slides" helperText="Search slide number or extracted text." size="small" fullWidth value={slideQuery} onChange={event => { setSlideQuery(event.target.value); setSlidePage(1); }} />
+        <p className={styles.helperText} role="status">{visibleSlides.length ? `Showing ${((effectiveSlidePage - 1) * 6) + 1}-${Math.min(effectiveSlidePage * 6, visibleSlides.length)} of ${visibleSlides.length} matching slides.` : "No slides match this search."}</p>
+        <div className={styles.slideGrid}>{sourceSlidePage(visibleSlides, effectiveSlidePage).map(slide => <article className={styles.slideCard} key={slide.id}>
           <div className={styles.slideHeading}><h3>Source slide {slide.ordinal}</h3><small>{slide.id}</small></div>
           <pre className={styles.slideText}>{slide.text || "No extracted text. Visual content has not been classified."}</pre>
           <TextField select fullWidth label={`Role for source slide ${slide.ordinal}`} slotProps={{ select: { "aria-describedby": busy ? "ppt-template-status" : !slide.text.trim() ? `ppt-role-reason-${slide.ordinal}` : undefined } }} disabled={busy} value={slide.role} onChange={event => {
@@ -229,7 +233,7 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
           }}>{SLIDE_ROLES.map(role => <MenuItem key={role} value={role}>{role}</MenuItem>)}</TextField>
           {!slide.text.trim() && <p id={`ppt-role-reason-${slide.ordinal}`} className={styles.helperText}>No text or image preview is available. You may assign a role, but this slide cannot be filled by the positional writer.</p>}
         </article>)}</div>
-        {definition.slides.length > 6 && <Pagination count={Math.ceil(definition.slides.length / 6)} page={slidePage} onChange={(_, page) => setSlidePage(page)} disabled={busy} aria-label="Source slide pages" />}
+        {visibleSlides.length > 6 && <Pagination count={Math.ceil(visibleSlides.length / 6)} page={effectiveSlidePage} onChange={(_, page) => setSlidePage(page)} disabled={busy} aria-label="Source slide pages" />}
         <div className={styles.actionRow}>
           <button className={savedId ? styles.secondaryButton : styles.primaryButton} type="button" disabled={busy || !name.trim()} aria-describedby={busy ? "ppt-template-status" : !name.trim() ? "ppt-save-reason" : undefined} onClick={() => void save()}>Save classifications</button>
           <button className={styles.secondaryButton} type="button" disabled={busy} aria-describedby={busy ? "ppt-template-status" : undefined} onClick={() => {

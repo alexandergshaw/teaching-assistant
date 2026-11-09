@@ -1,5 +1,5 @@
 import { recordSessionDiagnosticEntry } from "@/lib/session-diagnostic-log";
-import { failure, type TemplateFailure } from "@/lib/powerpoint-template-library/types";
+import { failure, type LibrarySlide, type TemplateFailure } from "@/lib/powerpoint-template-library/types";
 export const SELECTED_TEMPLATE_KEY = "ta-ppt-template-file-id";
 export function libraryDisplayName<T extends { id: string; name: string }>(library: T, libraries: readonly T[]): string {
   const key = library.name.trim().normalize("NFKC").toLocaleLowerCase();
@@ -14,6 +14,10 @@ export function filterLibraryPage<T extends { name: string }>(libraries: readonl
   return { matches: matches.length, pages, current, items: matches.slice((current - 1) * pageSize, current * pageSize) };
 }
 export const SELECTED_ROLE_LIBRARY_KEY = "ta-ppt-role-library";
+export function filterTemplateSlides(slides: readonly LibrarySlide[], query: string): LibrarySlide[] {
+  const term = query.trim().toLocaleLowerCase();
+  return slides.filter((slide) => `${slide.ordinal}\n${slide.text}`.toLocaleLowerCase().includes(term));
+}
 export const ROLE_LIBRARY_CHANGED = "ta-ppt-role-library-changed";
 export function sourceSlidePage<T>(slides: readonly T[], page: number, pageSize = 6): readonly T[] {
   const safePage = Number.isInteger(page) && page > 0 ? page : 1;

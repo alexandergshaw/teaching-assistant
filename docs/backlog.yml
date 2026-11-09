@@ -640,6 +640,18 @@
   from: 'Owner request in this chat, 2026-10-15: add a tool beside the PowerPoint template tab that accepts an uploaded doc or PDF and abstracts it into a template of itself. Filed by the commit adding this row.'
   note: 'Local implementation and independent source checks are complete; the corrected manual verification report is independently accepted. Current candidate-bound required gates and the full src gate passed; npm.cmd run build compiled and passed TypeScript, then failed prerender for missing Supabase configuration. No rendered UI, live database/provider, migration application or output-fidelity success is claimed. Existing unrelated template obligations remain open; local delivery/publication receipt is recorded in the discharging commit, not inferred from these source checks.'
   question: null
+- id: 'PPT-TEMPLATE-AUTHENTIC-SLIDE-PREVIEWS'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'presentations-authoring'
+  title: 'Render authentic source slide previews for PowerPoint Templates.'
+  owns: ['src/app/components/powerpoint-templates/', 'src/app/actions/powerpoint-template-library.ts', 'src/lib/powerpoint-template-library/']
+  verify: null
+  blocked_by: []
+  instrument: 'Verify original PPTX slide order and representative shapes, text, fonts, media, charts and textless slides against the source in a sandboxed production-compatible renderer. Test access isolation, file limits, malformed archives, timeouts, cleanup, pagination, keyboard and browser display; never present individual image assets or invented layout as a faithful slide render.'
+  from: 'Owner-requested PowerPoint Templates workflow audit and visual preview investigation.'
+  note: 'No PPTX slide renderer is present in the app dependencies or configured hosting; local Get-Command found no LibreOffice/soffice, while pdftoppm only renders existing PDFs. Existing Office helpers extract text or individual images, not composed slides. A production-compatible, trusted, resource-bounded renderer and real-file fidelity verification are needed; do not add paid or untrusted services. Text-only review and role assignment remain available in the meantime.'
+  question: null
 - id: 'PPT-TEMPLATE-SLIDE-LIBRARY'
   state: 'verification'
   kind: 'chore'

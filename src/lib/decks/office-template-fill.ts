@@ -1,6 +1,8 @@
 import type { OfficeKind, OfficeParagraph, RunSpan } from "@/lib/office-edit";
 import { parseOfficeParagraphs, applyOfficeSections } from "@/lib/office-edit";
-import { buildSlideCountAdjustment, type FitReport } from "@/lib/decks/fit-report";
+import { buildOperationRefusedAdjustment, buildSlideCountAdjustment, type FitReport } from "@/lib/decks/fit-report";
+import { inventorySlides } from "@/lib/powerpoint-template-library/inventory";
+import JSZip from "jszip";
 
 /**
  * The pure middle of an owner-uploaded-template fill, extracted from
@@ -133,6 +135,11 @@ export async function groupOfficeTemplateParagraphsBySlide(
   kind: OfficeKind,
   buffer: Buffer
 ): Promise<Array<{ slide: number; paragraphs: OfficeParagraph[] }>> {
+  if (kind !== "pptx") return [];
+  const inventory = await inventorySlides(buffer);
+  const zip = await JSZip.loadAsync(buffer);
+  const members = Object.keys(zip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/i.test(name)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  if (members.length !== inventory.length || inventory.some((slide) => !members.includes(slide.id))) throw new Error("This template contains unsupported or unreferenced slides. Use a standard PowerPoint template.");
   const paragraphs = await parseOfficeParagraphs(kind, buffer);
   const bySlide = new Map<number, OfficeParagraph[]>();
   for (const p of paragraphs) {
@@ -141,9 +148,7 @@ export async function groupOfficeTemplateParagraphsBySlide(
     if (list) list.push(p);
     else bySlide.set(p.slide, [p]);
   }
-  return [...bySlide.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([slide, ps]) => ({ slide, paragraphs: ps }));
+  return inventory.map((slide) => ({ slide: slide.ordinal, paragraphs: bySlide.get(members.indexOf(slide.id) + 1) ?? [] }));
 }
 
 /** A generated slide's content, in the shape both deck paths already emit. */
@@ -171,10 +176,8 @@ export type SlideTemplateFillPlan =
  * `groups.length` generated slides and discarding the rest - that silent
  * discard is the exact defect wave T2 exists to close (section 11.4).
  *
- * When the template has slides to spare, the extra template slides are left
- * alone - H1 (office-template-fill.ts's own module header) means an
- * untouched template paragraph is never a candidate for deletion, so there
- * is nothing to refuse there.
+ * Refuse surplus slides and paragraphs as well: leaving original text in an
+ * exported generated deck would silently carry unrelated template content.
  */
 export function planSlideTemplateFill(
   groups: Array<{ slide: number; paragraphs: OfficeParagraph[] }>,
@@ -185,11 +188,15 @@ export function planSlideTemplateFill(
     return { ok: false, fitReport: { adjustments: [refusal] } };
   }
 
+  if (groups.length > deckSlides.length) return { ok: false, fitReport: { adjustments: [buildOperationRefusedAdjustment(`Your template has ${groups.length} slides but this deck has ${deckSlides.length}; unused original slides would remain. Choose a template with the same number of slides.`)] } };
+
   const replacements: OfficeTemplateReplacement[] = [];
   for (let i = 0; i < deckSlides.length; i += 1) {
     const templateParas = groups[i].paragraphs;
     const genSlide = deckSlides[i];
-    if (templateParas.length === 0) continue;
+    if (templateParas.length === 0) return { ok: false, fitReport: { adjustments: [buildOperationRefusedAdjustment(`Slide ${i + 1} has no editable text slots for the generated title and ${genSlide.bullets.length} bullets.`)] } };
+    if (genSlide.bullets.length > templateParas.length - 1) return { ok: false, fitReport: { adjustments: [buildOperationRefusedAdjustment(`Slide ${i + 1} has ${templateParas.length - 1} editable bullet slots but needs ${genSlide.bullets.length}.`)] } };
+    if (genSlide.bullets.length < templateParas.length - 1) return { ok: false, fitReport: { adjustments: [buildOperationRefusedAdjustment(`Slide ${i + 1} has ${templateParas.length - 1} editable bullet slots but this deck supplies ${genSlide.bullets.length}; original text would remain.`)] } };
     replacements.push({ id: templateParas[0].id, text: genSlide.title });
     for (let b = 1; b < templateParas.length; b += 1) {
       const bulletText = genSlide.bullets[b - 1];

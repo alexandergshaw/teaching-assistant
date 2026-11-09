@@ -35,8 +35,10 @@ async function buildPptxFixture(slides: string[]): Promise<Buffer> {
   const zip = new JSZip();
   zip.file(
     "[Content_Types].xml",
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>`
+    `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>${slides.map((_, i) => `<Override PartName="/ppt/slides/slide${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`).join("")}</Types>`
   );
+  zip.file("ppt/presentation.xml", `<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst>${slides.map((_, i) => `<p:sldId id="${256 + i}" r:id="r${i + 1}"/>`).join("")}</p:sldIdLst></p:presentation>`);
+  zip.file("ppt/_rels/presentation.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${slides.map((_, i) => `<Relationship Id="r${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${i + 1}.xml"/>`).join("")}</Relationships>`);
   slides.forEach((xml, i) => zip.file(`ppt/slides/slide${i + 1}.xml`, pptxSlideXml(xml)));
   return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
 }
@@ -236,6 +238,12 @@ describe("office-template-fill: buildOfficeTemplateParagraphList", () => {
 });
 
 describe("office-template-fill: groupOfficeTemplateParagraphsBySlide", () => {
+  it("uses presentation relationship order rather than slide filename order", async () => {
+    const zip = await JSZip.loadAsync(await buildPptxFixture([pptxParagraph("First file"), pptxParagraph("Second file")]));
+    zip.file("ppt/presentation.xml", '<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId id="256" r:id="r2"/><p:sldId id="257" r:id="r1"/></p:sldIdLst></p:presentation>');
+    const groups = await groupOfficeTemplateParagraphsBySlide("pptx", Buffer.from(await zip.generateAsync({ type: "nodebuffer" })));
+    expect(groups.map((group) => group.paragraphs[0].text)).toEqual(["Second file", "First file"]);
+  });
   it("groups pptx paragraphs by slide, in ascending slide order, each slide's own order preserved", async () => {
     const buffer = await buildPptxFixture([
       `${pptxParagraph("Slide 1 title")}${pptxParagraph("Slide 1 body")}`,
@@ -257,6 +265,15 @@ describe("office-template-fill: groupOfficeTemplateParagraphsBySlide", () => {
 });
 
 describe("office-template-fill: planSlideTemplateFill (wave T2, docs/a43-scope.md section 11.4)", () => {
+  it("refuses missing bullet capacity and surplus original text", async () => {
+    const groups = await groupOfficeTemplateParagraphsBySlide("pptx", await buildPptxFixture([pptxParagraph("Title") + pptxParagraph("Body")]));
+    for (const [bullets, message] of [[[], "original text would remain"], [["one", "two"], "1 editable bullet slots but needs 2"]] as const) {
+      const plan = planSlideTemplateFill(groups, [{ title: "New", bullets: [...bullets] }]);
+      expect(plan.ok).toBe(false);
+      if (plan.ok) throw new Error("expected refusal");
+      expect(plan.fitReport.adjustments[0]).toMatchObject({ class: "operation-refused", reason: expect.stringContaining(message) });
+    }
+  });
   it("WATCHED RED before this wave: a template with fewer slides than the deck needs must not silently drop the rest", async () => {
     // This is the exact shape of the bug docs/a43-scope.md's wave T2 exists
     // to close: src/app/actions/deck-template-files.ts's fillDeckTemplateFileAction
@@ -322,7 +339,7 @@ describe("office-template-fill: planSlideTemplateFill (wave T2, docs/a43-scope.m
     ]);
   });
 
-  it("does not refuse when the template has slides to spare - the untouched slides keep their own text (H1)", async () => {
+  it("refuses when extra template slides would retain original content", async () => {
     const buffer = await buildPptxFixture([
       `${pptxParagraph("Slide 1 title")}`,
       `${pptxParagraph("Slide 2 title")}`,
@@ -332,16 +349,18 @@ describe("office-template-fill: planSlideTemplateFill (wave T2, docs/a43-scope.m
 
     const plan = planSlideTemplateFill(groups, [{ title: "Gen 1", bullets: [] }]);
 
-    expect(plan.ok).toBe(true);
-    if (!plan.ok) throw new Error("expected a fill plan");
-    expect(plan.replacements).toEqual([{ id: groups[0].paragraphs[0].id, text: "Gen 1" }]);
+    expect(plan.ok).toBe(false);
+    if (plan.ok) throw new Error("expected refusal");
+    expect(plan.fitReport.adjustments[0]).toMatchObject({ class: "operation-refused", reason: expect.stringContaining("unused original slides") });
   });
 
-  it("skips a template slide with no paragraphs at all, rather than throwing", async () => {
-    const buffer = await buildPptxFixture([`${pptxParagraph("Slide 1 title")}`]);
+  it("retains an image-only position and refuses to drop generated content", async () => {
+    const buffer = await buildPptxFixture(["", `${pptxParagraph("Slide 2 title")}`]);
     const groups = await groupOfficeTemplateParagraphsBySlide("pptx", buffer);
-
-    const plan = planSlideTemplateFill(groups, [{ title: "Gen 1", bullets: [] }]);
-    expect(plan.ok).toBe(true);
+    expect(groups.map((group) => group.paragraphs.length)).toEqual([0, 1]);
+    const plan = planSlideTemplateFill(groups, [{ title: "Gen 1", bullets: [] }, { title: "Gen 2", bullets: [] }]);
+    expect(plan.ok).toBe(false);
+    if (plan.ok) throw new Error("expected refusal");
+    expect(plan.fitReport.adjustments[0]).toMatchObject({ class: "operation-refused", reason: expect.stringContaining("Slide 1 has no editable text slots") });
   });
 });

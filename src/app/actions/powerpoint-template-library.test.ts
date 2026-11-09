@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { uploadPowerPointTemplateAction, analyzePowerPointTemplateAction, savePowerPointTemplateLibraryAction, listPowerPointTemplateLibrariesAction,
   getPowerPointTemplateLibraryAction, reusePowerPointTemplateLibraryAction, downloadPowerPointTemplateLibraryAction } from "./powerpoint-template-library";
 import { fillDeckTemplateFileAction } from "./deck-template-files";
-import { parseOfficeParagraphs } from "@/lib/office-edit";
+import { inventorySlides } from "@/lib/powerpoint-template-library/inventory";
 import { handoffTemplate } from "@/app/components/powerpoint-templates/panel-logic";
 type Row = Record<string, unknown>;
 const h = vi.hoisted(() => ({
@@ -79,6 +79,16 @@ async function saved() {
   return save.library;
 }
 describe("authenticated PowerPoint library flow", () => {
+  it("successfully reuses a compatible template in the PowerPoint presentation order", async () => {
+    h.tables.deck_template_files[0].content = (await pptFixture(["First file", "Second file"])).toString("base64");
+    const library = await saved();
+    const reuse = await reusePowerPointTemplateLibraryAction(library.id);
+    if ("error" in reuse) throw reuse;
+    const filled = await fillDeckTemplateFileAction(reuse.sourceFileId, { presentationTitle: "Lesson", slides: [{ title: "First generated", bullets: [] }, { title: "Second generated", bullets: [] }] });
+    if ("error" in filled) throw filled;
+    const slides = await inventorySlides(Buffer.from(filled.base64, "base64"));
+    expect(slides.map((slide) => slide.text)).toEqual(["First generated", "Second generated"]);
+  });
   it("saves, discards proposal, reopens corrected classifications, downloads original and reuses recovered identity", async () => {
     const original = h.tables.deck_template_files[0].content as string;
     const hash = createHash("sha256").update(Buffer.from(original, "base64")).digest("hex");
@@ -105,8 +115,7 @@ describe("authenticated PowerPoint library flow", () => {
     let selected = "";
     handoffTemplate(reuse.sourceFileId, { setItem: (_, value) => { selected = value; } }, () => expect(JSON.parse(selected)).toBe(sourceId));
     const filled = await fillDeckTemplateFileAction(JSON.parse(selected), { presentationTitle: "New lesson", slides: [{ title: "Reused original", bullets: [] }] });
-    if ("error" in filled) throw filled;
-    expect((await parseOfficeParagraphs("pptx", Buffer.from(filled.base64, "base64")))[0].text).toBe("Reused original");
+    expect(filled).toHaveProperty("error", expect.stringContaining("unused original slides"));
     expect(h.tables.deck_template_files[0].content).toBe(original);
     expect(h.model).toHaveBeenCalledTimes(1);
   });

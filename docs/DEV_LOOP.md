@@ -223,6 +223,13 @@ the separate main-delivery proof documented in the
 If the owner directs another target, verify publication there and report the
 main-only proof's scope.
 
+For ordinary non-loop work, invoke `npm run delivery:check -- <full-candidate-commit>`
+before reporting main delivery. It checks ancestry against live `origin/main` and
+fails closed if the remote cannot be verified or its commit is unavailable locally.
+Fetch and retry when instructed; a cherry-pick needs separate equivalence evidence.
+This command is manually invoked, not an automatic Codex hook. It does not verify
+review, clean worktree paths, or deployment.
+
 Report these states separately: **committed locally**, **pushed to a topic
 branch**, **integrated on the target branch**, and **deployed/live**. Apply the
 [release evidence checks](loop/this-repo.md#release-evidence) before telling

@@ -5,7 +5,7 @@ const source = readFileSync("src/app/components/RecordingTab.tsx", "utf8");
 describe("recording library entry", () => {
   it("starts a single owner-scoped load whose busy state cannot cancel its own request", () => {
     const effect = source.slice(source.indexOf("  const [libraryRetry"), source.indexOf("  // Auto-picks the first library file"));
-    expect(effect).toContain("await listRecordingFiles(supabase, libraryOwnerId)");
+    expect(effect).toContain("await listRecordingMediaFiles(supabase, libraryOwnerId)");
     expect(effect).toContain("[supabase, libraryOwnerId, libraryRetry]");
     expect(effect).not.toMatch(/\[[^\]]*libraryBusy[^\]]*\]/);
     expect(effect).toContain("if (!cancelled && !settled)");

@@ -4,6 +4,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./supabase/types";
+import { isRecordingLibraryMedia } from "./recording-library-media";
 
 export interface RecordingFile {
   id: string;
@@ -135,6 +136,27 @@ export async function listRecordingFiles(
   }
 
   return (rows || []).map(mapRecordingFile);
+}
+
+/** Load recent media candidates in bounded pages rather than truncating the unfiltered library. */
+export async function listRecordingMediaFiles(
+  supabase: SupabaseClient<Database>, userId: string
+): Promise<{ files: RecordingFile[]; truncated: boolean }> {
+  const pageSize = 200;
+  const maxPages = 10;
+  const files: RecordingFile[] = [];
+  for (let page = 0; page < maxPages; page++) {
+    const { data, error } = await supabase.from("recording_files").select("*")
+      .eq("user_id", userId)
+      .or('mime_type.ilike.audio/%,mime_type.ilike.video/%,mime_type.ilike.application/octet-stream%,mime_type.ilike.binary/octet-stream%,mime_type.ilike.application/ogg%,mime_type.eq.""')
+      .order("created_at", { ascending: false }).order("id", { ascending: false })
+      .range(page * pageSize, page * pageSize + pageSize - 1);
+    if (error) throw new Error(error.message);
+    const rows = data ?? [];
+    files.push(...rows.map(mapRecordingFile).filter(isRecordingLibraryMedia));
+    if (rows.length < pageSize) return { files, truncated: false };
+  }
+  return { files, truncated: true };
 }
 
 /**

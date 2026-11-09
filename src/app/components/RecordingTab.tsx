@@ -36,7 +36,7 @@ import ModuleDeckCapturePanel from "./module-deck-capture/ModuleDeckCapturePanel
 import MessageRepliesPanel from "./message-replies/MessageRepliesPanel";
 import TakeAnnouncementPanel from "./recording/TakeAnnouncementPanel";
 import { useAnnouncementBusy, type AnnouncementRecordingContext, type PostedAnnouncementInfo } from "./recording/useTakeAnnouncement";
-import { listRecordingFiles, downloadRecordingFile, type RecordingFile } from "@/lib/recording-files";
+import { listRecordingMediaFiles, downloadRecordingFile, type RecordingFile } from "@/lib/recording-files";
 import { awaitVideoMetadata, ensureFiniteDuration } from "@/lib/caption-burn";
 import { RECORDING_LAUNCH_EVENT, parseRecordingLaunch } from "@/lib/recording-launch";
 import { openAnnouncementsTab } from "@/lib/announcements-nav";
@@ -433,7 +433,7 @@ export default function RecordingTab({
   // AC26 reachability: recordings from before this page load live only in
   // the library. Loaded lazily, once, the same way useVideoImport does for
   // Caption Studio.
-  const [libraryResult, setLibraryResult] = useState<{ owner: string; files: RecordingFile[] } | null>(null);
+  const [libraryResult, setLibraryResult] = useState<{ owner: string; files: RecordingFile[]; truncated: boolean } | null>(null);
   const [libraryBusy, setLibraryBusy] = useState(false);
   const [libraryError, setLibraryError] = useState<string | null>(null);
   const [selectedLibraryFileId, setSelectedLibraryFileId] = useState("");
@@ -464,8 +464,8 @@ export default function RecordingTab({
         setLibraryBusy(false);
       }, 15000);
       try {
-        const files = await listRecordingFiles(supabase, libraryOwnerId);
-        if (!cancelled && !settled) { settled = true; setLibraryResult({ owner: libraryOwnerId, files }); }
+        const result = await listRecordingMediaFiles(supabase, libraryOwnerId);
+        if (!cancelled && !settled) { settled = true; setLibraryResult({ owner: libraryOwnerId, ...result }); }
       } catch {
         if (!cancelled && !settled) { settled = true; setLibraryError("Could not load your recording library. Please try again."); }
       } finally {
@@ -614,9 +614,10 @@ export default function RecordingTab({
       <div className={styles.adaptPanelHeader}>
         <h2 className={styles.adaptPanelTitle}>Narrate or announce a saved recording</h2>
         <p className={styles.adaptPanelSubtitle}>
-          Pick anything already in your recording library - including a captioned or narrated file - to talk over it or draft an announcement from it.
+          Pick an audio or video recording from your library, including captioned or narrated recordings.
         </p>
       </div>
+      {libraryResult && libraryResult.owner === libraryOwnerId && libraryResult.truncated && <p role="status">Showing recent recordings only. Older files were not checked; narrow your library and retry.</p>}
       {libraryError && <p role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>{libraryError}</p>}
       {libraryError && !libraryBusy && libraryFiles === null && libraryOwnerId && (
         <Button size="small" variant="outlined" onClick={() => setLibraryRetry((value) => value + 1)}>Retry loading recordings</Button>
@@ -626,7 +627,7 @@ export default function RecordingTab({
           <span className={styles.spinner} aria-hidden="true" /> Loading your recording library…
         </p>
       ) : !libraryFiles ? null : libraryFiles.length === 0 ? (
-        <p className={styles.fieldHint}>Nothing in your recording library yet.</p>
+        <p className={styles.fieldHint}>No audio or video recordings found in your library.</p>
       ) : (
         <div className={styles.adaptRow}>
           <TextField

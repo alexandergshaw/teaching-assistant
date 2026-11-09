@@ -1,3 +1,15 @@
+- id: 'RECORDING-LIBRARY-MEDIA-PICKER'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'live-lms-student-messaging'
+  title: 'Show playable recording media instead of unrelated library files.'
+  owns: ['src/app/components/RecordingTab.tsx', 'src/lib/recording-files.ts', 'src/lib/recording-library-media.ts', 'src/lib/recording-media-query.test.ts']
+  verify: 'npm.cmd run test:paths -- src/lib/recording-library-media.test.ts src/lib/recording-media-query.test.ts src/app/components/recording/recording-library-entry.structure.test.ts src/file-size-ceiling.structure.test.ts'
+  blocked_by: []
+  instrument: 'Verify the owner-scoped PostgREST candidate filter and bounded pagination against a real account with audio, video, generic MIME media, unrelated documents, and more than one page. In an authenticated browser confirm default selection, media opening, partial-results warning, sign-out/account switching, keyboard and focus behavior.'
+  from: 'Live recording-announcement walkthrough 2026-11-08: the picker selected a non-media class-session file and drafting failed while reporting that its duration could not be determined.'
+  note: 'Candidate filters audio/video MIME and known media extensions for generic MIME, excludes bundles, pages the owner-scoped candidate query and indicates possible truncation. Focused mock-query and source tests pass; live PostgREST filter syntax and rendered picker remain unverified. Genuine media whose duration cannot be measured continues to refuse real-time extraction rather than risking an unbounded decode; investigate a safe bounded fallback separately if a real media file reproduces that case.'
+  question: null
 - id: 'RECORDING-ANNOUNCEMENT-AUDIT-FIXES'
   state: 'actionable'
   kind: 'bug'

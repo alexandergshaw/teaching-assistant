@@ -71,6 +71,36 @@ it("reports a rejected script request without replacing the previous script", as
   expect(setGenerating).toHaveBeenLastCalledWith(false);
 });
 
+it("clears pending script state when a fresh capture invalidates its epoch", async () => {
+  const response = deferred<{ script: string }>();
+  const epoch = { current: 1 };
+  const generating = vi.fn();
+  const script = callback("handleGenerateScript", {
+    capturing: false, extracting: false, pendingFrames: 0, batchInFlightRef: { current: false }, upload: { busy: false, result: null }, uploadSnapshot: { current: null }, hasMaterial: true, extractionEpoch: epoch, uploadedVideoMaterialText: () => "captured", setScriptGenerating: generating, setScriptError: vi.fn(), setScriptText: vi.fn(), scriptRevisionRef: { current: 0 },
+    batchBlocksRef: { current: [] }, WALKTHROUGH_SCRIPT_MATERIALS_CAP: 100,
+    draftWalkthroughVideoScriptAction: () => response.promise,
+    selectedCourse: { name: "Course" }, moduleLabel: "", notesText: "", provider: "gemini",
+  });
+  const pending = script();
+  expect(generating).toHaveBeenLastCalledWith(true);
+  const start = callback("handleStartStop", {
+    capturing: false, extracting: false, pendingFrames: 0, batchInFlightRef: { current: false }, inputKind: "live", upload: { busy: false }, pushNotice: vi.fn(),
+    stop: vi.fn(), setInputKind: vi.fn(), setStartError: vi.fn(), setAutoDrafted: vi.fn(),
+    start: async ({ onStarted }: { onStarted: () => void }) => onStarted(),
+    resetCompletedRun: (_slots: unknown, reset: () => void) => reset(), currentSlotsRef: { current: [] },
+    extractionEpoch: epoch, setScriptGenerating: generating, batchBlocksRef: { current: [] }, setLegibleBlockCount: vi.fn(), reset: vi.fn(),
+  });
+  start();
+  await Promise.resolve();
+  expect(generating).toHaveBeenLastCalledWith(false);
+  generating(true);
+  const callsBeforeStaleSettlement = generating.mock.calls.length;
+  response.resolve({ script: "stale" });
+  await pending;
+  expect(generating).toHaveBeenCalledTimes(callsBeforeStaleSettlement);
+  expect(generating).toHaveBeenLastCalledWith(true);
+});
+
 it("adds a successful current-epoch extraction", async () => {
   const blocks = { current: [] as string[][] };
   let count = 0;

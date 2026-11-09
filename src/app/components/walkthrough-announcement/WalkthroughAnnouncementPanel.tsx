@@ -394,6 +394,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
         await start({ saveVideo: false, onStarted: () => {
           resetCompletedRun(currentSlotsRef, () => {
             extractionEpoch.current += 1;
+            setScriptGenerating(false);
             batchBlocksRef.current = [];
             setLegibleBlockCount(0);
             reset();

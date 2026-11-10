@@ -1,21 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Stack, TextField, Typography } from "@mui/material";
+import { Alert, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, LinearProgress, Stack, TextField, Typography } from "@mui/material";
+import type { PartialHashProgress, PartialHashReview } from "./partialHandoff";
 import { buildRecoverableZip, planRecoverableZip, type RecoverableGroup } from "@/lib/grade/large-zip-subset";
 
 /** Build a partial download only after reviewing the original member inventory. */
-export function LargeZipRecovery({ onSubmit, incomingFile, onClose }: { incomingFile?: File | null; onClose?: () => void; onSubmit: (source: File, file: File, selected: readonly RecoverableGroup[], omitted: readonly RecoverableGroup[], mapping: Readonly<Record<string, string>>) => Promise<string | null> }) {
+export function LargeZipRecovery({ onSubmit, incomingFile, onClose }: { incomingFile?: File | null; onClose?: () => void; onSubmit: (source: File, file: File, selected: readonly RecoverableGroup[], omitted: readonly RecoverableGroup[], mapping: Readonly<Record<string, string>>, review?: PartialHashReview) => Promise<string | null> }) {
   const [open, setOpen] = useState(!!incomingFile), [file, setFile] = useState<File | null>(incomingFile ?? null);
   const [groups, setGroups] = useState<readonly RecoverableGroup[]>([]), [selected, setSelected] = useState<string[]>([]);
   const [confirmed, setConfirmed] = useState(false), [busy, setBusy] = useState(!!incomingFile), [error, setError] = useState("");
   const [manifest, setManifest] = useState<string | null>(null);
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [attempts, setAttempts] = useState<Record<string, boolean>>({});
+  const [hashProgress, setHashProgress] = useState<PartialHashProgress | null>(null);
   const [uncertain, setUncertain] = useState(false);
-  const generation = useRef(0);
+  const generation = useRef(0), hashing = useRef(false);
   useEffect(() => () => { generation.current++; }, []);
-  const close = () => { generation.current++; setOpen(false); setFile(null); setGroups([]); setSelected([]); setMapping({}); setAttempts({}); setConfirmed(false); setBusy(false); setError(""); setManifest(null); onClose?.(); };
+  const close = () => { generation.current++; setOpen(false); setFile(null); setGroups([]); setSelected([]); setMapping({}); setAttempts({}); setConfirmed(false); setBusy(false); setHashProgress(null); setError(""); setManifest(null); onClose?.(); };
   const choose = async (next: File | undefined) => {
     const token = ++generation.current; setFile(next ?? null); setGroups([]); setSelected([]); setMapping({}); setAttempts({}); setConfirmed(false); setError(""); setManifest(null);
     if (!next) return;
@@ -41,11 +43,11 @@ export function LargeZipRecovery({ onSubmit, incomingFile, onClose }: { incoming
       const result = await buildRecoverableZip(file, selected, true); if (token !== generation.current) return;
       if (!result.ok) { setError(`Partial archive could not be prepared: ${result.reason}.`); return; }
       setUncertain(true);
-      const refusal = await onSubmit(file, new File([result.archive], "reviewed-partial-submissions.zip", { type: "application/zip" }), result.selected, result.omitted, mapping);
+      const refusal = await onSubmit(file, new File([result.archive], "reviewed-partial-submissions.zip", { type: "application/zip" }), result.selected, result.omitted, mapping, { current: () => token === generation.current, onProgress: (progress) => { if (token === generation.current) { hashing.current = !!progress; setHashProgress(progress); } } });
       if (token !== generation.current) return;
-      if (refusal) setError(refusal); else { setUncertain(false); close(); }
+      if (refusal) { if (hashing.current) setUncertain(false); setError(refusal); } else { setUncertain(false); close(); }
     } catch { if (token === generation.current) setError("The handoff could not be confirmed. Check results before retrying."); }
-    finally { if (token === generation.current) setBusy(false); }
+    finally { if (token === generation.current) { hashing.current = false; setHashProgress(null); setBusy(false); } }
   };
   const build = async () => {
     if (!file || !confirmed || !selected.length || !attemptsReviewed || busy) return;
@@ -68,7 +70,8 @@ export function LargeZipRecovery({ onSubmit, incomingFile, onClose }: { incoming
         <Alert severity="warning">Names and numeric fields come from filenames; they do not prove ownership. Check every listed file against the original class roster. Groups not selected are omitted. A record of names, files and omissions is saved in this browser before grading. Overlap checks cover only byte-identical source archives in this browser, not repackaged archives or other browsers. The review download contains a marker and cannot be graded directly.</Alert>
         <Button component="label" variant="outlined" disabled={busy}>Choose ZIP<input hidden type="file" accept=".zip,application/zip" onChange={(event) => void choose(event.target.files?.[0])} /></Button>
         {file && <Typography>{file.name}</Typography>}
-        {busy && <Typography role="status">Reviewing archive...</Typography>}
+        {busy && <Typography role="status">{hashProgress ? `Checking ${hashProgress.phase === "source" ? "original archive" : "selected files"}: ${hashProgress.written} of ${hashProgress.total} bytes` : "Reviewing archive..."}</Typography>}
+        {hashProgress && <LinearProgress variant={hashProgress.total ? "determinate" : "indeterminate"} value={hashProgress.total ? (hashProgress.written / hashProgress.total) * 100 : undefined} aria-label="Archive verification progress" />}
         {error && <Alert severity="error">{error}</Alert>}
         {uncertain && <Alert severity="warning">Submission may have started. Check the results before attempting another submission.</Alert>}
         {groups.map((group) => <Stack key={group.label} spacing={0.5}>
@@ -80,7 +83,7 @@ export function LargeZipRecovery({ onSubmit, incomingFile, onClose }: { incoming
         {!!groups.length && <FormControlLabel control={<Checkbox checked={confirmed} disabled={busy || !selected.length} onChange={(_, checked) => setConfirmed(checked)} />} label="I checked ownership and all files in the selected groups against the original records." />}
         {manifest && <Alert severity="warning">Download the review manifest separately and keep it with the partial archive. The grader does not automatically read it; it records omitted groups and is not cryptographically bound to the ZIP. <Button onClick={() => { try { download(new Blob([manifest], { type: "application/json" }), "partial-submissions-review.json"); } catch { setError("Manifest download failed. Try again."); } }}>Download review manifest</Button></Alert>}
       </Stack></DialogContent>
-      <DialogActions><Button disabled={busy} onClick={close}>Close</Button><Button disabled={busy || !confirmed || !mapped || !attemptsReviewed} onClick={() => void build()}>Download review copy</Button><Button variant="contained" disabled={busy || uncertain || !confirmed || !mapped || !attemptsReviewed} onClick={() => void grade()}>Grade selected groups</Button></DialogActions>
+      <DialogActions><Button disabled={busy && !hashProgress} onClick={() => { if (busy && !hashing.current) return; if (hashing.current) setUncertain(false); close(); }}>{hashProgress ? "Cancel verification" : "Close"}</Button><Button disabled={busy || !confirmed || !mapped || !attemptsReviewed} onClick={() => void build()}>Download review copy</Button><Button variant="contained" disabled={busy || uncertain || !confirmed || !mapped || !attemptsReviewed} onClick={() => void grade()}>Grade selected groups</Button></DialogActions>
     </Dialog>
   </>;
 }

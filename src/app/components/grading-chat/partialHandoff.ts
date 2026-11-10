@@ -4,29 +4,37 @@ import { claimIntake, releaseIntake, type IntakeFence } from "./intakeFence";
 import { listPartialHandoffs, reservePartialHandoff, settlePartialHandoff, type PartialHandoffRecord } from "./partialHandoffLedger";
 import { partialArchiveDigest } from "./partialArchiveDigest";
 
+export type PartialHashProgress = { readonly phase: "source" | "subset"; readonly written: number; readonly total: number };
+export type PartialHashReview = { readonly current: () => boolean; readonly onProgress: (progress: PartialHashProgress | null) => void };
+
 export function createPartialHandoffHandler(args: {
   getEpoch: () => number; account?: string; capture: () => number; owns: (account: string | undefined, token: number) => boolean;
   latch: IntakeFence; onRecords: (records: PartialHandoffRecord[]) => void; onOmissions: (groups: readonly RecoverableGroup[]) => void;
   submit: (file: File, mapping: Readonly<Record<string, string>>) => Promise<DirectFileOutcome[]>;
 }) {
-  return (source: File, file: File, selected: readonly RecoverableGroup[], omitted: readonly RecoverableGroup[], ownerMapping: Readonly<Record<string, string>>) => {
+  return (source: File, file: File, selected: readonly RecoverableGroup[], omitted: readonly RecoverableGroup[], ownerMapping: Readonly<Record<string, string>>, review?: PartialHashReview) => {
     const epoch = args.getEpoch(), accountToken = args.capture();
     return partialHandoff({ source, file, selected, omitted, ownerMapping, latch: args.latch, account: args.account,
-      current: () => args.getEpoch() === epoch && args.owns(args.account, accountToken), onRecords: args.onRecords, onOmissions: args.onOmissions, submit: args.submit });
+      current: () => args.getEpoch() === epoch && args.owns(args.account, accountToken) && (review?.current() ?? true), onHashProgress: review?.onProgress, onRecords: args.onRecords, onOmissions: args.onOmissions, submit: args.submit });
   };
 }
 
 export async function partialHandoff(args: {
   source: File; file: File; selected: readonly RecoverableGroup[]; omitted: readonly RecoverableGroup[]; ownerMapping: Readonly<Record<string, string>>;
   latch: IntakeFence; account?: string; current: () => boolean;
+  onHashProgress?: (progress: PartialHashProgress | null) => void;
   onRecords: (records: PartialHandoffRecord[]) => void; onOmissions: (groups: readonly RecoverableGroup[]) => void;
   submit: (file: File, mapping: Readonly<Record<string, string>>) => Promise<DirectFileOutcome[]>;
 }): Promise<string | null> {
   const token = claimIntake(args.latch); if (token === null) return "Wait for the current submission to finish.";
-  const { account, selected, omitted, ownerMapping } = args;
+  const { account, selected, omitted, ownerMapping } = args; let verified = false;
   try {
     if (!account || !navigator.locks || !crypto.subtle) return "This browser cannot safely record and lock this partial intake.";
-    const sourceDigest = await partialArchiveDigest(args.source, crypto.subtle), subsetDigest = await partialArchiveDigest(args.file, crypto.subtle);
+    args.onHashProgress?.({ phase: "source", written: 0, total: args.source.size });
+    const sourceDigest = await partialArchiveDigest(args.source, crypto.subtle, args.current, (written, total) => args.onHashProgress?.({ phase: "source", written, total }));
+    args.onHashProgress?.({ phase: "subset", written: 0, total: args.file.size });
+    const subsetDigest = await partialArchiveDigest(args.file, crypto.subtle, args.current, (written, total) => args.onHashProgress?.({ phase: "subset", written, total }));
+    verified = true; args.onHashProgress?.(null);
     if (!args.current()) return "The session changed before submission.";
     return await navigator.locks.request(`partial-intake:${account}:${sourceDigest}`, async () => {
       if (!args.current()) return "The session changed before submission.";
@@ -44,6 +52,6 @@ export async function partialHandoff(args: {
         return accepted ? null : "Submission could not be confirmed. Check results before retrying.";
       } catch { settlePartialHandoff(localStorage, account, sourceDigest, subsetDigest, "unknown"); return "Submission could not be confirmed. Check results before retrying."; }
     });
-  } catch { return "The partial intake record could not be saved. Check earlier results before retrying."; }
+  } catch { return !args.current() ? "The session changed before submission." : verified ? "The partial intake record could not be saved. Check earlier results before retrying." : "Archive verification failed. Nothing was submitted."; }
   finally { releaseIntake(args.latch, token); }
 }

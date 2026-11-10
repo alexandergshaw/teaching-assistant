@@ -77,6 +77,22 @@ describe("actual role controller -> Panel setup/transport callbacks -> continuou
     expect(oversizedReviewCandidate([file, new File(["x"], "other.txt")])).toBeNull();
     expect(oversizedReviewCandidate([new File(["x"], "small.zip")])).toBeNull();
   });
+  it("cancels long source hashing without recording or dispatching", async () => {
+    const records = new Map<string, string>(); const storage = { get length() { return records.size; }, key: (i: number) => [...records.keys()][i] ?? null, getItem: (key: string) => records.get(key) ?? null, setItem: (key: string, value: string) => { records.set(key, value); } };
+    vi.stubGlobal("navigator", { locks: { request: async (_key: string, work: () => Promise<unknown>) => work() } }); vi.stubGlobal("crypto", webcrypto); vi.stubGlobal("localStorage", storage);
+    const submitted = vi.fn(async () => [{ kind: "accepted" }]); let current = true; const updates: number[] = [];
+    const run = callback("handlePartialHandoff", { createPartialHandoffHandler, sharedIntakeLatch: { busy: false, generation: 0 }, dropSessionEpoch: { current: 0 }, user: { id: "owner" }, zipReview: { capture: () => 0, owns: () => true }, setPartialOmissions: vi.fn(), setPartialRecords: vi.fn(), handleSubmitFiles: submitted });
+    const group = { label: "Synthetic", members: [{ path: "work.txt" }] }, source = new File([new Uint8Array(8 * 1024 * 1024)], "source.zip");
+    const result = await run(source, new File(["subset"], "subset.zip"), [group], [], { Synthetic: "Student" }, { current: () => current, onProgress: (value: { written: number } | null) => { if (value) { updates.push(value.written); if (value.written > 0) current = false; } } });
+    expect(result).toMatch(/session changed/i); expect(updates).toEqual([0, 4 * 1024 * 1024]); expect(records.size).toBe(0); expect(submitted).not.toHaveBeenCalled(); vi.unstubAllGlobals();
+  });
+  it("reports a hash read failure before dispatch as a safe refusal", async () => {
+    vi.stubGlobal("navigator", { locks: { request: vi.fn() } }); vi.stubGlobal("crypto", webcrypto);
+    const submitted = vi.fn(); const run = callback("handlePartialHandoff", { createPartialHandoffHandler, sharedIntakeLatch: { busy: false, generation: 0 }, dropSessionEpoch: { current: 0 }, user: { id: "owner" }, zipReview: { capture: () => 0, owns: () => true }, setPartialOmissions: vi.fn(), setPartialRecords: vi.fn(), handleSubmitFiles: submitted });
+    const broken = { size: 5, slice: () => new Blob(["four"]) }, group = { label: "Synthetic", members: [{ path: "work.txt" }] };
+    expect(await run(broken, new File(["subset"], "subset.zip"), [group], [], { Synthetic: "Student" }, { current: () => true, onProgress: vi.fn() })).toMatch(/verification failed.*nothing was submitted/i);
+    expect(submitted).not.toHaveBeenCalled(); vi.unstubAllGlobals();
+  });
   it("holds a whole-panel ZIP drop at shared review and fences a second drop", async () => {
     let decide!: (value: boolean) => void;
     const check = vi.fn((_files: readonly File[], _current: () => boolean, _unknown: boolean) => new Promise<boolean>((resolve) => { decide = resolve; }));

@@ -27,6 +27,7 @@ import RubricProvenance from "../grading-results/RubricProvenance";
 import GeneratedRubricCard from "../grading-results/GeneratedRubricCard";
 import SubmissionClassificationBadge from "../grading/SubmissionClassificationBadge";
 import { ChatComposer } from "./ChatComposer";
+import { oversizedReviewCandidate } from "./oversizedReviewCandidate";
 import { LargeZipRecovery } from "./LargeZipRecovery";
 import { PartialHandoffNotice, usePartialHandoffRecords } from "./PartialHandoffNotice";
 import { createPartialHandoffHandler } from "./partialHandoff";
@@ -281,14 +282,14 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
 
   const [instructions, setInstructions] = useState("");
   const [rubric, setRubric] = useState("");
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null), [reviewFile, setReviewFile] = useState<{ file: File; id: number } | null>(null);
   const [setupNote, setSetupNote] = useState<string | null>(null);
   const [harshness, setHarshness] = useState<GradeHarshness>("balanced");
   const [feedbackLengthText, setFeedbackLengthText] = useState("");
   const [applyNamingDeduction, setApplyNamingDeduction] = useState(true);
   const [applyLengthDeduction, setApplyLengthDeduction] = useState(false);
   const [lengthThresholdText, setLengthThresholdText] = useState(String(LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT));
-  const directIntake = useRef(createDirectFileIntake());
+  const directIntake = useRef(createDirectFileIntake()), reviewSequence = useRef(0);
   const [directPreparing, setDirectPreparing] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -416,11 +417,10 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
     setZipPhase(null);
     driver.reset();
     setSetupExpanded(true);
-    setSubmitError(null);
+    setSubmitError(null); setReviewFile(null);
     setPartialOmissions([]);
     setSetupNote(null);
   };
-
   // Marks the submit intake (extraction, session start) as in progress so the
   // composer shows busy until the awaits settle, success or failure.
   const withPreparing = async <T,>(work: () => Promise<T>): Promise<T> => {
@@ -633,6 +633,7 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
   };
   const handleSubmitFiles = (files: File[], label?: string, reviewedZipMapping?: Readonly<Record<string, string>>) => {
     const blocked = directIntake.current.isPending() || preparing || driver.headerState === "resolving";
+    const oversized = !blocked ? oversizedReviewCandidate(files) : null; if (oversized) { setReviewFile({ file: oversized, id: ++reviewSequence.current }); return Promise.resolve([{ kind: "refused" as const, reason: "Opened oversized ZIP review. Nothing was submitted." }]); }
     return directIntake.current.run({ files, label, blocked, preparing: (value) => { setDirectPreparing(value); setPreparing(value); }, error: setSubmitError,
       setup: { instructions, rubric, harshness, feedbackWordTarget: coerceFeedbackWordTarget(feedbackLengthText), applyNamingDeduction, applyLengthDeduction,
         lengthDeductionThresholdWords: applyLengthDeduction ? parseLengthDeductionThreshold(lengthThresholdText) ?? NaN : undefined },
@@ -981,7 +982,7 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
       </div>
       <div className={chatStyles.stickyComposer}>
         <PartialHandoffNotice omissions={partialOmissions} records={partialRecords} />
-        <LargeZipRecovery key={visibleDropEpoch} onSubmit={handlePartialHandoff} />
+        <LargeZipRecovery key={`${visibleDropEpoch}:${reviewFile?.id ?? "idle"}`} onSubmit={handlePartialHandoff} incomingFile={reviewFile?.file} onClose={() => setReviewFile(null)} />
         <ChatComposer
           sharedLatch={sharedIntakeLatch}
           disabled={busy || preparing}

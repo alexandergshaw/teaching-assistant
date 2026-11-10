@@ -14,7 +14,7 @@ export type ChatRoleChoices = { instructions: "draft" | "file"; rubric: "draft" 
 export const isSetupRole = (role: ChatFileRole) => role === "instructions" || role === "rubric" || role === "combined";
 export function admitRoleFiles(files: readonly File[]): string | null {
   if (!files.length || files.length > ROLE_FILE_LIMIT) return "Choose between 1 and 40 top-level files.";
-  if (files.some((file) => !Number.isSafeInteger(file.size) || file.size < 0) || files.reduce((sum, file) => sum + file.size, 0) > ROLE_BYTE_LIMIT) return "This batch exceeds the staged file size limit. Choose a smaller batch.";
+  if (files.some((file) => !Number.isSafeInteger(file.size) || file.size < 0) || files.reduce((sum, file) => sum + file.size, 0) > ROLE_BYTE_LIMIT) return "This batch exceeds the staged file size limit. Select an oversized ZIP by itself to open review, or choose a smaller batch.";
   return null;
 }
 export async function readRoleSetup(file: File): Promise<string> {

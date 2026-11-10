@@ -1,3 +1,4 @@
+import { oversizedReviewCandidate } from "./oversizedReviewCandidate";
 import type { CompositePartInput } from "./chatSubmissionIntake";
 import type { DirectFileOutcome } from "./chatDirectFileIntake";
 import type { SubmitOutcome } from "./useContinuousGradingRun";
@@ -31,6 +32,7 @@ export async function submitOneFileGroup(
   submitFiles: (files: File[], label?: string) => Promise<DirectFileOutcome[]>,
   submitComposite: (student: string, parts: CompositePartInput[]) => Promise<SubmitOutcome>,
 ): Promise<DirectFileOutcome> {
+  if (oversizedReviewCandidate(files)) return (await submitFiles(files))[0] ?? { kind: "unknown", reason: "The upload status could not be confirmed." };
   if (files.length === 1 && !/\.zip$/i.test(files[0].name)) {
     return (await submitFiles(files, name || undefined))[0] ?? { kind: "unknown", reason: "The upload status could not be confirmed." };
   }

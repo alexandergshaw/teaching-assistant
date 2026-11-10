@@ -115,3 +115,10 @@ describe("file drop routing", () => {
     expect(submitFiles).not.toHaveBeenCalled(); expect(submitComposite).not.toHaveBeenCalled();
   });
 });
+
+it("routes an oversized single ZIP to review even in one-student mode", async () => {
+  const zip = new File(["synthetic"], "archive.zip"); Object.defineProperty(zip, "size", { value: 282_107_616 });
+  const submitFiles = vi.fn(async () => [{ kind: "refused" as const, reason: "Opened oversized ZIP review. Nothing was submitted." }]); const composite = vi.fn();
+  expect(await submitOneFileGroup("Synthetic", [zip], submitFiles, composite)).toMatchObject({ kind: "refused", reason: expect.stringContaining("review") });
+  expect(submitFiles).toHaveBeenCalledWith([zip]); expect(composite).not.toHaveBeenCalled();
+});

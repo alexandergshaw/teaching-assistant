@@ -5,17 +5,17 @@ import { Alert, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTi
 import { buildRecoverableZip, planRecoverableZip, type RecoverableGroup } from "@/lib/grade/large-zip-subset";
 
 /** Build a partial download only after reviewing the original member inventory. */
-export function LargeZipRecovery({ onSubmit }: { onSubmit: (source: File, file: File, selected: readonly RecoverableGroup[], omitted: readonly RecoverableGroup[], mapping: Readonly<Record<string, string>>) => Promise<string | null> }) {
-  const [open, setOpen] = useState(false), [file, setFile] = useState<File | null>(null);
+export function LargeZipRecovery({ onSubmit, incomingFile, onClose }: { incomingFile?: File | null; onClose?: () => void; onSubmit: (source: File, file: File, selected: readonly RecoverableGroup[], omitted: readonly RecoverableGroup[], mapping: Readonly<Record<string, string>>) => Promise<string | null> }) {
+  const [open, setOpen] = useState(!!incomingFile), [file, setFile] = useState<File | null>(incomingFile ?? null);
   const [groups, setGroups] = useState<readonly RecoverableGroup[]>([]), [selected, setSelected] = useState<string[]>([]);
-  const [confirmed, setConfirmed] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const [confirmed, setConfirmed] = useState(false), [busy, setBusy] = useState(!!incomingFile), [error, setError] = useState("");
   const [manifest, setManifest] = useState<string | null>(null);
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [attempts, setAttempts] = useState<Record<string, boolean>>({});
   const [uncertain, setUncertain] = useState(false);
   const generation = useRef(0);
   useEffect(() => () => { generation.current++; }, []);
-  const close = () => { generation.current++; setOpen(false); setFile(null); setGroups([]); setSelected([]); setMapping({}); setAttempts({}); setConfirmed(false); setBusy(false); setError(""); setManifest(null); };
+  const close = () => { generation.current++; setOpen(false); setFile(null); setGroups([]); setSelected([]); setMapping({}); setAttempts({}); setConfirmed(false); setBusy(false); setError(""); setManifest(null); onClose?.(); };
   const choose = async (next: File | undefined) => {
     const token = ++generation.current; setFile(next ?? null); setGroups([]); setSelected([]); setMapping({}); setAttempts({}); setConfirmed(false); setError(""); setManifest(null);
     if (!next) return;
@@ -27,6 +27,10 @@ export function LargeZipRecovery({ onSubmit }: { onSubmit: (source: File, file: 
     } catch { if (token === generation.current) setError("Archive review failed. Try choosing the file again."); }
     finally { if (token === generation.current) setBusy(false); }
   };
+  useEffect(() => {
+    if (!incomingFile) return; const token = ++generation.current;
+    void planRecoverableZip(incomingFile).then((result) => { if (token !== generation.current) return; if (result.ok) setGroups(result.groups); else setError(`Archive could not be reviewed: ${result.reason}.`); }).catch(() => { if (token === generation.current) setError("Archive review failed. Try choosing the file again."); }).finally(() => { if (token === generation.current) setBusy(false); });
+  }, [incomingFile]);
   const mappedNames = selected.map((label) => mapping[label]?.trim().normalize("NFKC").toLocaleLowerCase() ?? "");
   const mapped = selected.length > 0 && mappedNames.every(Boolean) && new Set(mappedNames).size === mappedNames.length;
   const attemptsReviewed = selected.every((label) => !/^\d+-\d+$/.test(label) || !!attempts[label]);

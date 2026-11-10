@@ -14,6 +14,7 @@ import { useContinuousGradingRun } from "./useContinuousGradingRun";
 import { createChatFileRolesController } from "./useChatFileRoles";
 import { submitFilesSequentially } from "./chatFileBatch";
 import { createDirectFileIntake } from "./chatDirectFileIntake";
+import { oversizedReviewCandidate } from "./oversizedReviewCandidate";
 import { claimIntake, releaseIntake } from "./intakeFence";
 import { createPartialHandoffHandler } from "./partialHandoff";
 import { webcrypto } from "node:crypto";
@@ -65,6 +66,16 @@ describe("actual role controller -> Panel setup/transport callbacks -> continuou
     expect(await staleRun(new File(["stale"], "source.zip"), new File(["subset"], "subset.zip"), [group], omitted, { "archive-name": "Student" })).toMatch(/session changed/i);
     expect(submitted).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
+  });
+  it("routes the original oversized ZIP into review without starting grading", async () => {
+    const file = new File(["synthetic"], "Vector Sorting.zip"); Object.defineProperty(file, "size", { value: 282_107_616 });
+    const setReviewFile = vi.fn(), intake = { isPending: () => false, run: vi.fn() }, reviewSequence = { current: 0 };
+    const submit = callback("handleSubmitFiles", { directIntake: { current: intake }, preparing: false, driver: { headerState: "ready" }, oversizedReviewCandidate, setReviewFile, reviewSequence });
+    const outcome = await submit([file]); expect(setReviewFile).toHaveBeenCalledWith({ file, id: 1 }); expect(intake.run).not.toHaveBeenCalled(); expect(outcome[0]).toMatchObject({ kind: "refused", reason: expect.stringContaining("Nothing was submitted") });
+    const second = new File(["synthetic2"], "second.zip"); Object.defineProperty(second, "size", { value: 282_107_617 }); await submit([second]); expect(setReviewFile).toHaveBeenLastCalledWith({ file: second, id: 2 });
+    expect(panel).toContain("key={`${visibleDropEpoch}:${reviewFile?.id ?? \"idle\"}`}");
+    expect(oversizedReviewCandidate([file, new File(["x"], "other.txt")])).toBeNull();
+    expect(oversizedReviewCandidate([new File(["x"], "small.zip")])).toBeNull();
   });
   it("holds a whole-panel ZIP drop at shared review and fences a second drop", async () => {
     let decide!: (value: boolean) => void;
@@ -263,7 +274,7 @@ describe("actual role controller -> Panel setup/transport callbacks -> continuou
       const consume = callback("handleConfirmedFiles", { driver, zipReview: { check: async () => true, capture: () => 0, owns: () => true, remember: vi.fn() }, submitFilesSequentially, submitLooseVideo: vi.fn(async () => null), user: { id: "owner" }, supabase: { storage: {} }, VIDEO_GRADING_ENABLED: false,
         isZipFileName: (name: string) => name.endsWith(".zip"), chooseZipTransport: () => ({ kind: "body" }), chooseSingleFileTransport: () => ({ kind: "body" }), preflightUploadFile: () => ({ ok: true }),
         safeIntake: (fn: () => void) => fn(), recordIntakeGate: vi.fn(), submitStoragedZip: vi.fn(), submitStoragedSingleFile: vi.fn(), sessionRefusalRef: { current: "refused" }, setSubmitError: vi.fn() });
-      return callback("handleSubmitFiles", { directIntake: { current: intake }, preparing: false, driver, roleIntake: { isPending: () => false, stage }, includeSetupFiles: false,
+      return callback("handleSubmitFiles", { directIntake: { current: intake }, preparing: false, driver, oversizedReviewCandidate, setReviewFile: vi.fn(), roleIntake: { isPending: () => false, stage }, includeSetupFiles: false,
         setDirectPreparing: vi.fn(), setPreparing: vi.fn(), setSubmitError: vi.fn(), instructions, rubric: "FROZEN_RUBRIC", harshness: "strict", feedbackLengthText: "80", coerceFeedbackWordTarget: Number,
         applyNamingDeduction: false, applyLengthDeduction: true, lengthThresholdText: "25", parseLengthDeductionThreshold, ensureSession: start, handleConfirmedFiles: consume });
     };

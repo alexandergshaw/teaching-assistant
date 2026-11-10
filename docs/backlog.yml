@@ -1,3 +1,15 @@
+- id: 'GRADING-CHAT-LIFECYCLE-DIAGNOSTICS'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'grading-setup-interaction-cost'
+  title: 'Complete Grading Chat diagnostics across intake, dispatch, grading, interruption and recovery.'
+  owns: ['src/app/components/grading-chat/', 'src/app/api/grade-run-item/', 'src/app/account/diagnostics/']
+  verify: null
+  blocked_by: []
+  instrument: 'Exercise started, settled, rejected, timed out, aborted and unknown outcomes; setup, storage, source processing, retries, export and account transitions. Preserve a safe attempt correlation and distinguish server acceptance from uncertain browser interruption. Verify actual exported JSON and CSV without credentials, submissions, prompts or feedback.'
+  from: 'Owner requested exhaustive Grading Chat diagnostics and an RCA of why they were not included in the original diagnostics.'
+  note: 'Audit and implementation started. Current traces cover several completed operations but do not reliably retain pending or pre-validation failures. Privacy constraints do not justify losing operational status; use an explicit safe diagnostic boundary.'
+  question: null
 - id: 'REPO-GRADING-INCOMPLETE-DIAGNOSTICS'
   state: 'actionable'
   kind: 'bug'

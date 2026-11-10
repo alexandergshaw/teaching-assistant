@@ -514,7 +514,7 @@ export interface StudentSubmissionEntry {
   linkFetch?: LinkFetchOutcome;
   // Per-axis slices of a discussion entry. TYPE-ONLY forward declaration
   // (A8 Wave A): no producer or consumer until Wave B.
-  discussionAxes?: { initialPostContent: string; replyContent: string; replyCount: number };
+  discussionAxes?: { initialPostContent: string; replyContent: string; replyCount: number; initialPostAbsentConfirmed?: boolean };
   // Set ONLY by buildSingleFileEntry. Absent (the default on every other
   // producer) means "resolved normally" - byte-identical to today, exactly as
   // `determination` was added without touching other producers. Never copied

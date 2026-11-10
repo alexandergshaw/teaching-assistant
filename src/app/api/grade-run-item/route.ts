@@ -183,6 +183,7 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
   const axes = rawEntry.discussionAxes;
   if (axes !== undefined && (
     !isRecord(axes) ||
+    (axes.initialPostAbsentConfirmed !== undefined && axes.initialPostAbsentConfirmed !== true) ||
     typeof axes.initialPostContent !== "string" || axes.initialPostContent.length > MAX_CONTENT_CHARS ||
     typeof axes.replyContent !== "string" || axes.replyContent.length > MAX_CONTENT_CHARS ||
     typeof axes.replyCount !== "number" || !Number.isSafeInteger(axes.replyCount) || axes.replyCount < 0 ||

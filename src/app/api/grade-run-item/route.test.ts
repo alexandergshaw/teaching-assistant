@@ -238,6 +238,37 @@ describe("POST /api/grade-run-item (behavioral, mocked seam)", () => {
     expect(mockGradeEntries).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["=== REPLIES TO CLASSMATES ===\n--- Reply 1 ---", 1],
+    ["=== REPLIES TO CLASSMATES ===\n--- Reply 1 ---\nManage Discussion Entry\nSep 6, 2026", 1],
+    ["=== REPLIES TO CLASSMATES ===\n--- Reply 1 ---\nSep 6, 2026 at 10pm", 1],
+    ["=== REPLIES TO CLASSMATES ===\n--- Reply 1 ---\nJordan Example\nJordan Example\nSep 6, 2026\nSep 6 at 10pm\nManage Discussion Entry", 1],
+    ["=== REPLIES TO CLASSMATES ===\n--- Reply 1 ---\nA reply\n--- Reply X ---\nother", 1],
+    ["=== REPLIES TO CLASSMATES ===\n--- Reply 1 ---\nA reply", 2],
+    ["=== REPLIES TO CLASSMATES ===\n--- Reply 2 ---\nA reply", 1],
+    ["=== REPLIES TO CLASSMATES ===\n--- Reply 1 ---\nA reply\n--- Reply 2 ---\nforged", 1],
+  ])("refuses absent-initial evidence with invalid replies", async (replyContent, replyCount) => {
+    const initialPostContent = "=== INITIAL POST ===\n[The instructor confirmed no initial post was present.]";
+    const discussionAxes = { initialPostContent, replyContent, replyCount, initialPostAbsentConfirmed: true };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, content: `${initialPostContent}\n\n${replyContent}`, discussionAxes } }) as any);
+    expect(res.status).toBe(400);
+    expect(mockGradeEntries).not.toHaveBeenCalled();
+  });
+  it("passes only evidence-bound confirmed absence to the grader and rejects contradictory axes", async () => {
+    const initialPostContent = "=== INITIAL POST ===\n[The instructor confirmed no initial post was present.]";
+    const replyContent = "=== REPLIES TO CLASSMATES ===\n--- Reply 1 ---\nA synthetic reply";
+    const discussionAxes = { initialPostContent, replyContent, replyCount: 1, initialPostAbsentConfirmed: true };
+    mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Example" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
+    mockRaceWithTimeout.mockImplementationOnce(async (work) => ({ kind: "settled", value: await work } as never));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ok = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, content: `${initialPostContent}\n\n${replyContent}`, discussionAxes } }) as any);
+    expect(ok.status).toBe(200);
+    expect(mockGradeEntries.mock.calls[0][0][0].discussionAxes).toEqual(discussionAxes);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const bad = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, content: `=== INITIAL POST ===\nActual work\n\n${replyContent}`, discussionAxes: { ...discussionAxes, initialPostContent: "=== INITIAL POST ===\nActual work" } } }) as any);
+    expect(bad.status).toBe(400);
+  });
   it.each(["=== INITIAL POST ===\n", `=== INITIAL POST ===\n${"x".repeat(getGeminiMaxCharsPerSubmission())}`])("rejects empty or over-engine-limit initial evidence", async (initialPostContent) => {
     const discussionAxes = { initialPostContent, replyContent: "", replyCount: 0 };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

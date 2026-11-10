@@ -278,6 +278,8 @@ function absentReplyAreas(replyCriteria: RubricCriterion[]): RubricAreaResult[] 
 async function gradeDiscussionAxes(a: {
   student: string;
   initialPrompt: string;
+  initialCriteria: RubricCriterion[];
+  initialPostAbsentConfirmed: boolean;
   replyPrompt: string | null;
   replyCriteria: RubricCriterion[];
   initialText: string;
@@ -293,7 +295,11 @@ async function gradeDiscussionAxes(a: {
   callSink?: GradeCallSink;
   modelExecution?: LlmExecutionPolicy;
 }): Promise<GradedResult> {
-  const initial = await scoreAxis(a.initialPrompt, a.student, a.initialText, a.provider, a.inlineFiles, a.codeRun, a.submittedFiles, a.commentSplit, a.videoGradeWindowSec, a.callSink, { modelExecution: a.modelExecution });
+  if (a.initialPostAbsentConfirmed && a.replyPrompt === null) throw new Error("Cannot grade replies separately without reply rubric criteria.");
+  if (a.initialPostAbsentConfirmed && (!a.initialCriteria.length || a.initialCriteria.some((criterion) => criterion.points == null || !Number.isFinite(criterion.points) || criterion.points <= 0))) throw new Error("Cannot score an absent initial post without explicit positive point values for its rubric criteria.");
+  const initial = a.initialPostAbsentConfirmed
+    ? { rubricAreas: a.initialCriteria.map((criterion) => ({ area: criterion.name, score: `0/${criterion.points}`, comment: "No initial post was submitted." })), modelTotalScore: "", strengths: "", improvements: "No initial post was submitted." }
+    : await scoreAxis(a.initialPrompt, a.student, a.initialText, a.provider, a.inlineFiles, a.codeRun, a.submittedFiles, a.commentSplit, a.videoGradeWindowSec, a.callSink, { modelExecution: a.modelExecution });
 
   if (a.replyPrompt === null) {
     const total = deriveTotalScore(initial.modelTotalScore, initial.rubricAreas);
@@ -531,6 +537,8 @@ async function gradeStudentEntries(
         ? await gradeDiscussionAxes({
             student,
             initialPrompt: initialAxisPrompt,
+            initialCriteria,
+            initialPostAbsentConfirmed: axes?.initialPostAbsentConfirmed === true,
             replyPrompt: replyAxisPrompt,
             replyCriteria,
             initialText: initialTrunc.text,

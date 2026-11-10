@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 //    to the initial-axis scoreAxis call.
 //  - two-axis merge: trust the model total instead of deriveTotalScore("").
 
+vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn(async () => ({ id: "owner" })) }));
 vi.mock("../gemini", () => ({
   getGeminiInterRequestDelayMs: () => 0,
   getGeminiMaxCharsPerSubmission: () => 100000,
@@ -25,6 +26,7 @@ vi.mock("../gemini", () => ({
 
 vi.mock("../llm", () => ({
   callLlm: vi.fn(),
+  normalizeProvider: () => "gemini",
 }));
 
 vi.mock("../code-runner", () => ({
@@ -37,6 +39,8 @@ vi.mock("./repo-content", () => ({
 
 import { callLlm } from "../llm";
 import { gradeEntries } from "./engine";
+import { POST } from "@/app/api/grade-run-item/route";
+import { buildReviewedPastedDiscussion } from "./reviewed-pasted-discussion";
 import { canvasWorkToEntry } from "./extraction";
 import { buildSystemPrompt, composeReplyExclusionDisclosure } from "./prompts";
 import { extractRubricCriteria } from "./rubric";
@@ -205,6 +209,35 @@ describe("code-held exclusion - discussion entry, rubric with NO reply section",
 });
 
 describe("two-axis scoring - discussion entry, rubric WITH a reply section", () => {
+  it("routes reviewed missing-initial evidence through the real engine", async () => {
+    const reviewed = buildReviewedPastedDiscussion({ initialPosts: [], replies: [REPLY_SENTINEL], initialAbsenceConfirmed: true, sourceCompleteConfirmed: true, attachmentsAccountedFor: true }, 100000);
+    expect(reviewed.ok).toBe(true);
+    if (!reviewed.ok) return;
+    const body = { sourceIndex: 0, entry: { student: "Example", content: reviewed.content, discussionAxes: reviewed.discussionAxes, mergedFileCount: 0, submittedFiles: [] }, assignmentInstructions: INSTRUCTIONS, rubric: MARKER_RUBRIC, provider: "gemini", pointsPossible: null };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const response = await POST({ headers: { get: () => "application/json" }, json: async () => body } as any);
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result.result.totalScore).toBe("7/30");
+    expect(mockCallLlm).toHaveBeenCalledTimes(1);
+    expect(requestText(0)).toContain(REPLY_SENTINEL);
+  });
+  it("scores a confirmed absent initial at zero and grades only the reply", async () => {
+    const entry = await discussionEntry(1);
+    entry.discussionAxes = { ...entry.discussionAxes!, initialPostContent: "[Initial post absent]", initialPostAbsentConfirmed: true };
+    const run = await gradeEntries([entry], INSTRUCTIONS, MARKER_RUBRIC, "gemini", null);
+    expect(mockCallLlm).toHaveBeenCalledTimes(1);
+    expect(requestText(0)).toContain("SCOPE OF THIS EVALUATION (replies only)");
+    expect(run.results[0].rubricAreas).toEqual(expect.arrayContaining([expect.objectContaining({ area: "Thesis", score: "0/20" }), expect.objectContaining({ area: "Engagement", score: "7/10" })]));
+    expect(run.results[0].totalScore).toBe("7/30");
+  });
+  it("refuses absent initials when rubric points are not extractable", async () => {
+    const entry = await discussionEntry(1);
+    entry.discussionAxes = { ...entry.discussionAxes!, initialPostContent: "[Initial post absent]", initialPostAbsentConfirmed: true };
+    const run = await gradeEntries([entry], INSTRUCTIONS, "Rubric text with no extractable criteria", "gemini", null);
+    expect(mockCallLlm).not.toHaveBeenCalled();
+    expect(run.results[0].ungraded).toBeDefined();
+  });
   it("scores initial and reply axes in separate requests and sums the areas by code", async () => {
     const entry = await discussionEntry(2);
     const run = await gradeEntries([entry], INSTRUCTIONS, MARKER_RUBRIC, "gemini");

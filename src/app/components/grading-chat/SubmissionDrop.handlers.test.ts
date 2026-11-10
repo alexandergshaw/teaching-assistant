@@ -117,6 +117,21 @@ describe("SubmissionDrop actual handlers", () => {
     expect(nodes(tree).filter((n) => n.type === "TextField" && /^Submission \d+$/.test(String(n.props.label))).map((n) => n.props.value).join("\n")).toBe(value);
     h.button(tree, "Grade reviewed submissions").props.onClick(); await flush(); expect(h.onText).not.toHaveBeenCalled();
   });
+  it("requires explicit missing-initial and source attestations before handing off a reply", async () => {
+    const onReviewed = vi.fn().mockResolvedValue({ kind: "accepted", entryCount: 1 });
+    const h = harness(undefined, undefined, undefined, undefined, false, onReviewed); let tree = h.render();
+    h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "Jordan Example posted Sep 6, 2026\nA synthetic reply" } }); tree = h.render();
+    nodes(tree).find((n) => n.type === "FormControlLabel" && n.props.label === "Classify initial posts and replies for separate grading")!.props.control.props.onChange(null, true); tree = h.render();
+    nodes(tree).find((n) => n.type === "FormControlLabel" && n.props.label === "I checked author and response 1")!.props.control.props.onChange(null, true);
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Student group for entry 1")!.props.onChange({ target: { value: "Jordan Example" } });
+    nodes(tree).find((n) => n.type === "RadioGroup" && n.props.value === "unassigned")!.props.onChange({ target: { value: "reply" } }); tree = h.render();
+    for (const label of ["I verified entries assigned to each group belong to the same person", "I verified all initial posts and replies for these students are included", "I accounted for any attachments"]) nodes(tree).find((n) => n.type === "FormControlLabel" && n.props.label === label)!.props.control.props.onChange(null, true);
+    tree = h.render(); h.button(tree, "Grade reviewed submissions").props.onClick(); await flush(); expect(onReviewed).not.toHaveBeenCalled();
+    nodes(tree).find((n) => n.type === "FormControlLabel" && n.props.label === "I verified Jordan Example has no initial post in the complete source; score initial criteria as zero")!.props.control.props.onChange(null, true); tree = h.render();
+    h.button(tree, "Grade reviewed submissions").props.onClick(); await flush();
+    expect(onReviewed).toHaveBeenCalledWith("Jordan Example", expect.stringContaining("A synthetic reply"), expect.objectContaining({ initialAbsenceConfirmed: true, sourceCompleteConfirmed: true, replies: [expect.stringContaining("A synthetic reply")] }));
+  });
   it("keeps a suspected whole board out of the single-student fallback", async () => {
     const onText = vi.fn().mockResolvedValue({ kind: "accepted", entryCount: 1 });
     const h = harness(undefined, undefined, onText); let tree = h.render();

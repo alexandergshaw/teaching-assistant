@@ -14,6 +14,7 @@ export interface ReviewedDiscussionGroup {
   samePersonConfirmed: boolean;
   sourceCompleteConfirmed: boolean;
   attachmentsAccountedFor: boolean;
+  initialAbsenceConfirmed?: boolean;
 }
 
 export function buildReviewedDiscussionGroups(rows: readonly ReviewedDiscussionRow[], groups: readonly ReviewedDiscussionGroup[], maxChars: number) {
@@ -21,11 +22,11 @@ export function buildReviewedDiscussionGroups(rows: readonly ReviewedDiscussionR
   const normalizedNames = groups.map((group) => group.student.trim().normalize("NFKC").toLocaleLowerCase());
   if (new Set(normalizedNames).size !== normalizedNames.length) return { ok: false as const, reason: "identity" as const };
   if (rows.some((row) => !row.authorConfirmed || row.role === "unassigned" || !groups.some((group) => group.id === row.group))) return { ok: false as const, reason: "unassigned" as const };
-  const entries: { student: string; content: string; discussionAxes: { initialPostContent: string; replyContent: string; replyCount: number }; reviewedDiscussion: ReviewedPastedDiscussion }[] = [];
+  const entries: { student: string; content: string; discussionAxes: { initialPostContent: string; replyContent: string; replyCount: number; initialPostAbsentConfirmed?: boolean }; reviewedDiscussion: ReviewedPastedDiscussion }[] = [];
   for (const group of groups) {
     const members = rows.filter((row) => row.group === group.id);
     if (!group.id || !group.student.trim() || !members.length || (members.length > 1 && !group.samePersonConfirmed)) return { ok: false as const, reason: "identity" as const };
-    const reviewedDiscussion: ReviewedPastedDiscussion = { initialPosts: members.filter((row) => row.role === "initial").map((row) => row.content), replies: members.filter((row) => row.role === "reply").map((row) => row.content), initialAbsenceConfirmed: false, sourceCompleteConfirmed: group.sourceCompleteConfirmed, attachmentsAccountedFor: group.attachmentsAccountedFor };
+    const reviewedDiscussion: ReviewedPastedDiscussion = { initialPosts: members.filter((row) => row.role === "initial").map((row) => row.content), replies: members.filter((row) => row.role === "reply").map((row) => row.content), initialAbsenceConfirmed: group.initialAbsenceConfirmed === true, sourceCompleteConfirmed: group.sourceCompleteConfirmed, attachmentsAccountedFor: group.attachmentsAccountedFor };
     const result = buildReviewedPastedDiscussion(reviewedDiscussion, maxChars);
     if (!result.ok) return result;
     entries.push({ student: group.student.trim(), content: result.content, discussionAxes: result.discussionAxes, reviewedDiscussion });

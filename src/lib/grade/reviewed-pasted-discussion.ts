@@ -8,7 +8,7 @@ export interface ReviewedPastedDiscussion {
 }
 
 export type ReviewedDiscussionResult =
-  | { ok: true; content: string; discussionAxes: { initialPostContent: string; replyContent: string; replyCount: number } }
+  | { ok: true; content: string; discussionAxes: { initialPostContent: string; replyContent: string; replyCount: number; initialPostAbsentConfirmed?: boolean } }
   | { ok: false; reason: "incomplete-source" | "unaccounted-attachments" | "initial-unknown" | "empty-contribution" | "too-large" };
 
 /**
@@ -21,7 +21,9 @@ export type ReviewedDiscussionResult =
 export function buildReviewedPastedDiscussion(input: ReviewedPastedDiscussion, maxChars: number): ReviewedDiscussionResult {
   if (!input.sourceCompleteConfirmed) return { ok: false, reason: "incomplete-source" };
   if (!input.attachmentsAccountedFor) return { ok: false, reason: "unaccounted-attachments" };
-  if (!input.initialPosts.length) return { ok: false, reason: "initial-unknown" };
+  if (!input.initialPosts.length && !input.initialAbsenceConfirmed) return { ok: false, reason: "initial-unknown" };
+  if (input.initialPosts.length && input.initialAbsenceConfirmed) return { ok: false, reason: "initial-unknown" };
+  if (!input.initialPosts.length && !input.replies.length) return { ok: false, reason: "empty-contribution" };
   if ([...input.initialPosts, ...input.replies].some((text) => !text.trim())) return { ok: false, reason: "empty-contribution" };
   const initial = input.initialPosts.length
     ? input.initialPosts.map((text, index) => `--- Initial post ${index + 1} ---\n${text}`).join("\n\n")
@@ -31,5 +33,5 @@ export function buildReviewedPastedDiscussion(input: ReviewedPastedDiscussion, m
   const replyContent = replies ? `=== REPLIES TO CLASSMATES ===\n${replies}` : "";
   const content = [initialPostContent, replyContent].filter(Boolean).join("\n\n");
   if (!Number.isSafeInteger(maxChars) || maxChars < 1 || content.length > maxChars) return { ok: false, reason: "too-large" };
-  return { ok: true, content, discussionAxes: { initialPostContent, replyContent, replyCount: input.replies.length } };
+  return { ok: true, content, discussionAxes: { initialPostContent, replyContent, replyCount: input.replies.length, ...(!input.initialPosts.length ? { initialPostAbsentConfirmed: true } : {}) } };
 }

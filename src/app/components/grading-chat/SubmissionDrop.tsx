@@ -62,6 +62,7 @@ export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, get
   const [groupingConfirmed, setGroupingConfirmed] = useState(false);
   const [sourceComplete, setSourceComplete] = useState(false);
   const [attachmentsAccounted, setAttachmentsAccounted] = useState(false);
+  const [absentInitialGroups, setAbsentInitialGroups] = useState<Set<string>>(new Set());
   const textRowsEditedRef = useRef(false);
   const activeTextRow = useRef<number | null>(null);
   const activeTextGroup = useRef<string | null>(null);
@@ -115,7 +116,7 @@ export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, get
   const isDiscussionListing = mode === "many" && isPastedDiscussionListing(submissionText);
   const duplicateNames = textRows.filter((row, index) => row.student.trim() && textRows.findIndex((other) => other.student.trim().normalize("NFKC").toLocaleLowerCase() === row.student.trim().normalize("NFKC").toLocaleLowerCase()) !== index).map((row) => row.student.trim());
 
-  function invalidateDiscussionReview() { setGroupingConfirmed(false); setSourceComplete(false); setAttachmentsAccounted(false); }
+  function invalidateDiscussionReview() { setGroupingConfirmed(false); setSourceComplete(false); setAttachmentsAccounted(false); setAbsentInitialGroups(new Set()); }
 
   function changeText(value: string) {
     invalidateDiscussionReview();
@@ -159,8 +160,8 @@ export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, get
     const groupNames = [...new Set(pendingRows.map((row) => row.group?.trim() ?? ""))];
     const queuedGroups = new Set(textRows.filter((row) => row.state === "queued").map((row) => (row.group ?? "").trim().normalize("NFKC").toLocaleLowerCase()));
     if (groupNames.some((name) => queuedGroups.has(name.normalize("NFKC").toLocaleLowerCase()))) { setError("A group with this student name was already submitted. Check results before submitting more entries for that student."); return; }
-    const built = buildReviewedDiscussionGroups(pendingRows.map((row) => ({ content: row.content, group: row.group?.trim() ?? "", role: row.role ?? "unassigned", authorConfirmed: row.reviewed === true })), groupNames.map((name) => ({ id: name, student: name, samePersonConfirmed: groupingConfirmed, sourceCompleteConfirmed: sourceComplete, attachmentsAccountedFor: attachmentsAccounted })), getGeminiMaxCharsPerSubmission());
-    if (!built.ok || groupNames.some((name) => name.length > CHAT_LABEL_MAX_CHARS)) { setError("Confirm every author, classify and group every entry, confirm completeness and attachments, and include an initial post within the grading limit for each student."); return; }
+    const built = buildReviewedDiscussionGroups(pendingRows.map((row) => ({ content: row.content, group: row.group?.trim() ?? "", role: row.role ?? "unassigned", authorConfirmed: row.reviewed === true })), groupNames.map((name) => ({ id: name, student: name, samePersonConfirmed: groupingConfirmed, sourceCompleteConfirmed: sourceComplete, attachmentsAccountedFor: attachmentsAccounted, initialAbsenceConfirmed: absentInitialGroups.has(name) })), getGeminiMaxCharsPerSubmission());
+    if (!built.ok || groupNames.some((name) => name.length > CHAT_LABEL_MAX_CHARS)) { setError("Confirm every author, classify and group every entry, confirm completeness and attachments, and include or explicitly confirm the absence of each initial post within the grading limit."); return; }
     const token = claimIntake(latch); if (token === null) return;
     textRowsEditedRef.current = true; setTextRowsEdited(true); setPending(true); setError(null);
     const epoch = getSessionEpoch?.();
@@ -317,6 +318,7 @@ export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, get
               {row.state === "uncertain" && <Button size="small" disabled={busy} onClick={() => setTextRows((previous) => previous.map((item, i) => i === index ? { ...item, state: "refused", reason: undefined } : item))}>I checked results; allow retry</Button>}
             </Box>)}
             {duplicateNames.length > 0 && <Alert severity="warning">Some entries have the same name. Confirm they are the same person and combine them, or correct their names before grading. <Button color="inherit" disabled={busy || textRows.some((row) => row.state === "queued" || row.state === "uncertain")} onClick={() => setCombineName(duplicateNames[0])}>Combine entries</Button></Alert>}
+            {axesMode && [...new Set(textRows.filter((row) => (row.state === "ready" || row.state === "refused") && row.group?.trim()).map((row) => row.group!.trim()))].filter((group) => !textRows.some((row) => row.group?.trim() === group && row.role === "initial")).map((group) => <FormControlLabel key={group} control={<Checkbox checked={absentInitialGroups.has(group)} disabled={busy} onChange={(_, checked) => setAbsentInitialGroups((previous) => { const next = new Set(previous); if (checked) next.add(group); else next.delete(group); return next; })} />} label={`I verified ${group} has no initial post in the complete source; score initial criteria as zero`} />)}
             {axesMode && <><FormControlLabel control={<Checkbox checked={groupingConfirmed} disabled={busy} onChange={(_, checked) => setGroupingConfirmed(checked)} />} label="I verified entries assigned to each group belong to the same person" /><FormControlLabel control={<Checkbox checked={sourceComplete} disabled={busy} onChange={(_, checked) => setSourceComplete(checked)} />} label="I verified all initial posts and replies for these students are included" /><FormControlLabel control={<Checkbox checked={attachmentsAccounted} disabled={busy} onChange={(_, checked) => setAttachmentsAccounted(checked)} />} label="I accounted for any attachments" /></>}
             <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}><Button size="small" variant="outlined" disabled={busy || textRows.some((row) => row.state === "uncertain") || !textRows.some((row) => row.state === "ready" || row.state === "refused")} onClick={() => void (axesMode ? gradeDiscussionGroups() : gradeTextRows())}>Grade reviewed submissions</Button><Button size="small" disabled={busy} onClick={() => setClearingText(true)}>Clear text list</Button></Box>
           </> : <Box><Button size="small" variant="outlined" disabled={busy || textUncertain || !submissionText.trim() || (mode === "many" && (!textStudent.trim() || !singleTextConfirmed))} onClick={() => void gradeText()}>Grade text</Button></Box>}

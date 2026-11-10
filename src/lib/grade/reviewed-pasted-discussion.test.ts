@@ -23,7 +23,10 @@ describe("reviewed pasted discussion", () => {
   it("requires explicit initial absence and rejects unaccounted attachments", () => {
     expect(buildReviewedPastedDiscussion({ ...reviewed, initialPosts: [] }, 10_000)).toEqual({ ok: false, reason: "initial-unknown" });
     expect(buildReviewedPastedDiscussion({ ...reviewed, attachmentsAccountedFor: false }, 10_000)).toEqual({ ok: false, reason: "unaccounted-attachments" });
-    expect(buildReviewedPastedDiscussion({ ...reviewed, initialPosts: [], initialAbsenceConfirmed: true }, 10_000)).toEqual({ ok: false, reason: "initial-unknown" });
+    const absent = buildReviewedPastedDiscussion({ ...reviewed, initialPosts: [], initialAbsenceConfirmed: true }, 10_000);
+    expect(absent.ok && absent.discussionAxes.initialPostAbsentConfirmed).toBe(true);
+    expect(absent.ok && absent.discussionAxes.replyContent).toContain("Reply one.");
+    expect(buildReviewedPastedDiscussion({ ...reviewed, initialAbsenceConfirmed: true }, 10_000)).toEqual({ ok: false, reason: "initial-unknown" });
   });
   it("refuses empty and oversized contributions rather than dropping them", () => {
     expect(buildReviewedPastedDiscussion({ ...reviewed, replies: [" "] }, 10_000)).toEqual({ ok: false, reason: "empty-contribution" });

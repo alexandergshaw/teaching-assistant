@@ -541,9 +541,12 @@ async function gradeStudentEntries(
       visualCoverage: affected.some(d => d.coverage.status === "failed") ? "failed" : affected.length ? "incomplete" : visuals.documents.some(d => d.coverage.status === "unavailable") ? "unavailable" : "complete",
     });
     if (affected.length) {
+      const unsupportedShapes = affected.some((item) => item.coverage.reason === "unsupported-shape");
       results.push(buildUngradedRow(limitedEntries[i], {
         kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId,
-        message: `${GRADING_FAILURE_PREFIX}Embedded picture evidence could not be fully inspected in ${affected.map(d => d.file.name).join(", ")}. Supply a supported PDF or export the pictures, then try again.`,
+        message: unsupportedShapes
+          ? `${GRADING_FAILURE_PREFIX}Embedded Word vector shapes could not be fully inspected in ${affected.map(d => d.file.name).join(", ")}. Export the document to PDF and try again.`
+          : `${GRADING_FAILURE_PREFIX}Embedded picture evidence could not be fully inspected in ${affected.map(d => d.file.name).join(", ")}. Supply a supported PDF or export the pictures, then try again.`,
       }));
       continue;
     }

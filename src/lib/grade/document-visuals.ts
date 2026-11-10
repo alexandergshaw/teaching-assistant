@@ -37,17 +37,18 @@ function imageTargets(xml: string | null): ReadonlyMap<string, string> {
 }
 
 /** Namespace-aware parsing ignores comments and honors locally scoped/default prefixes. */
-function imageRelationships(xml: string, extension: string): (string | undefined)[] {
+function imageRelationships(xml: string, extension: string): (string | null | undefined)[] {
   const expected = extension === "docx" ? WORD_NAMESPACES : PRESENTATION_NAMESPACES;
   const target = extension === "docx" ? "drawing" : "pic";
-  const found: (string | undefined)[] = [];
-  const active: { depth: number; embedded?: string; blips: number }[] = [];
+  const found: (string | null | undefined)[] = [];
+  const active: { depth: number; embedded?: string; blips: number; wordShape?: boolean }[] = [];
   const parser = new SaxesParser({ xmlns: true });
   let depth = 0;
   parser.on("doctype", () => { throw new Error("DTD not supported"); });
   parser.on("opentag", (tag) => {
     depth++;
     if (expected.has(tag.uri) && tag.local === target) active.push({ depth, blips: 0 });
+    else if (active.length && DRAWING_NAMESPACES.has(tag.uri) && tag.local === "graphicData" && Object.values(tag.attributes).some((attribute) => !attribute.uri && attribute.local === "uri" && attribute.value === "http://schemas.microsoft.com/office/word/2010/wordprocessingShape")) active[active.length - 1].wordShape = true;
     else if (active.length && DRAWING_NAMESPACES.has(tag.uri) && tag.local === "blip") {
       const drawing = active[active.length - 1];
       if (++drawing.blips > 1) throw new Error("Ambiguous image");
@@ -56,7 +57,7 @@ function imageRelationships(xml: string, extension: string): (string | undefined
       drawing.embedded = ids[0]?.value;
     }
   });
-  parser.on("closetag", () => { if (active.at(-1)?.depth === depth) found.push(active.pop()!.embedded); depth--; });
+  parser.on("closetag", () => { if (active.at(-1)?.depth === depth) { const drawing = active.pop()!; found.push(drawing.wordShape ? null : drawing.embedded); } depth--; });
   parser.write(xml).close();
   return found;
 }
@@ -102,10 +103,11 @@ export async function prepareDocumentVisuals(extension: string, bytes?: Buffer, 
       const targets = imageTargets(rels);
       if (extension === "docx" && name === "word/document.xml") names.push(...activeDocxHeaderFooterPaths(xml, rels));
       const legacyPictures = extension === "docx" ? countLegacyPictures(xml) : 0;
-      if (legacyPictures) { out.found += legacyPictures; out.omitted += legacyPictures; out.status = "incomplete"; out.reason = "unsupported-image"; }
+      if (legacyPictures) { out.found += legacyPictures; out.omitted += legacyPictures; out.status = "incomplete"; if (out.reason !== "unsupported-shape") out.reason = "unsupported-image"; }
       for (const embed of drawings) {
         out.found++;
-        const omit = (reason: DocumentVisuals["reason"]) => { out.omitted++; out.status = "incomplete"; out.reason = reason; };
+        const omit = (reason: DocumentVisuals["reason"]) => { out.omitted++; out.status = "incomplete"; if (reason === "unsupported-shape" || out.reason !== "unsupported-shape") out.reason = reason; };
+        if (embed === null) { omit("unsupported-shape"); continue; }
         if (out.parts.length >= limits.parts) { omit("budget"); continue; }
         const target = embed && targets.get(embed);
         if (!target) { omit("missing-data"); continue; }

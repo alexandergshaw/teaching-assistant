@@ -181,6 +181,31 @@ describe.each(["docx", "pptx"] as const)("%s intake through actual model request
 });
 
 describe("coverage and boundaries", () => {
+  it("holds Word vector shapes with a specific PDF-export instruction", async () => {
+    const zip = await JSZip.loadAsync(await fixture("docx", { pictures: 0 }));
+    zip.file("word/document.xml", '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><w:body><w:p><w:r><w:t>Synthetic answer</w:t><w:drawing><a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp/></a:graphicData></a:graphic></w:drawing></w:r></w:p></w:body></w:document>');
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+    const coverage = await prepareDocumentVisuals("docx", bytes);
+    expect(coverage).toMatchObject({ status: "incomplete", reason: "unsupported-shape", found: 1, omitted: 1 });
+    expect(isDocumentVisuals(coverage)).toBe(true);
+    const entry = await canvasWorkToEntry({ student: "Student", userId: 17, text: "", contributionCount: 1, files: [{ name: "shape.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: bytes.toString("base64") }] });
+    const response = await (await gradePost(request({ ...body(entry), entry }))).json();
+    expect(response.result.ungraded.kind).toBe("grading-failed");
+    expect(response.result.feedback).toMatch(/vector shapes.*export.*PDF/i);
+    expect(callLlm).not.toHaveBeenCalled();
+  });
+  it("holds a Word shape even when it also contains an embedded image and another drawing is missing", async () => {
+    const zip = await JSZip.loadAsync(await fixture("docx", { pictures: 1 }));
+    zip.file("word/document.xml", '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><w:body><w:p><w:r><w:t>Synthetic answer</w:t><w:drawing><a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><a:blip r:embed="rId1"/></wps:wsp></a:graphicData></a:graphic></w:drawing><w:drawing><a:blip/></w:drawing></w:r></w:p></w:body></w:document>');
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+    const coverage = await prepareDocumentVisuals("docx", bytes);
+    expect(coverage).toMatchObject({ status: "incomplete", reason: "unsupported-shape", found: 2, omitted: 2 });
+    const entry = await canvasWorkToEntry({ student: "Student", userId: 17, text: "", contributionCount: 1, files: [{ name: "shape.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: bytes.toString("base64") }] });
+    const response = await (await gradePost(request({ ...body(entry), entry }))).json();
+    expect(response.result.ungraded.kind).toBe("grading-failed");
+    expect(response.result.feedback).toMatch(/vector shapes.*export.*PDF/i);
+    expect(callLlm).not.toHaveBeenCalled();
+  });
   it("reinspects raw DOCX instead of trusting stale complete visual metadata", async () => {
     const zip = await JSZip.loadAsync(await fixture("docx", { pictures: 0 }));
     zip.file("word/document.xml", `<w:document xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml"><w:body><w:p><w:r><w:t>Answer</w:t><w:pict><v:shape><v:imagedata/></v:shape></w:pict></w:r></w:p></w:body></w:document>`);

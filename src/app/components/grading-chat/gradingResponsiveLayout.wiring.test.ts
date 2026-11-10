@@ -43,6 +43,12 @@ describe("responsive grading chat presentation wiring", () => {
     expect(css).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
   });
 
+  it("keeps the composer in normal flow whenever results are present", () => {
+    expect(panel).toMatch(/\{hasRows && driver\.run && \([\s\S]*?<div className=\{chatStyles\.stream\}>/);
+    expect(panel.indexOf("chatStyles.stream")).toBeLessThan(panel.indexOf("chatStyles.stickyComposer"));
+    expect(css).toMatch(/\.stream\s*~\s*\.stickyComposer\s*\{\s*position:\s*static\s*;/);
+  });
+
   it("names focusable local scroll regions, keeps the matrix, and opts in only chat", () => {
     expect(panel).toMatch(/diagnosticsScroll\} role="region" aria-label="Run diagnostics table" tabIndex=\{0\}/);
     expect(results).toMatch(/layout.tableScroll[^>]+role="region" aria-label="Grading results table" tabIndex=\{0\}/);

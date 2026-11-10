@@ -47,6 +47,12 @@
   gap: var(--space-3);
 }
 
+/* A dock can cover the results and their inner scroll region on desktop.
+   Once results exist, keep the composer after them in the document flow. */
+.stream ~ .stickyComposer {
+  position: static;
+}
+
 /* Composer rows inside the dock. */
 .composer {
   display: flex;

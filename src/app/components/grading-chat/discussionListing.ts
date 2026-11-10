@@ -11,6 +11,11 @@ const NAVIGATION = /^(?:last\s+(?:post|reply)|repl(?:y|ies)|unread|views?|profil
 const SIGNAL = /\b(?:unread|last\s+(?:post|reply)|repl(?:y|ies)|views?|discussion)\b/i;
 const ONLY_FURNITURE = /^(?:collapse\s+subdiscussion|manage\s+discussion\s+entry|unread(?:\s+posts?)?|(?:\d+\s+)?(?:repl(?:y|ies)|views?|unread)|last\s+(?:post|reply)\b.*|view\s+profile|profile|(?:week\s+\d+\s+)?discussion(?:\s+(?:topic|board))?)$/i;
 
+function repeatedCanvasAuthor(first: string, second: string): boolean {
+  const name = first.trim();
+  return !!name && (second.trim() === name || second.trim() === `${name} inactive`);
+}
+
 function plausibleAuthor(value: string): boolean {
   const name = value.trim();
   return name.length >= 2 && name.length <= 100 && !NAVIGATION.test(name) && !/[\d:<>]/.test(name) && /\p{L}/u.test(name);
@@ -23,7 +28,7 @@ export function hasDiscussionResponseContent(content: string): boolean {
   const lines = content.replace(/\r\n?/g, "\n").split("\n");
   return lines.some((line, index) => {
     const value = line.trim();
-    return !!value && !INLINE.test(value) && !TIMESTAMP.test(value) && !CANVAS_TIME.test(value) && !CANVAS_DATE.test(value) && !CANVAS_DATE.test((lines[index + 1] ?? "").trim()) && !(value === (lines[index + 1] ?? "").trim() && CANVAS_DATE.test((lines[index + 2] ?? "").trim())) && !TIMESTAMP.test((lines[index + 1] ?? "").trim()) && !CANVAS_TIME.test((lines[index + 1] ?? "").trim()) && !ONLY_FURNITURE.test(value) && !/^---+$/.test(value);
+    return !!value && !INLINE.test(value) && !TIMESTAMP.test(value) && !CANVAS_TIME.test(value) && !CANVAS_DATE.test(value) && !CANVAS_DATE.test((lines[index + 1] ?? "").trim()) && !(repeatedCanvasAuthor(value, lines[index + 1] ?? "") && CANVAS_DATE.test((lines[index + 2] ?? "").trim())) && !TIMESTAMP.test((lines[index + 1] ?? "").trim()) && !CANVAS_TIME.test((lines[index + 1] ?? "").trim()) && !ONLY_FURNITURE.test(value) && !/^---+$/.test(value);
   });
 }
 
@@ -40,12 +45,22 @@ export function parseDiscussionListing(text: string): DiscussionListingResult {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     const inline = line.match(INLINE);
-    const canvasDetailed = CANVAS_TIME.test(line) && i >= 3 && /^manage\s+discussion\s+entry$/i.test((lines[i + 1] ?? "").trim()) && CANVAS_DATE.test(lines[i - 1].trim()) && lines[i - 2].trim() === lines[i - 3].trim() && plausibleAuthor(lines[i - 2]);
-    if (canvasDetailed) headers.push({ index: i - 3, student: lines[i - 2].trim() });
+    const canvasBlock = CANVAS_TIME.test(line) && i >= 3 && /^manage\s+discussion\s+entry$/i.test((lines[i + 1] ?? "").trim()) && CANVAS_DATE.test(lines[i - 1].trim()) && plausibleAuthor(lines[i - 3]) && plausibleAuthor(lines[i - 2]);
+    if (canvasBlock) headers.push({ index: i - 3, student: repeatedCanvasAuthor(lines[i - 3], lines[i - 2]) ? lines[i - 3].trim() : "" });
     else if (inline && plausibleAuthor(inline[1])) headers.push({ index: i, student: inline[1].trim() });
     else if ((TIMESTAMP.test(line) || (canvasCandidates >= 1 && CANVAS_TIME.test(line))) && i > 0 && plausibleAuthor(lines[i - 1])) headers.push({ index: i - 1, student: lines[i - 1].trim() });
   }
-  const detected = headers.length > 0 || (SIGNAL.test(normalized) && /\b(?:posted|wrote|unread)\b/i.test(normalized));
+  // A Canvas control followed by another entry's controls is a boundary even
+  // when the metadata is malformed. Hold the block unassigned for review.
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^collapse\s+subdiscussion$/i.test(lines[i].trim())) continue;
+    const end = Math.min(lines.length, i + 8);
+    if (!lines.slice(i + 1, end).some((line) => /^manage\s+discussion\s+entry$/i.test(line.trim()))) continue;
+    const candidate = headers.find((header) => header.index > i && header.index < end);
+    if (candidate && !candidate.student) candidate.index = i;
+    else if (!candidate) headers.push({ index: i, student: "" });
+  }
+  headers.sort((a, b) => a.index - b.index);  const detected = headers.length > 0 || /^(?:collapse\s+subdiscussion|manage\s+discussion\s+entry)\s*$/im.test(normalized) || (SIGNAL.test(normalized) && /\b(?:posted|wrote|unread)\b/i.test(normalized));
   if (!detected) return { detected: false, rows: [] };
   if (headers.length === 0) return { detected: true, rows: normalized.trim() ? [{ student: "", content: normalized.trim() }] : [] };
   const rows: PastedSubmission[] = [];

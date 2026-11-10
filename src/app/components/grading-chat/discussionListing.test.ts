@@ -44,6 +44,7 @@ describe("pasted discussion listings", () => {
 describe("Canvas copied metadata", () => {
   it("does not treat repeated names, dates and controls as response text", () => {
     expect(hasDiscussionResponseContent("Jordan Example\nJordan Example\nSep 6, 2026\nSep 6 at 10pm\nManage Discussion Entry")).toBe(false);
+    expect(hasDiscussionResponseContent("Jordan Example\nJordan Example inactive\nSep 6, 2026\nSep 6 at 10pm\nManage Discussion Entry")).toBe(false);
     expect(hasDiscussionResponseContent("Jordan Example\nJordan Example\nSep 6, 2026\nSep 6 at 10pm\nManage Discussion Entry\nReal synthetic reply")).toBe(true);
   });
 });

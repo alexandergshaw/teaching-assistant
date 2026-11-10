@@ -66,6 +66,30 @@ describe("parsePastedSubmissions", () => {
     expect(rows.map((row) => row.student)).toEqual(["", "Jordan Example", "Taylor Example"]);
     expect(rows.map((row) => row.content).join("\n")).toBe(text);
   });
+  it("separates an inactive Canvas student from the preceding reply", () => {
+    const text = "Jordan Example\nJordan Example\nSep 6, 2026\nSep 6 at 10pm\nManage Discussion Entry\nSynthetic reply\nCollapse Subdiscussion\nTaylor Example\nTaylor Example inactive\nSep 6, 2026\nSep 6 at 11:50pm\nManage Discussion Entry\nSynthetic post";
+    const rows = parsePastedSubmissions(text);
+    expect(rows.map((row) => row.student)).toEqual(["Jordan Example", "Taylor Example"]);
+    expect(rows.map((row) => row.content).join("\n")).toBe(text);
+    expect(rows[0].content).not.toContain("Synthetic post");
+  });
+  it("keeps a malformed Canvas block after a valid post unassigned", () => {
+    const text = "Jordan Example\nJordan Example\nSep 6, 2026\nSep 6 at 10pm\nManage Discussion Entry\nFirst synthetic reply\nCollapse Subdiscussion\nTaylor Example\nDifferent Example\nSep 6, 2026\nSep 6 at 11:50pm\nManage Discussion Entry\nSecond synthetic reply";
+    const rows = parsePastedSubmissions(text);
+    expect(rows.map((row) => row.student)).toEqual(["Jordan Example", ""]);
+    expect(rows[0].content).not.toContain("Second synthetic reply");
+    expect(rows.map((row) => row.content).join("\n")).toBe(text);
+  });
+  it("holds a malformed timestamp after a valid Canvas entry unassigned", () => {
+    const text = "Jordan Example\nJordan Example\nSep 6, 2026\nSep 6 at 10pm\nManage Discussion Entry\nFirst synthetic reply\nCollapse Subdiscussion\nTaylor Example\nTaylor Example\nUnknown timestamp\nManage Discussion Entry\nSecond synthetic reply";
+    const rows = parsePastedSubmissions(text);
+    expect(rows.map((row) => row.student)).toEqual(["Jordan Example", ""]);
+    expect(rows.map((row) => row.content).join("\n")).toBe(text);
+  });
+  it("holds malformed copied Canvas headers unassigned instead of guessing an author", () => {
+    const text = "Collapse Subdiscussion\nJordan Example\nDifferent Example\nSep 6, 2026\nSep 6 at 10pm\nManage Discussion Entry\nSynthetic reply";
+    expect(parsePastedSubmissions(text)).toEqual([{ student: "", content: text }]);
+  });
   it("keeps same-name posts separate until an instructor confirms they are the same student", () => {
     const text = "Alex Kim posted 10/1/2026\nInitial\nAlex Kim posted 10/2/2026\nReply";
     expect(parsePastedSubmissions(text)).toEqual([{ student: "Alex Kim", content: "Alex Kim posted 10/1/2026\nInitial" }, { student: "Alex Kim", content: "Alex Kim posted 10/2/2026\nReply" }]);

@@ -23,6 +23,25 @@ function plausibleAuthor(value: string): boolean {
 
 export interface DiscussionListingResult { detected: boolean; rows: PastedSubmission[] }
 
+/** Counts visible thread summaries; these are not the contents of replies. */
+export function listedReplyCount(text: string): number {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n").filter((line) => line.trim());
+  return lines.reduce((total, line, index) => {
+    const match = line.trim().match(/^(\d+)\s+repl(?:y|ies)$/i);
+    const following = lines[index + 1] ?? "";
+    const split = line.trim().match(/^(\d+)$/) && /^repl(?:y|ies)$/i.test(following.trim());
+    const previous = lines[index - 1] ?? "";
+    const repeated = split && previous.trim().toLowerCase() === `${line.trim()} ${following.trim().toLowerCase()}`;
+    return total + (match ? Number(match[1]) : split && !repeated ? Number(line.trim()) : 0);
+  }, 0);
+}
+
+/** Recognize discussion evidence even when an explicit student label precedes it. */
+export function hasDiscussionListingEvidence(text: string): boolean {
+  const listing = parseDiscussionListing(text);
+  return listing.detected && listing.rows.some((row) => !!row.student);
+}
+
 /** Header and recognizable controls are not evidence of a student's response. */
 export function hasDiscussionResponseContent(content: string): boolean {
   const lines = content.replace(/\r\n?/g, "\n").split("\n");

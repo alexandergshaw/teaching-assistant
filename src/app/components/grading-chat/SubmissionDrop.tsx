@@ -25,7 +25,7 @@ import { ROLE_FILE_LIMIT } from "./chatFileRoles";
 import { markSessionChanged, submitAssignedFiles, submitDropBatch, suggestFileGroups } from "./submissionDropRoutes";
 import { claimIntake, releaseIntake, resetIntake, type IntakeFence } from "./intakeFence";
 import { hasSubmissionContent, isPastedDiscussionListing, parsePastedSubmissions } from "./pastedSubmissions";
-import { hasDiscussionResponseContent } from "./discussionListing";
+import { hasDiscussionListingEvidence, hasDiscussionResponseContent, listedReplyCount } from "./discussionListing";
 import { CHAT_LABEL_MAX_CHARS } from "./chatSubmissionIntake";
 import { buildReviewedDiscussionGroups } from "@/lib/grade/reviewed-discussion-groups";
 import type { ReviewedPastedDiscussion } from "@/lib/grade/reviewed-pasted-discussion";
@@ -127,6 +127,7 @@ export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, get
 
   async function gradeTextRows(reviewedAll = false) {
     if (busy || latch.busy || textRows.some((row) => row.state === "uncertain") || !textRows.some((row) => row.state === "ready" || row.state === "refused")) return;
+    if (hasDiscussionListingEvidence(submissionText) && listedReplyCount(submissionText) > 0) { setError("This listing reports replies that may not be included. Expand and paste the full threads, remove reply-count controls from the original Submission text, then classify and review every post and reply before grading."); return; }
     if (textRows.some((row) => (row.state === "ready" || row.state === "refused") && (!row.student.trim() || !hasSubmissionContent(row.content)))) { setError("Add a student name and submission text beyond the heading for every entry before grading."); return; }
     if (textRows.some((row) => (row.state === "ready" || row.state === "refused") && ((!reviewedAll && !row.reviewed) || (isDiscussionListing && !hasDiscussionResponseContent(row.content))))) { setError("Confirm each name and submission boundary before grading; remove page controls and include response text beyond any dated header."); return; }
     if (textRows.some((row) => (row.state === "ready" || row.state === "refused") && row.content.length > getGeminiMaxCharsPerSubmission())) { setError("A submission exceeds the grading text limit. Shorten or split it before grading."); return; }
@@ -157,6 +158,7 @@ export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, get
   async function gradeDiscussionGroups() {
     if (!onReviewed || busy || latch.busy || textRows.some((row) => row.state === "uncertain")) return;
     const pendingRows = textRows.filter((row) => row.state === "ready" || row.state === "refused");
+    if (listedReplyCount(submissionText) > 0) { setError("This listing contains reply-count summaries. Expand and paste the full threads, remove summary controls from the original Submission text, and verify every reply before grading."); return; }
     const groupNames = [...new Set(pendingRows.map((row) => row.group?.trim() ?? ""))];
     const queuedGroups = new Set(textRows.filter((row) => row.state === "queued").map((row) => (row.group ?? "").trim().normalize("NFKC").toLocaleLowerCase()));
     if (groupNames.some((name) => queuedGroups.has(name.normalize("NFKC").toLocaleLowerCase()))) { setError("A group with this student name was already submitted. Check results before submitting more entries for that student."); return; }

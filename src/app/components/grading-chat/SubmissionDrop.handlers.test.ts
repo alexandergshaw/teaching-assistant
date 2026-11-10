@@ -6,7 +6,7 @@ import { markSessionChanged, submitAssignedFiles, submitDropBatch, suggestFileGr
 import { claimIntake, releaseIntake, resetIntake, type IntakeFence } from "./intakeFence";
 import type { SubmitOutcome } from "./useContinuousGradingRun";
 import { hasSubmissionContent, isPastedDiscussionListing, parsePastedSubmissions } from "./pastedSubmissions";
-import { hasDiscussionResponseContent } from "./discussionListing";
+import { hasDiscussionListingEvidence, hasDiscussionResponseContent, listedReplyCount } from "./discussionListing";
 import { CHAT_LABEL_MAX_CHARS } from "./chatSubmissionIntake";
 import { buildReviewedDiscussionGroups } from "@/lib/grade/reviewed-discussion-groups";
 import { getGeminiMaxCharsPerSubmission } from "@/lib/gemini";
@@ -23,8 +23,8 @@ const declarations = file.statements.filter((statement) => ts.isFunctionDeclarat
 const code = ts.transpileModule(declarations.map((d) => d.getText(file).replace(/^export\s+/, "")).join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS } }).outputText;
 const jsx = (type: string, props: Record<string, unknown>) => ({ type, props });
 const components = ["Alert", "Accordion", "AccordionDetails", "AccordionSummary", "Box", "Button", "Checkbox", "Dialog", "DialogActions", "DialogContent", "DialogTitle", "FormControl", "FormControlLabel", "FormLabel", "Radio", "RadioGroup", "TextField", "Typography"];
-const factory = new Function("exports", "require", "useState", "useRef", "useEffect", "ROLE_FILE_LIMIT", "submitAssignedFiles", "submitDropBatch", "suggestFileGroups", "markSessionChanged", "claimIntake", "releaseIntake", "resetIntake", "parsePastedSubmissions", "hasSubmissionContent", "isPastedDiscussionListing", "hasDiscussionResponseContent", "CHAT_LABEL_MAX_CHARS", "buildReviewedDiscussionGroups", "getGeminiMaxCharsPerSubmission", "window", ...components, `${code}; return SubmissionDrop;`);
-const component = factory({}, (id: string) => id === "react/jsx-runtime" ? { jsx, jsxs: jsx } : {}, useState, useRef, useEffect, 40, submitAssignedFiles, submitDropBatch, suggestFileGroups, markSessionChanged, claimIntake, releaseIntake, resetIntake, parsePastedSubmissions, hasSubmissionContent, isPastedDiscussionListing, hasDiscussionResponseContent, CHAT_LABEL_MAX_CHARS, buildReviewedDiscussionGroups, getGeminiMaxCharsPerSubmission, { addEventListener() {}, removeEventListener() {} }, ...components);
+const factory = new Function("exports", "require", "useState", "useRef", "useEffect", "ROLE_FILE_LIMIT", "submitAssignedFiles", "submitDropBatch", "suggestFileGroups", "markSessionChanged", "claimIntake", "releaseIntake", "resetIntake", "parsePastedSubmissions", "hasSubmissionContent", "isPastedDiscussionListing", "hasDiscussionListingEvidence", "hasDiscussionResponseContent", "listedReplyCount", "CHAT_LABEL_MAX_CHARS", "buildReviewedDiscussionGroups", "getGeminiMaxCharsPerSubmission", "window", ...components, `${code}; return SubmissionDrop;`);
+const component = factory({}, (id: string) => id === "react/jsx-runtime" ? { jsx, jsxs: jsx } : {}, useState, useRef, useEffect, 40, submitAssignedFiles, submitDropBatch, suggestFileGroups, markSessionChanged, claimIntake, releaseIntake, resetIntake, parsePastedSubmissions, hasSubmissionContent, isPastedDiscussionListing, hasDiscussionListingEvidence, hasDiscussionResponseContent, listedReplyCount, CHAT_LABEL_MAX_CHARS, buildReviewedDiscussionGroups, getGeminiMaxCharsPerSubmission, { addEventListener() {}, removeEventListener() {} }, ...components);
 function nodes(node: any): Node[] { if (Array.isArray(node)) return node.flatMap(nodes); if (!node || typeof node !== "object") return []; return [node, ...nodes(node.props?.children)]; }
 const text = (node: any): string => Array.isArray(node) ? node.map(text).join("") : typeof node === "string" ? node : !node || typeof node !== "object" ? "" : text(node.props?.children);
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
@@ -81,6 +81,45 @@ describe("SubmissionDrop actual handlers", () => {
     h.button(tree, "I reviewed all names and submissions; grade").props.onClick(); await flush(); tree = h.render();
     expect(onText).toHaveBeenCalledTimes(1); expect(h.button(tree, "I reviewed all names and submissions; grade").props.disabled).toBe(true);
     h.button(tree, "I reviewed all names and submissions; grade").props.onClick(); await flush(); expect(onText).toHaveBeenCalledTimes(1);
+  });
+  it.each([1, 4])("holds an unexpanded listing reporting %i replies before dispatch", async (count) => {
+    const onText = vi.fn().mockResolvedValue({ kind: "accepted", entryCount: 1 });
+    const h = harness(undefined, undefined, onText); let tree = h.render(); h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: `Ada Chen posted Sep 3, 2026\nInitial response\n${count} Replies\n${count}\nReplies\n13 Views` } }); tree = h.render();
+    tree = h.confirmText(tree); h.button(tree, "Grade reviewed submissions").props.onClick(); await flush(); tree = h.render();
+    expect(onText).not.toHaveBeenCalled(); expect(text(tree)).toContain("may not be included");
+  });
+  it("also holds an unexpanded reply-count listing in separate-axis mode", async () => {
+    const onReviewed = vi.fn(); const h = harness(undefined, undefined, undefined, undefined, false, onReviewed);
+    let tree = h.render(); h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "Ada Chen posted Sep 3, 2026\nInitial response\n4 Replies\n4\nReplies" } }); tree = h.render();
+    nodes(tree).find((n) => n.type === "FormControlLabel" && n.props.label === "Classify initial posts and replies for separate grading")!.props.control.props.onChange(null, true); tree = h.render();
+    h.button(tree, "Grade reviewed submissions").props.onClick(); await flush(); tree = h.render();
+    expect(onReviewed).not.toHaveBeenCalled(); expect(text(tree)).toContain("reply-count summaries");
+  });
+  it("holds a labeled discussion listing with a split reply count but allows an ordinary essay", async () => {
+    for (const [content, blocked] of [["Student: Ada Chen\nAda Chen posted Sep 3, 2026\nInitial response\n4\n\nReplies", true], ["Student: Ada Chen\nMy essay discusses peer feedback.\n4\n\nReplies", false]] as const) {
+      slots.length = 0; const onText = vi.fn().mockResolvedValue({ kind: "accepted", entryCount: 1 });
+      const h = harness(undefined, undefined, onText); let tree = h.render(); h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+      nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: content } }); tree = h.render();
+      h.button(tree, "I reviewed all names and submissions; grade").props.onClick(); await flush();
+      expect(onText).toHaveBeenCalledTimes(blocked ? 0 : 1);
+    }
+  });
+  it.each([["1\nReply", false], ["4\nReplies", false], ["0\nReplies", true]])("handles split reply summary %s in ordinary mode", async (summary, allowed) => {
+    const onText = vi.fn().mockResolvedValue({ kind: "accepted", entryCount: 1 });
+    const h = harness(undefined, undefined, onText); let tree = h.render(); h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: `Ada Chen posted Sep 3, 2026\nInitial response\n${summary}` } }); tree = h.confirmText(h.render());
+    h.button(tree, "Grade reviewed submissions").props.onClick(); await flush();
+    if (!allowed) expect(onText).not.toHaveBeenCalled();
+    expect(text(h.render()).includes("may not be included")).toBe(!allowed);
+  });
+  it.each([["1\nReply", true], ["4\nReplies", true], ["0\nReplies", false]])("checks split reply summary %s in separate-axis mode", async (summary, held) => {
+    const onReviewed = vi.fn(); const h = harness(undefined, undefined, undefined, undefined, false, onReviewed);
+    let tree = h.render(); h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: `Ada Chen posted Sep 3, 2026\nInitial response\n${summary}` } }); tree = h.render();
+    nodes(tree).find((n) => n.type === "FormControlLabel" && n.props.label === "Classify initial posts and replies for separate grading")!.props.control.props.onChange(null, true); tree = h.render();
+    h.button(tree, "Grade reviewed submissions").props.onClick(); await flush(); expect(onReviewed).not.toHaveBeenCalled(); expect(text(h.render()).includes("original Submission text")).toBe(held);
   });
   it("clears discussion attestations after editing source and when starting a new paste", () => {
     const h = harness(undefined, undefined, undefined, undefined, false, vi.fn()); let tree = h.render();

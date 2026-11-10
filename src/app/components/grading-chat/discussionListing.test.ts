@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { hasDiscussionResponseContent, parseDiscussionListing } from "./discussionListing";
+import { hasDiscussionResponseContent, listedReplyCount, parseDiscussionListing } from "./discussionListing";
+
+it("counts thread reply summaries without treating duplicated interface numbers as reply text", () => {
+  expect(listedReplyCount("3 Unread\n3\nUnread\n4 Replies\n4\nReplies\n13 Views")).toBe(4);
+  expect(listedReplyCount("1 Replies\n1\nReplies\n0 Replies")).toBe(1);
+  expect(listedReplyCount("4\nReplies")).toBe(4);
+  expect(listedReplyCount("4\n\nReplies")).toBe(4);
+  expect(listedReplyCount("1\nReply")).toBe(1);
+  expect(listedReplyCount("0\nReplies")).toBe(0);
+  expect(listedReplyCount("We considered 4 replies in our analysis.")).toBe(0);
+});
 
 const visible = (value: string) => value.replace(/\s/g, "");
 

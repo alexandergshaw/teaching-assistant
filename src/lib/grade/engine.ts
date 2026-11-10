@@ -1,4 +1,5 @@
 import { reportsLengthCriterionDeduction, reportsLengthPenalty } from "./reported-length-penalty";
+import { addLengthExemption, extractLengthOnlyExemption, withoutSupportedInstructionLength, withoutSupportedRubricLength } from "./length-only-exemption";
 import { canvasOmissionIdentityRefusal, canvasVideoRefusal } from "../canvas/omitted-video";
 import type { SubmissionFileInventory } from "./submission-file-inventory";
 import { parseRepositoryProposalOutput } from "./repository-proposal-output";
@@ -247,11 +248,14 @@ async function gradeSubmission(
   videoGradeWindowSec?: RecordingWindow,
   callSink?: GradeCallSink,
   executionOptions?: GradingRunOptions,
-  repositoryInventories?: SubmissionFileInventory[]
+  repositoryInventories?: SubmissionFileInventory[],
+  lengthExemption?: { criteria: RubricCriterion[]; exempt: RubricCriterion } | null
 ): Promise<GradedResult> {
   const axis = await scoreAxis(systemPrompt, studentName, content, provider, inlineFiles, codeRun, submittedFiles, commentSplit, videoGradeWindowSec, callSink, executionOptions, repositoryInventories);
-  const derivedTotal = deriveTotalScore(axis.modelTotalScore, axis.rubricAreas);
-  return finalizeGrade(studentName, axis.rubricAreas, derivedTotal, axis.strengths, axis.improvements, pointsPossible);
+  const areas = lengthExemption ? addLengthExemption(axis.rubricAreas, lengthExemption.criteria, lengthExemption.exempt) : axis.rubricAreas;
+  if (!areas) throw new GradeCallError("The model did not return all substantive rubric scores on their stated scales. Review or retry; no grade was produced.", "model unparseable");
+  const derivedTotal = deriveTotalScore(lengthExemption ? "" : axis.modelTotalScore, areas);
+  return finalizeGrade(studentName, areas, derivedTotal, axis.strengths, axis.improvements, pointsPossible);
 }
 
 /**
@@ -298,12 +302,18 @@ async function gradeDiscussionAxes(a: {
   callSink?: GradeCallSink;
   modelExecution?: LlmExecutionPolicy;
   suppressLengthDeduction?: boolean;
+  lengthExemption?: { criteria: RubricCriterion[]; exempt: RubricCriterion } | null;
 }): Promise<GradedResult> {
   if (a.initialPostAbsentConfirmed && a.replyPrompt === null) throw new Error("Cannot grade replies separately without reply rubric criteria.");
   if (a.initialPostAbsentConfirmed && (!a.initialCriteria.length || a.initialCriteria.some((criterion) => criterion.points == null || !Number.isFinite(criterion.points) || criterion.points <= 0))) throw new Error("Cannot score an absent initial post without explicit positive point values for its rubric criteria.");
   const initial = a.initialPostAbsentConfirmed
     ? { rubricAreas: a.initialCriteria.map((criterion) => ({ area: criterion.name, score: `0/${criterion.points}`, comment: "No initial post was submitted." })), modelTotalScore: "", strengths: "", improvements: "No initial post was submitted." }
     : await scoreAxis(a.initialPrompt, a.student, a.initialText, a.provider, a.inlineFiles, a.codeRun, a.submittedFiles, a.commentSplit, a.videoGradeWindowSec, a.callSink, { modelExecution: a.modelExecution, suppressLengthDeduction: a.suppressLengthDeduction });
+  if (a.lengthExemption && a.lengthExemption.exempt.axis !== "reply") {
+    const areas = addLengthExemption(initial.rubricAreas, a.initialCriteria, a.lengthExemption.exempt);
+    if (!areas) throw new GradeCallError("The model did not return all substantive initial-post scores on their stated scales. Review or retry; no grade was produced.", "model unparseable");
+    initial.rubricAreas = areas; initial.modelTotalScore = "";
+  }
 
   if (a.replyPrompt === null) {
     const total = deriveTotalScore(initial.modelTotalScore, initial.rubricAreas);
@@ -324,6 +334,11 @@ async function gradeDiscussionAxes(a: {
     replyImprovements = reply.improvements;
   } else {
     replyAreas = absentReplyAreas(a.replyCriteria);
+  }
+  if (a.lengthExemption?.exempt.axis === "reply") {
+    const areas = addLengthExemption(replyAreas, a.replyCriteria, a.lengthExemption.exempt);
+    if (!areas) throw new GradeCallError("The model did not return all substantive reply scores on their stated scales. Review or retry; no grade was produced.", "model unparseable");
+    replyAreas = areas;
   }
   const areas = [...initial.rubricAreas, ...replyAreas];
   // The code sum, never a model total: each pass saw only one axis.
@@ -457,23 +472,27 @@ async function gradeStudentEntries(
   const audit = evidenceOnly ? extractRubricCriteriaForEvidence(rubric) : null;
   if (evidenceOnly && (!audit?.ok || !options.evidenceContext || provider !== "gemini" || studentSubmissions.some((entry) => entry.discussionAxes || entry.content.length > maxCharsPerSubmission || entry.submittedFiles.some((file) => file.videoRef)))) throw new Error("Unsupported or incomplete evidence grading input.");
   const criteria = audit?.ok ? audit.criteria : extractRubricCriteria(rubric);
+  const scoringInstructions = options.suppressLengthDeduction ? withoutSupportedInstructionLength(assignmentInstructions) : assignmentInstructions;
+  const lengthExemption = options.suppressLengthDeduction && !evidenceOnly && studentSubmissions.every((entry) => !entry.discussionAxes?.initialPostAbsentConfirmed) ? extractLengthOnlyExemption(rubric, criteria) : null;
+  const scoringRubric = lengthExemption?.rubric ?? (options.suppressLengthDeduction ? withoutSupportedRubricLength(rubric) : rubric);
+  const scoringCriteria = lengthExemption?.criteria ?? criteria;
   // A8 Wave B (docs/a8-scoring-architecture.md 3.2): THREE prompts, built
   // once; WHICH one an entry uses is chosen PER ENTRY (3.3/3.6). singleAxisPrompt
   // is today's call, byte for byte (ALL criteria, axisScope "all").
   const singleAxisPrompt = commentSplit
-    ? buildSystemPrompt(assignmentInstructions, rubric, criteria, "some", "separate-strengths", "all", harshness, feedbackWordTarget, namingDeduction, lengthDeduction, undefined, options.lengthDeductionThresholdWords, options.suppressLengthDeduction)
-    : buildSystemPrompt(assignmentInstructions, rubric, criteria, "some", "in-overall-comment", "all", harshness, feedbackWordTarget, namingDeduction, lengthDeduction, undefined, options.lengthDeductionThresholdWords, options.suppressLengthDeduction);
+    ? buildSystemPrompt(scoringInstructions ?? "", scoringRubric ?? "", scoringCriteria, "some", "separate-strengths", "all", harshness, feedbackWordTarget, namingDeduction, lengthDeduction, undefined, options.lengthDeductionThresholdWords, options.suppressLengthDeduction)
+    : buildSystemPrompt(scoringInstructions ?? "", scoringRubric ?? "", scoringCriteria, "some", "in-overall-comment", "all", harshness, feedbackWordTarget, namingDeduction, lengthDeduction, undefined, options.lengthDeductionThresholdWords, options.suppressLengthDeduction);
   const [axisMode, axisRouting] = commentSplit
     ? (["some", "separate-strengths"] as const)
     : (["some", "in-overall-comment"] as const);
-  const initialCriteria = criteria.filter((c) => c.axis !== "reply");
-  const replyCriteria = criteria.filter((c) => c.axis === "reply");
+  const initialCriteria = scoringCriteria.filter((c) => c.axis !== "reply");
+  const replyCriteria = scoringCriteria.filter((c) => c.axis === "reply");
   const hasReplySection = replyCriteria.length > 0;
-  const initialAxisPrompt = buildSystemPrompt(assignmentInstructions, rubric, initialCriteria, axisMode, axisRouting, "initial-post-only", harshness, feedbackWordTarget, namingDeduction, lengthDeduction, undefined, options.lengthDeductionThresholdWords, options.suppressLengthDeduction);
+  const initialAxisPrompt = buildSystemPrompt(scoringInstructions ?? "", scoringRubric ?? "", initialCriteria, axisMode, axisRouting, "initial-post-only", harshness, feedbackWordTarget, namingDeduction, lengthDeduction, undefined, options.lengthDeductionThresholdWords, options.suppressLengthDeduction);
   const replyAxisPrompt = hasReplySection
-    ? buildSystemPrompt(assignmentInstructions, rubric, replyCriteria, axisMode, axisRouting, "reply-only", harshness, feedbackWordTarget, namingDeduction, lengthDeduction, undefined, options.lengthDeductionThresholdWords, options.suppressLengthDeduction)
+    ? buildSystemPrompt(scoringInstructions ?? "", scoringRubric ?? "", replyCriteria, axisMode, axisRouting, "reply-only", harshness, feedbackWordTarget, namingDeduction, lengthDeduction, undefined, options.lengthDeductionThresholdWords, options.suppressLengthDeduction)
     : null;
-  const evidencePrompt = evidenceOnly ? buildSystemPrompt(assignmentInstructions, rubric, criteria, "some", axisRouting, "all", harshness, feedbackWordTarget, namingDeduction, lengthDeduction, options.evidenceContext?.provenance, options.lengthDeductionThresholdWords, options.suppressLengthDeduction) : singleAxisPrompt;
+  const evidencePrompt = evidenceOnly ? buildSystemPrompt(scoringInstructions ?? "", scoringRubric ?? "", criteria, "some", axisRouting, "all", harshness, feedbackWordTarget, namingDeduction, lengthDeduction, options.evidenceContext?.provenance, options.lengthDeductionThresholdWords, options.suppressLengthDeduction) : singleAxisPrompt;
   const results: GradeResult[] = [];
 
   // N13a: entry 0 always STARTS (it does not follow that results[0] is a
@@ -489,6 +508,10 @@ async function gradeStudentEntries(
     }
     const { student, content, mergedFileCount, submittedFiles, userId, codeRun: precomputedCodeRun, gradedRepo, gradedRef, repositoryInventories } = limitedEntries[i];
     const axes = limitedEntries[i].discussionAxes;
+    if (options.suppressLengthDeduction && (scoringInstructions === null || scoringRubric === null || (axes && axes.replyCount === 0 && lengthExemption?.exempt.axis === "reply"))) {
+      results.push(buildUngradedRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}This rubric contains a length rule that cannot be separated safely. Revise the rubric or review grading manually; no grade was produced.` }));
+      continue;
+    }
     const { text: truncatedContent, truncated: contentTruncated } = truncateSubmission(
       content,
       Math.max(0, maxCharsPerSubmission - (repositoryInventories?.length ? buildSubmittedFileNamesBlock(submittedFiles, repositoryInventories).length : 0))
@@ -559,6 +582,7 @@ async function gradeStudentEntries(
             callSink,
             modelExecution,
             suppressLengthDeduction: options.suppressLengthDeduction,
+            lengthExemption,
           })
         : await gradeSubmission(
             evidencePrompt,
@@ -573,10 +597,16 @@ async function gradeStudentEntries(
             videoGradeWindowSec,
             callSink,
             options,
-            repositoryInventories
+            repositoryInventories,
+            lengthExemption
           );
+      const disclosedStrengths = scoringInstructions !== assignmentInstructions || scoringRubric !== rubric ? [result.strengths, "Length requirements were not used for scoring."].filter(Boolean).join("\n\n") : result.strengths;
+      const disclosedComment = composeOverallComment(disclosedStrengths, result.improvements, result.resubmitNotice);
       results.push({
         ...result,
+        strengths: disclosedStrengths,
+        overallComment: disclosedComment,
+        feedback: formatFeedback(disclosedComment, result.rubricAreas, result.totalScore),
         mergedFileCount,
         submittedFiles,
         userId,

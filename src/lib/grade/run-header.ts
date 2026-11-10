@@ -2,6 +2,7 @@ import { extractRubricCriteria, generateRubric } from "./rubric";
 import { stampRubricProvenance } from "./rubric-provenance-stamp";
 import type { GradingRunHeader } from "./types";
 import type { LlmProvider } from "../llm";
+import { parseBrightspaceRubric } from "./brightspace-rubric";
 
 /**
  * A39 incremental-fill W2 (RULING 133). Resolves everything that is per-RUN
@@ -46,6 +47,7 @@ export async function resolveRunHeader(
       : rubric;
   const generatedRubric = rubric.trim() || !options.synthesizeRubricWhenBlank ? undefined : effectiveRubric;
 
+  if (parseBrightspaceRubric(effectiveRubric).kind === "invalid") return { kind: "refused", error: "This rubric table could not be read completely. Review its criteria and point values before grading." };
   const criteriaNames = extractRubricCriteria(effectiveRubric).map((criterion) => criterion.name);
   const stamp = stampRubricProvenance(effectiveRubric);
 

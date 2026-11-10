@@ -7,6 +7,7 @@ import { normalizeGeminiError } from "./parsing";
 import { rubricTierPromptLines } from "./rubric-tiers";
 import type { RubricCriterion, InferredFileNameLookup, InferredFileNameParts } from "./types";
 import { CANONICAL_REPLY_MARKER, isReplySectionMarker } from "./rubric-reply-marker";
+import { parseBrightspaceRubric } from "./brightspace-rubric";
 
 // FALLBACK MODE (backlog 4.3, ruling B43-7 in scratchpad/b43-rulings.md): the
 // owner grades by screenshotting a rubric, and a flattened screenshot often
@@ -26,6 +27,9 @@ import { CANONICAL_REPLY_MARKER, isReplySectionMarker } from "./rubric-reply-mar
 // measured unsafe on its own, on exactly the flattened input this exists
 // for.
 export function extractRubricCriteria(rubric: string): RubricCriterion[] {
+  const table = parseBrightspaceRubric(rubric);
+  if (table.kind === "invalid") throw new Error("This rubric table could not be read completely. Review its criteria and point values before grading.");
+  if (table.kind === "parsed") return table.criteria;
   const strict = extractRubricCriteriaStrict(rubric);
   if (strict.length > 0) return strict;
   return extractRubricCriteriaWidened(rubric);
@@ -459,6 +463,9 @@ export { buildSystemPrompt, normalizeAreaName, buildSampleAnswerPrompt };
 export type { RubricCriterion };
 
 export function extractRubricCriteriaForEvidence(rubric: string): { ok: true; criteria: RubricCriterion[] } | { ok: false; reason: "ambiguous-rubric" } {
+  const table = parseBrightspaceRubric(rubric);
+  if (table.kind === "invalid") return { ok: false, reason: "ambiguous-rubric" };
+  if (table.kind === "parsed") return { ok: true, criteria: table.criteria };
   let names: string[] = [];
   let criteria = extractRubricCriteriaStrict(rubric, (name) => names.push(name));
   if (!criteria.length) { names = []; criteria = extractRubricCriteriaWidened(rubric, (name) => names.push(name)); }

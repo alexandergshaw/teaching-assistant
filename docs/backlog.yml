@@ -1,3 +1,27 @@
+- id: 'CHAT-CODE-RUNNER-ERROR-DIAGNOSTICS'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'grading-setup-interaction-cost'
+  title: 'Expose actionable code-runner failure diagnostics during Chat grading.'
+  owns: ['src/lib/code-runner.ts', 'src/app/components/GradingResults.tsx', 'src/app/components/grading-chat/chatGradeDetail.ts']
+  verify: null
+  blocked_by: []
+  instrument: 'Reproduce runner setup, transport, compile and runtime failures with C++ and distinguish unavailable sandbox, missing input, compilation errors and uncertain outcomes. Confirm the real output control displays a useful safe reason, diagnostics classify runner error separately from student failure, and results do not imply execution success. Verify live browser behavior without recording source code or private student content.'
+  from: 'Live Vector Sorting result displayed Code: runner error; the output control did not expose details in the accessibility state.'
+  note: 'Owner: coordinator. The actual failure cause remains unknown; do not claim a compiler or network cause without observed evidence.'
+  question: null
+- id: 'CHAT-FLATTENED-RUBRIC-RATING-HEADERS'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'grading-setup-interaction-cost'
+  title: 'Preserve criteria and point values when grading a flattened Brightspace rubric.'
+  owns: ['src/lib/grade/rubric.ts', 'src/lib/grade/brightspace-rubric.ts', 'src/lib/grade/run-header.ts']
+  verify: null
+  blocked_by: []
+  instrument: 'Exercise the real header, grading route, and result table using the original line-separated seven-criterion, 100-point rubric. Confirm criterion names and weights, prevent rating headers from becoming columns, and refuse incomplete or ambiguous tables before grading. Verify other rubric formats unchanged and run a live synthetic submission before regrading student work.'
+  from: 'Live Vector Sorting grading displayed rating labels as criteria and a 99/100 total, so that result is not reliable.'
+  note: 'Owner: coordinator. The flattened table includes three percentage rating headers followed by criteria, descriptions and point values. Separately investigate the live code runner error and missing visible diagnostic; do not infer an execution result.'
+  question: null
 - id: 'DISCUSSION-UNDERGRADUATE-RUBRIC-PASTE-VERIFICATION'
   state: 'actionable'
   kind: 'bug'

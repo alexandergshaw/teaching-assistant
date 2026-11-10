@@ -1,3 +1,4 @@
+import { reportsLengthCriterionDeduction, reportsLengthPenalty } from "./reported-length-penalty";
 import { canvasOmissionIdentityRefusal, canvasVideoRefusal } from "../canvas/omitted-video";
 import type { SubmissionFileInventory } from "./submission-file-inventory";
 import { parseRepositoryProposalOutput } from "./repository-proposal-output";
@@ -165,6 +166,7 @@ async function scoreAxis(
   if (executionOptions?.evidenceContext) {
     const strict = parseRepositoryProposalOutput(result.text, executionOptions.evidenceContext.criteria, executionOptions.evidenceContext.allowedEvidenceIds);
     if (!strict.ok || (commentSplit && !strict.value.separateStrengths)) throw new GradeCallError("Repository proposal output was incomplete.", "model unparseable");
+    if (executionOptions?.suppressLengthDeduction && ([strict.value.overallComment, strict.value.improvements, strict.value.separateStrengths ?? "", ...strict.value.rubricAreas.map((area) => area.comment)].some(reportsLengthPenalty) || strict.value.rubricAreas.some((area) => reportsLengthCriterionDeduction(area.area, area.score)))) throw new GradeCallError("The model reported a length penalty even though length deductions are disabled. Review or retry this submission; no grade was produced.", "model unparseable");
     return { ...strict.value, strengths: commentSplit ? strict.value.separateStrengths! : strict.value.overallComment, improvements: commentSplit ? [strict.value.overallComment, strict.value.improvements].filter(Boolean).join("\n\n") : strict.value.improvements };
   }
   if (!hasParseableRubricJson(result.text)) {
@@ -173,6 +175,7 @@ async function scoreAxis(
 
   const feedback = result.text.trim() || "No feedback generated.";
   const parsed = parseRubricResponse(feedback);
+  if (executionOptions?.suppressLengthDeduction && ([parsed.overallComment, parsed.improvements, extractStrengthsField(feedback), ...parsed.rubricAreas.map((area) => area.comment)].some(reportsLengthPenalty) || parsed.rubricAreas.some((area) => reportsLengthCriterionDeduction(area.area, area.score)))) throw new GradeCallError("The model reported a length penalty even though length deductions are disabled. Review or retry this submission; no grade was produced.", "model unparseable");
 
   // docs/grading-results-feedback-boxes-acceptance-criteria.md, A1: the model
   // supplies strengths (still called overallComment in its JSON response -
@@ -294,12 +297,13 @@ async function gradeDiscussionAxes(a: {
   pointsPossible: number | null;
   callSink?: GradeCallSink;
   modelExecution?: LlmExecutionPolicy;
+  suppressLengthDeduction?: boolean;
 }): Promise<GradedResult> {
   if (a.initialPostAbsentConfirmed && a.replyPrompt === null) throw new Error("Cannot grade replies separately without reply rubric criteria.");
   if (a.initialPostAbsentConfirmed && (!a.initialCriteria.length || a.initialCriteria.some((criterion) => criterion.points == null || !Number.isFinite(criterion.points) || criterion.points <= 0))) throw new Error("Cannot score an absent initial post without explicit positive point values for its rubric criteria.");
   const initial = a.initialPostAbsentConfirmed
     ? { rubricAreas: a.initialCriteria.map((criterion) => ({ area: criterion.name, score: `0/${criterion.points}`, comment: "No initial post was submitted." })), modelTotalScore: "", strengths: "", improvements: "No initial post was submitted." }
-    : await scoreAxis(a.initialPrompt, a.student, a.initialText, a.provider, a.inlineFiles, a.codeRun, a.submittedFiles, a.commentSplit, a.videoGradeWindowSec, a.callSink, { modelExecution: a.modelExecution });
+    : await scoreAxis(a.initialPrompt, a.student, a.initialText, a.provider, a.inlineFiles, a.codeRun, a.submittedFiles, a.commentSplit, a.videoGradeWindowSec, a.callSink, { modelExecution: a.modelExecution, suppressLengthDeduction: a.suppressLengthDeduction });
 
   if (a.replyPrompt === null) {
     const total = deriveTotalScore(initial.modelTotalScore, initial.rubricAreas);
@@ -314,7 +318,7 @@ async function gradeDiscussionAxes(a: {
   let replyStrengths = "";
   let replyImprovements = "";
   if (a.replyCount > 0 && a.replyText !== null) {
-    const reply = await scoreAxis(a.replyPrompt, a.student, a.replyText, a.provider, [], null, a.submittedFiles, a.commentSplit, undefined, a.callSink, { modelExecution: a.modelExecution });
+    const reply = await scoreAxis(a.replyPrompt, a.student, a.replyText, a.provider, [], null, a.submittedFiles, a.commentSplit, undefined, a.callSink, { modelExecution: a.modelExecution, suppressLengthDeduction: a.suppressLengthDeduction });
     replyAreas = reply.rubricAreas;
     replyStrengths = reply.strengths;
     replyImprovements = reply.improvements;
@@ -554,6 +558,7 @@ async function gradeStudentEntries(
             pointsPossible,
             callSink,
             modelExecution,
+            suppressLengthDeduction: options.suppressLengthDeduction,
           })
         : await gradeSubmission(
             evidencePrompt,

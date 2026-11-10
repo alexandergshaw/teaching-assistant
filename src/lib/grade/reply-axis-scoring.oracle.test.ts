@@ -303,3 +303,11 @@ describe("canvasWorkToEntry - discussionAxes population", () => {
     expect(entry.discussionAxes?.replyCount).toBe(0);
   });
 });
+
+it("refuses an explicitly reported length penalty in the reply pass when disabled", async () => {
+  mockCallLlm.mockResolvedValueOnce({ ok: true, text: respond("Thesis", "20/20") });
+  mockCallLlm.mockResolvedValueOnce({ ok: true, text: JSON.stringify({ overallComment: "Deducted 2 points for word count.", rubricResults: [{ area: "Engagement", score: "8/10" }] }) });
+  const run = await gradeEntries([await discussionEntry(1)], INSTRUCTIONS, MARKER_RUBRIC, "gemini", null, { suppressLengthDeduction: true });
+  expect(run.results[0].ungraded?.kind).toBe("grading-failed");
+  expect(run.results[0].ungraded?.message).toContain("length penalty");
+});

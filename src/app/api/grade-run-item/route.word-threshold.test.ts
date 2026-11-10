@@ -48,3 +48,28 @@ it("leaves legacy callers unchanged and refuses contradictory policies", async (
   await send(base); expect(JSON.stringify(llm.mock.calls[0][0])).not.toContain(LENGTH_DEDUCTION_OFF_DIRECTIVE);
   llm.mockClear(); expect((await send({ ...base, applyLengthDeduction: true, suppressLengthDeduction: true })).status).toBe(400); expect(llm).not.toHaveBeenCalled();
 });
+
+it("refuses an explicitly reported length penalty only when Chat disables it", async () => {
+  llm.mockResolvedValue({ ok: true, text: '{"overallComment":"Deducted 2 points for word count.","rubricResults":[{"area":"Content","score":"8/10"}]}' });
+  const blocked = await send({ ...base, suppressLengthDeduction: true });
+  expect(blocked.status).toBe(200);
+  const body = await blocked.json(); expect(body.result.ungraded.kind).toBe("grading-failed");
+  expect(body.result.ungraded.message).toContain("length penalty");
+  const allowed = await send({ ...base, applyLengthDeduction: true });
+  expect((await allowed.json()).result.ungraded).toBeUndefined();
+});
+it("refuses a lower score on a length-only criterion while deductions are disabled", async () => {
+  llm.mockResolvedValue({ ok: true, text: '{"overallComment":"Good work.","rubricResults":[{"area":"Word Count","score":"4/5","comment":"Reviewed."}]}' });
+  const response = await send({ ...base, suppressLengthDeduction: true });
+  expect((await response.json()).result.ungraded.kind).toBe("grading-failed");
+});
+it.each(["Lost 2 points for word count", "2 points off for word count", "Deducted 2.5 points for word count"])("refuses an explicitly described disabled penalty: %s", async (comment) => {
+  llm.mockResolvedValue({ ok: true, text: JSON.stringify({ overallComment: comment, rubricResults: [{ area: "Content", score: "8/10" }] }) });
+  const response = await send({ ...base, suppressLengthDeduction: true });
+  expect((await response.json()).result.ungraded.kind).toBe("grading-failed");
+});
+it("allows feedback explicitly stating that no points were deducted for word count", async () => {
+  llm.mockResolvedValue({ ok: true, text: JSON.stringify({ overallComment: "No points were deducted for word count", rubricResults: [{ area: "Content", score: "10/10" }] }) });
+  const response = await send({ ...base, suppressLengthDeduction: true });
+  expect((await response.json()).result.ungraded).toBeUndefined();
+});

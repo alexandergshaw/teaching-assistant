@@ -34,8 +34,9 @@ function harness(onOne = vi.fn(async () => ({ kind: "accepted", entryCount: 1 })
   const render = () => { cursor = 0; return component({ disabled: false, sharedLatch, reviewFiles, onOne, onMany, onText, onReviewed, getSessionEpoch: () => epoch, sessionEpoch: epoch }); };
   const find = (tree: Node, type: string) => nodes(tree).find((node) => node.type === type)!;
   const button = (tree: Node, label: string) => nodes(tree).find((node) => node.type === "Button" && text(node) === label)!;
+  const confirmText = (tree: Node) => { for (const label of nodes(tree).filter((n) => n.type === "FormControlLabel" && String(n.props.label).startsWith("I checked the name and complete submission"))) label.props.control.props.onChange(null, true); return render(); };
   const reset = () => { epoch++; };
-  return { render, find, button, reset, onOne, onMany, onText };
+  return { render, find, button, reset, confirmText, onOne, onMany, onText };
 }
 const work = (name: string) => new File(["work"], name);
 
@@ -85,7 +86,7 @@ describe("SubmissionDrop actual handlers", () => {
       nodes(tree).find((n) => n.type === "RadioGroup" && n.props.value === "unassigned")!.props.onChange({ target: { value: "initial" } }); tree = h.render();
     }
     for (const label of ["I verified entries assigned to each group belong to the same person", "I verified all initial posts and replies for these students are included", "I accounted for any attachments"]) nodes(tree).find((n) => n.type === "FormControlLabel" && n.props.label === label)!.props.control.props.onChange(null, true);
-    tree = h.render(); h.button(tree, "Grade reviewed submissions").props.onClick(); h.reset(); tree = h.render(); finish({ kind: "accepted", entryCount: 1 }); await flush(); tree = h.render();
+    tree = h.confirmText(h.render()); h.button(tree, "Grade reviewed submissions").props.onClick(); h.reset(); tree = h.render(); finish({ kind: "accepted", entryCount: 1 }); await flush(); tree = h.render();
     expect(onReviewed).toHaveBeenCalledTimes(1); expect(text(tree)).toContain("Needs review");
     expect(nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission 2")!.props.value).toContain("Second answer");
   });
@@ -120,7 +121,7 @@ describe("SubmissionDrop actual handlers", () => {
     const onText = vi.fn().mockResolvedValue({ kind: "accepted", entryCount: 1 }); const h = harness(undefined, undefined, onText); let tree = h.render();
     h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
     nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: `Student: ${"A".repeat(501)}\nAnswer\nStudent: Bob\nAnswer` } });
-    tree = h.render(); h.button(tree, "Grade reviewed submissions").props.onClick(); await flush(); tree = h.render();
+    tree = h.confirmText(h.render()); h.button(tree, "Grade reviewed submissions").props.onClick(); await flush(); tree = h.render();
     expect(onText).not.toHaveBeenCalled(); expect(text(tree)).toContain("at most 500 characters");
   });
   it("does not grade a heading without student work", () => {
@@ -138,12 +139,31 @@ describe("SubmissionDrop actual handlers", () => {
     expect(nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission 1")!.props.value).toBe("Corrected A");
     expect(nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.disabled).toBe(true);
   });
+  it("parses text already entered when switching to multiple students", async () => {
+    const onText = vi.fn().mockResolvedValue({ kind: "accepted", entryCount: 1 }); const h = harness(undefined, undefined, onText); let tree = h.render();
+    const input = "Student: Example One\nFirst\nStudent: Example Two\nSecond";
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: input } });
+    tree = h.render(); h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    expect(nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission 1")!.props.value).toBe("Student: Example One\nFirst");
+    expect(nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission 2")!.props.value).toBe("Student: Example Two\nSecond");
+    tree = h.confirmText(tree); h.button(tree, "Grade reviewed submissions").props.onClick(); await flush();
+    expect(onText.mock.calls).toEqual([["Example One", "Student: Example One\nFirst"], ["Example Two", "Student: Example Two\nSecond"]]);
+  });
+  it("holds a headed URL for review and submits its literal contents", async () => {
+    const onText = vi.fn().mockResolvedValue({ kind: "accepted", entryCount: 1 }); const h = harness(undefined, undefined, onText); let tree = h.render();
+    h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    const input = "Student: Example\nhttps://github.com/example/repo";
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: input } });
+    tree = h.render(); h.button(tree, "Grade reviewed submissions").props.onClick(); await flush(); expect(onText).not.toHaveBeenCalled();
+    tree = h.confirmText(h.render()); h.button(tree, "Grade reviewed submissions").props.onClick(); await flush();
+    expect(onText).toHaveBeenCalledWith("Example", input);
+  });
   it("stops a pasted batch on an uncertain outcome and keeps unattempted text", async () => {
     const onText = vi.fn().mockResolvedValueOnce({ kind: "partial", dispatchedCount: 1, refusedCount: 1, reason: "partial" });
     const h = harness(undefined, undefined, onText); let tree = h.render();
     h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
     nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "Student: Ada\nA\nStudent: Bob\nB" } });
-    tree = h.render(); h.button(tree, "Grade reviewed submissions").props.onClick(); await flush(); tree = h.render();
+    tree = h.confirmText(h.render()); h.button(tree, "Grade reviewed submissions").props.onClick(); await flush(); tree = h.render();
     expect(onText).toHaveBeenCalledTimes(1); expect(text(tree)).toContain("Needs review");
     expect(nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission 2")!.props.value).toBe("Student: Bob\nB");
     expect(h.button(tree, "Grade reviewed submissions").props.disabled).toBe(true);
@@ -153,7 +173,7 @@ describe("SubmissionDrop actual handlers", () => {
     const h = harness(undefined, undefined, onText); let tree = h.render();
     h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
     nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "Student: Ada\nA\nStudent: Bob\nB" } });
-    tree = h.render(); h.button(tree, "Grade reviewed submissions").props.onClick(); h.reset(); tree = h.render(); finish({ kind: "accepted", entryCount: 1 }); await flush(); tree = h.render();
+    tree = h.confirmText(h.render()); h.button(tree, "Grade reviewed submissions").props.onClick(); h.reset(); tree = h.render(); finish({ kind: "accepted", entryCount: 1 }); await flush(); tree = h.render();
     expect(onText).toHaveBeenCalledTimes(1); expect(text(tree)).toContain("Needs review");
     expect(nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission 2")!.props.value).toBe("Student: Bob\nB");
   });
@@ -163,7 +183,7 @@ describe("SubmissionDrop actual handlers", () => {
     h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
     nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "Student: Ada\nFirst answer\nStudent: Bob\nSecond answer" } });
     tree = h.render(); expect(onText).not.toHaveBeenCalled(); expect(text(tree)).toContain("Review each name");
-    h.button(tree, "Grade reviewed submissions").props.onClick(); await flush(); tree = h.render();
+    tree = h.confirmText(tree); h.button(tree, "Grade reviewed submissions").props.onClick(); await flush(); tree = h.render();
     expect(onText.mock.calls).toEqual([["Ada", "Student: Ada\nFirst answer"], ["Bob", "Student: Bob\nSecond answer"]]); expect(text(tree)).toContain("Queued"); expect(text(tree)).toContain("not ready");
     h.button(tree, "Grade reviewed submissions").props.onClick(); await flush();
     expect(onText.mock.calls).toEqual([["Ada", "Student: Ada\nFirst answer"], ["Bob", "Student: Bob\nSecond answer"], ["Bob", "Student: Bob\nSecond answer"]]);
@@ -210,6 +230,8 @@ describe("SubmissionDrop actual handlers", () => {
     h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
     const field = (label: string) => nodes(tree).find((n) => n.type === "TextField" && n.props.label === label)!;
     field("Submission text").props.onChange({ target: { value: "Student work" } }); field("Student for this text").props.onChange({ target: { value: "Alice" } });
+    tree = h.render(); h.button(tree, "Grade text").props.onClick(); await flush(); expect(onText).not.toHaveBeenCalled();
+    nodes(tree).find((n) => n.type === "FormControlLabel" && n.props.label === "I checked this entire text belongs to the named student")!.props.control.props.onChange(null, true);
     tree = h.render(); h.button(tree, "Grade text").props.onClick(); await flush(); tree = h.render();
     expect(onText).toHaveBeenCalledWith("Alice", "Student work"); expect(field("Submission text").props.value).toBe("Student work"); expect(text(tree)).toContain("setup incomplete");
     h.button(tree, "Grade text").props.onClick(); await flush(); tree = h.render(); expect(field("Submission text").props.value).toBe("");

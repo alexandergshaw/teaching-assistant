@@ -5,6 +5,7 @@ import type { PastedSubmission } from "./pastedSubmissions";
 const DATE = String.raw`(?:\d{1,4}[/.-]\d{1,2}[/.-]\d{1,4}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}\b|today\b|yesterday\b)`;
 const INLINE = new RegExp(String.raw`^(.{2,100}?)\s+(?:posted|wrote)\s+(?:on\s+)?(${DATE}.*)$`, "i");
 const TIMESTAMP = new RegExp(String.raw`^(?:posted|wrote)\s+(?:on\s+)?(${DATE}.*)$`, "i");
+const CANVAS_TIME = new RegExp(String.raw`^${DATE}(?:,?\s+\d{4})?\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)$`, "i");
 const NAVIGATION = /^(?:last\s+(?:post|reply)|repl(?:y|ies)|unread|views?|profile|discussion|topic)\b/i;
 const SIGNAL = /\b(?:unread|last\s+(?:post|reply)|repl(?:y|ies)|views?|discussion)\b/i;
 const ONLY_FURNITURE = /^(?:unread(?:\s+posts?)?|(?:\d+\s+)?(?:repl(?:y|ies)|views?|unread)|last\s+(?:post|reply)\b.*|view\s+profile|profile|(?:week\s+\d+\s+)?discussion(?:\s+(?:topic|board))?)$/i;
@@ -21,7 +22,7 @@ export function hasDiscussionResponseContent(content: string): boolean {
   const lines = content.replace(/\r\n?/g, "\n").split("\n");
   return lines.some((line, index) => {
     const value = line.trim();
-    return !!value && !INLINE.test(value) && !TIMESTAMP.test(value) && !TIMESTAMP.test((lines[index + 1] ?? "").trim()) && !ONLY_FURNITURE.test(value) && !/^---+$/.test(value);
+    return !!value && !INLINE.test(value) && !TIMESTAMP.test(value) && !CANVAS_TIME.test(value) && !TIMESTAMP.test((lines[index + 1] ?? "").trim()) && !CANVAS_TIME.test((lines[index + 1] ?? "").trim()) && !ONLY_FURNITURE.test(value) && !/^---+$/.test(value);
   });
 }
 
@@ -34,11 +35,12 @@ export function parseDiscussionListing(text: string): DiscussionListingResult {
   const normalized = text.replace(/\r\n?/g, "\n");
   const lines = normalized.split("\n");
   const headers: { index: number; student: string }[] = [];
+  const canvasCandidates = lines.filter((line, index) => CANVAS_TIME.test(line.trim()) && index > 0 && plausibleAuthor(lines[index - 1])).length;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     const inline = line.match(INLINE);
     if (inline && plausibleAuthor(inline[1])) headers.push({ index: i, student: inline[1].trim() });
-    else if (TIMESTAMP.test(line) && i > 0 && plausibleAuthor(lines[i - 1])) headers.push({ index: i - 1, student: lines[i - 1].trim() });
+    else if ((TIMESTAMP.test(line) || (canvasCandidates >= 1 && CANVAS_TIME.test(line))) && i > 0 && plausibleAuthor(lines[i - 1])) headers.push({ index: i - 1, student: lines[i - 1].trim() });
   }
   const detected = headers.length > 0 || (SIGNAL.test(normalized) && /\b(?:posted|wrote|unread)\b/i.test(normalized));
   if (!detected) return { detected: false, rows: [] };

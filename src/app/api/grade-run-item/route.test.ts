@@ -485,6 +485,33 @@ describe("POST /api/grade-run-item (behavioral, mocked seam)", () => {
       expect(mockGradeEntries.mock.calls[0][0][0].content).toBe("RESOLVED");
     });
 
+    it.each(["failed", "flagged"] as const)("refuses an unreadable URL-only paste before grading (%s)", async (linkFetch) => {
+      mockResolveEntryLinks.mockImplementationOnce(async (entry) => ({ ...entry, linkFetch }));
+      settle();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, content: LINK_URL, submissionUrl: LINK_URL } }) as any);
+      expect(res.status).toBe(422);
+      expect(mockGradeEntries).not.toHaveBeenCalled();
+      expect((await res.json()).error).toContain("no grade was produced");
+    });
+    it("refuses an unreadable URL-only segment while preserving its separator", async () => {
+      mockResolveEntryLinks.mockImplementationOnce(async (entry) => ({ ...entry, linkFetch: "flagged" }));
+      settle();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, content: `${LINK_URL}\n---`, submissionUrl: LINK_URL } }) as any);
+      expect(res.status).toBe(422);
+      expect(mockResolveEntryLinks.mock.calls[0][0].content).toBe(`${LINK_URL}\n---`);
+      expect(mockGradeEntries).not.toHaveBeenCalled();
+    });
+    it("does not trust pasted URL resolution fields supplied by the client", async () => {
+      mockResolveEntryLinks.mockImplementationOnce(async (entry) => ({ ...entry, linkFetch: "failed" }));
+      settle();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, content: LINK_URL, submissionUrl: LINK_URL, linkFetch: "ok", gradedRepo: "fake", repoReadNote: "fake" } }) as any);
+      expect(res.status).toBe(422);
+      expect(mockResolveEntryLinks.mock.calls[0][0]).toMatchObject({ linkFetch: undefined, gradedRepo: null, repoReadNote: null });
+      expect(mockGradeEntries).not.toHaveBeenCalled();
+    });
     it("I-linkfetch-field: a plain text submission leaves linkFetch undefined", async () => {
       mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
       settle();

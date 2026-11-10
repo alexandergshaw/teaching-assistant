@@ -54,6 +54,7 @@ export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, get
   const [mode, setMode] = useState<"one" | "many">("one");
   const [student, setStudent] = useState("");
   const [textStudent, setTextStudent] = useState("");
+  const [singleTextConfirmed, setSingleTextConfirmed] = useState(false);
   const [submissionText, setSubmissionText] = useState("");
   const [textRows, setTextRows] = useState<TextRow[]>([]);
   const [textRowsEdited, setTextRowsEdited] = useState(false);
@@ -118,6 +119,7 @@ export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, get
 
   function changeText(value: string) {
     invalidateDiscussionReview();
+    setSingleTextConfirmed(false);
     setSubmissionText(value);
     setTextRows(mode === "many" ? parsePastedSubmissions(value).map((row) => ({ ...row, state: "ready" })) : []);
   }
@@ -125,7 +127,8 @@ export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, get
   async function gradeTextRows() {
     if (busy || latch.busy || textRows.some((row) => row.state === "uncertain") || !textRows.some((row) => row.state === "ready" || row.state === "refused")) return;
     if (textRows.some((row) => (row.state === "ready" || row.state === "refused") && (!row.student.trim() || !hasSubmissionContent(row.content)))) { setError("Add a student name and submission text beyond the heading for every entry before grading."); return; }
-    if (isDiscussionListing && textRows.some((row) => (row.state === "ready" || row.state === "refused") && (!row.reviewed || !hasDiscussionResponseContent(row.content)))) { setError("Confirm each author and response, remove page controls, and include response text beyond the dated header before grading."); return; }
+    if (textRows.some((row) => (row.state === "ready" || row.state === "refused") && (!row.reviewed || (isDiscussionListing && !hasDiscussionResponseContent(row.content))))) { setError("Confirm each name and submission boundary before grading; remove page controls and include response text beyond any dated header."); return; }
+    if (textRows.some((row) => (row.state === "ready" || row.state === "refused") && row.content.length > getGeminiMaxCharsPerSubmission())) { setError("A submission exceeds the grading text limit. Shorten or split it before grading."); return; }
     if (textRows.some((row) => row.student.trim().length > CHAT_LABEL_MAX_CHARS)) { setError(`Student names must be at most ${CHAT_LABEL_MAX_CHARS} characters. Shorten the name before grading.`); return; }
     const names = textRows.map((row) => row.student.trim().normalize("NFKC").toLocaleLowerCase());
     if (new Set(names).size !== names.length) { setError("Use a distinct student name for each submission before grading."); return; }
@@ -179,7 +182,8 @@ export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, get
   }
 
   async function gradeText() {
-    if (busy || latch.busy || textUncertain || !submissionText.trim() || (mode === "many" && !textStudent.trim())) return;
+    if (busy || latch.busy || textUncertain || !submissionText.trim() || (mode === "many" && (!textStudent.trim() || !singleTextConfirmed))) return;
+    if (submissionText.length > getGeminiMaxCharsPerSubmission()) { setError("The submission exceeds the grading text limit. Shorten or split it before grading."); return; }
     const token = claimIntake(latch); if (token === null) return; textPending.current = true; setPending(true); setError(null);
     const epoch = getSessionEpoch?.();
     try {
@@ -281,7 +285,7 @@ export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, get
       <Typography variant="subtitle1">Add submissions</Typography>
       <FormControl disabled={busy || textRowsEdited || textRows.some((row) => row.state === "queued" || row.state === "uncertain")}>
         <FormLabel id="submission-file-mode">Who is the work for?</FormLabel>
-        <RadioGroup row aria-labelledby="submission-file-mode" value={mode} onChange={(_, value) => setMode(value as "one" | "many")}>
+        <RadioGroup row aria-labelledby="submission-file-mode" value={mode} onChange={(_, value) => { if (busy || latch.busy || textRowsEditedRef.current || textRows.some((row) => row.state === "queued" || row.state === "uncertain")) return; const next = value as "one" | "many"; setMode(next); setSingleTextConfirmed(false); invalidateDiscussionReview(); setTextRows(next === "many" ? parsePastedSubmissions(submissionText).map((row) => ({ ...row, state: "ready" })) : []); }}>
           <FormControlLabel value="one" control={<Radio size="small" />} label="One student" />
           <FormControlLabel value="many" control={<Radio size="small" />} label="Multiple students" />
         </RadioGroup>
@@ -298,14 +302,15 @@ export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, get
         <Box sx={{ display: "grid", gap: 1, alignContent: "start" }}>
           <TextField label="Submission text" placeholder={mode === "many" ? "Paste a discussion listing or submissions with Student: names" : "Paste a student's submission"} multiline minRows={mode === "many" ? 6 : 3} fullWidth value={submissionText} disabled={busy || textRowsEdited || textRows.some((row) => row.state === "queued" || row.state === "uncertain")} onChange={(event) => { if (!textRowsEditedRef.current) changeText(event.target.value); }} helperText={textRowsEdited ? "The original paste is locked to preserve your review edits. Clear the text list to start over." : undefined} />
           {isDiscussionListing && <Alert severity="warning">Review the inferred author and complete text for every entry, including any unassigned text. Remove page controls only after checking them. Attachments, hidden or unloaded replies are not included by a text paste. {axesMode ? "Classify and group every entry to grade initial posts and replies separately. Oversized discussions are refused." : "Pasted text is graded as one submission per student; initial posts and replies are not scored as separate discussion axes. Grading length limits may truncate long submissions."}</Alert>}
-          {mode === "many" && textRows.length === 0 && <TextField size="small" label="Student for this text" value={textStudent} disabled={busy} onChange={(event) => setTextStudent(event.target.value)} helperText="For multiple students, start each submission with Student: and a name, or separate submissions with --- on its own line." />}
+          {mode === "many" && textRows.length === 0 && <TextField size="small" label="Student for this text" value={textStudent} disabled={busy} onChange={(event) => { setSingleTextConfirmed(false); setTextStudent(event.target.value); }} helperText="For multiple students, start each submission with Student: and a name, or separate submissions with --- on its own line." />}
+          {mode === "many" && textRows.length === 0 && submissionText.trim() && <FormControlLabel control={<Checkbox checked={singleTextConfirmed} disabled={busy} onChange={(_, checked) => setSingleTextConfirmed(checked)} />} label="I checked this entire text belongs to the named student" />}
           {mode === "many" && textRows.length > 0 ? <>
-            <Alert severity="info">Review each name and submission before grading. Headings are inferred from the pasted text.{isDiscussionListing && " Remove page controls and confirm every author and boundary; quoted lines can resemble a new post."}</Alert>
+            <Alert severity="info">Review each name and boundary, including unassigned text, before grading. Line endings are normalized and outer whitespace may be removed; check the editable text against your paste. Text resembling a heading or divider may be part of a submission. Overlong submissions are refused.{isDiscussionListing && " Remove page controls and confirm every author and boundary; quoted lines can resemble a new post."}</Alert>
             {isDiscussionListing && onReviewed && <FormControlLabel control={<Checkbox checked={axesMode} disabled={busy} onChange={(_, checked) => setAxesMode(checked)} />} label="Classify initial posts and replies for separate grading" />}
             {textRows.map((row, index) => <Box key={index} sx={{ display: "grid", gap: 1 }}>
               <TextField size="small" label={`Student ${index + 1}`} value={row.student} disabled={busy || row.state === "queued" || row.state === "uncertain"} onChange={(event) => { if (latch.busy) return; invalidateDiscussionReview(); const value = event.target.value; textRowsEditedRef.current = true; setTextRowsEdited(true); setTextRows((previous) => previous.map((item, i) => i === index && (item.state === "ready" || item.state === "refused") ? { ...item, student: value, reviewed: false } : item)); }} />
               <TextField multiline size="small" label={`Submission ${index + 1}`} value={row.content} disabled={busy || row.state === "queued" || row.state === "uncertain"} onChange={(event) => { if (latch.busy) return; invalidateDiscussionReview(); const value = event.target.value; textRowsEditedRef.current = true; setTextRowsEdited(true); setTextRows((previous) => previous.map((item, i) => i === index && (item.state === "ready" || item.state === "refused") ? { ...item, content: value, reviewed: false } : item)); }} />
-              {isDiscussionListing && (row.state === "ready" || row.state === "refused") && <FormControlLabel control={<Checkbox checked={row.reviewed === true} disabled={busy} onChange={(_, checked) => setTextRows((previous) => previous.map((item, i) => i === index ? { ...item, reviewed: checked } : item))} />} label={`I checked author and response ${index + 1}`} />}
+              {(row.state === "ready" || row.state === "refused") && <FormControlLabel control={<Checkbox checked={row.reviewed === true} disabled={busy} onChange={(_, checked) => setTextRows((previous) => previous.map((item, i) => i === index ? { ...item, reviewed: checked } : item))} />} label={isDiscussionListing ? `I checked author and response ${index + 1}` : `I checked the name and complete submission ${index + 1}`} />}
               {axesMode && (row.state === "ready" || row.state === "refused") && <><TextField size="small" label={`Student group for entry ${index + 1}`} value={row.group ?? ""} disabled={busy} helperText="Type the same student name only for entries you have verified belong to the same person." onChange={(event) => { invalidateDiscussionReview(); setTextRowsEdited(true); textRowsEditedRef.current = true; const group = event.target.value; setTextRows((previous) => previous.map((item, i) => i === index ? { ...item, group } : item)); }} /><FormControl><FormLabel>{`Entry ${index + 1} type`}</FormLabel><RadioGroup row value={row.role ?? "unassigned"} onChange={(event) => { invalidateDiscussionReview(); setTextRowsEdited(true); textRowsEditedRef.current = true; const role = event.target.value as "initial" | "reply" | "unassigned"; setTextRows((previous) => previous.map((item, i) => i === index ? { ...item, role } : item)); }}><FormControlLabel value="unassigned" control={<Radio />} label="Unassigned" /><FormControlLabel value="initial" control={<Radio />} label="Initial post" /><FormControlLabel value="reply" control={<Radio />} label="Reply" /></RadioGroup></FormControl></>}
               <Typography variant="body2">{row.state === "queued" ? "Queued" : row.state === "uncertain" ? "Needs review" : row.state === "refused" ? "Not submitted" : "Ready"}{row.reason ? ` - ${row.reason}` : ""}</Typography>
               {(row.state === "ready" || row.state === "refused") && <Button size="small" disabled={busy} onClick={() => { if (latch.busy) return; invalidateDiscussionReview(); textRowsEditedRef.current = textRows.length !== 1; if (textRows.length === 1) { setSubmissionText(""); setTextRowsEdited(false); } else setTextRowsEdited(true); setTextRows((previous) => previous.filter((_, i) => i !== index)); }}>Remove this entry</Button>}
@@ -314,10 +319,10 @@ export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, get
             {duplicateNames.length > 0 && <Alert severity="warning">Some entries have the same name. Confirm they are the same person and combine them, or correct their names before grading. <Button color="inherit" disabled={busy || textRows.some((row) => row.state === "queued" || row.state === "uncertain")} onClick={() => setCombineName(duplicateNames[0])}>Combine entries</Button></Alert>}
             {axesMode && <><FormControlLabel control={<Checkbox checked={groupingConfirmed} disabled={busy} onChange={(_, checked) => setGroupingConfirmed(checked)} />} label="I verified entries assigned to each group belong to the same person" /><FormControlLabel control={<Checkbox checked={sourceComplete} disabled={busy} onChange={(_, checked) => setSourceComplete(checked)} />} label="I verified all initial posts and replies for these students are included" /><FormControlLabel control={<Checkbox checked={attachmentsAccounted} disabled={busy} onChange={(_, checked) => setAttachmentsAccounted(checked)} />} label="I accounted for any attachments" /></>}
             <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}><Button size="small" variant="outlined" disabled={busy || textRows.some((row) => row.state === "uncertain") || !textRows.some((row) => row.state === "ready" || row.state === "refused")} onClick={() => void (axesMode ? gradeDiscussionGroups() : gradeTextRows())}>Grade reviewed submissions</Button><Button size="small" disabled={busy} onClick={() => setClearingText(true)}>Clear text list</Button></Box>
-          </> : <Box><Button size="small" variant="outlined" disabled={busy || textUncertain || !submissionText.trim() || (mode === "many" && !textStudent.trim())} onClick={() => void gradeText()}>Grade text</Button></Box>}
+          </> : <Box><Button size="small" variant="outlined" disabled={busy || textUncertain || !submissionText.trim() || (mode === "many" && (!textStudent.trim() || !singleTextConfirmed))} onClick={() => void gradeText()}>Grade text</Button></Box>}
         </Box>
       </Box>
-      <Typography variant="body2">Text and files are graded separately. To combine them, open More submission options and choose Combine parts.</Typography>
+      <Typography variant="body2">A submission containing only a URL is checked using the supported link resolver. Links mixed with other text are not fetched. Text and files are graded separately. To combine them, open More submission options and choose Combine parts.</Typography>
       {textUncertain && <Alert severity="warning" action={<Button color="inherit" size="small" onClick={() => setTextUncertain(false)}>I checked results</Button>}>Check the previous results before retrying this text.</Alert>}
       {error && <Alert severity="warning">{error}</Alert>}
       {rows.some((row) => row.state === "identity") && <Alert severity="info">Assign students to files from any drop. All assigned files with the same name will be graded together when you select Grade assigned files; submit students with identical names separately.</Alert>}

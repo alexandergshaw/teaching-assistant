@@ -1,3 +1,15 @@
+- id: 'CHAT-LENGTH-DEDUCTION-OFF-IGNORED'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'grading-setup-interaction-cost'
+  title: 'Honor the disabled length-deduction control throughout Chat grading.'
+  owns: ['src/app/components/grading-chat/', 'src/app/api/grade-run-item/', 'src/lib/grade/']
+  verify: null
+  blocked_by: []
+  instrument: 'Reproduce the reported result with Deduct for length unchecked and an assignment with an explicit word minimum. Trace the actual toggle through session setup, frozen options, dispatch, route, prompt and grade result; verify no length-based score deduction or length-penalty feedback is applied when disabled, while enabled policy still works. Include a meaningful end-to-end regression that drives the toggle through the grading result, covering new and restored sessions, text, uploaded files and ZIP entries, retry and independent review. Test explicit rubric wording and model noncompliance without inventing a minimum; separately verify rendered toggle state and a live provider result.'
+  from: 'Owner reported in this chat that unchecking Deduct for length in Chat grader does nothing.'
+  note: 'User-reported behavior. Source review found the off setting removes the extra length-deduction directive but does not override length penalties in the supplied rubric; the exact cause in the reported run remains unverified. Test model adherence and do not imply a prompt alone guarantees scoring behavior.'
+  question: null
 - id: 'GRADING-CHAT-LIFECYCLE-DIAGNOSTICS'
   state: 'actionable'
   kind: 'bug'
@@ -200,7 +212,7 @@
   blocked_by: []
   instrument: 'In multiple-student mode, the instructor can paste text and immediately press a visible Grade action without first navigating a separate parsing or review workflow. Parse and submit clearly attributable student work through the existing grader while preserving each student''s complete text. When identity or segmentation is genuinely ambiguous, surface the specific uncertainty and an editable resolution before dispatching affected work; do not silently misattribute or drop text or automatically repeat paid grading after partial, failed or uncertain dispatch. Cover explicit headings, separators, discussion listings, duplicate names, ambiguous boundaries, mixed outcomes, reset and retry in actual paste-to-grade handler tests, plus desktop/mobile keyboard, focus and rendered behavior.'
   from: 'Owner request in this chat: paste text into the multiple-student submission field and immediately press Grade.'
-  note: 'Owner: coordinator. Coordinate with CHAT-PASTED-DISCUSSION-LISTING and CHAT-SIMPLIFY-SUBMISSION-MODES so the result is one clear submission process. Preserve already-supported formats and use the current parsing/review safeguards where ambiguity requires them.'
+  note: 'Owner: coordinator. The paste field must support arbitrary student work including URLs, code, essays and short answers, not assume a discussion. Cover source accounting for ambiguous headings, code fences, dividers and preamble; duplicate names; long input; URL resolution and failure; partial dispatch, reset and retry. Candidate in progress, not yet verified or delivered. Browser paste, keyboard and focus verification remain open. Coordinate with CHAT-PASTED-DISCUSSION-LISTING and CHAT-SIMPLIFY-SUBMISSION-MODES.'
   question: null
 - id: 'CHAT-PASTED-DISCUSSION-LISTING'
   state: 'actionable'
@@ -212,7 +224,7 @@
   blocked_by: []
   instrument: 'Exercise an anonymized fixture matching the owner''s example: repeated discussion titles and unread markers, an author followed by a posted date and time, multi-paragraph post bodies, and intervening unread/reply/view counts, profile-card text and last-post metadata. Identify the post author without treating a last-reply author or navigation metadata as a new submission; preserve every post body and do not silently discard ambiguous text. Cover multiple posts, duplicate authors, varied names and timestamps, missing metadata, body text resembling a heading, and malformed or partial listings. Show editable segmentation and identity for instructor review before grading, with explicit uncertainty and no duplicate dispatch on failure or retry. Verify the actual paste-to-review-to-grading flow and desktop/mobile keyboard and focus behavior.'
   from: 'Owner request in this chat, illustrated by a pasted discussion listing; fixture must be anonymized and must not reproduce student text.'
-  note: 'Owner: coordinator. Candidate recognizes dated author headers and holds unmatched listing text for review, while retaining explicit-heading and separator modes. Duplicate names require explicit confirmation before combining; instructors must review the inferred boundaries. Text-only grading does not populate discussionAxes, so replies are not scored as a separate axis: see CHAT-PASTED-DISCUSSION-AXES. Attachments, unloaded replies and model input limits require explicit disclosure. Browser and real LMS copy verification remain open.'
+  note: 'Owner: coordinator. Main recognizes dated author headers and holds unmatched listing text for review, while retaining explicit-heading and separator modes. Duplicate names require explicit confirmation before combining; instructors must review the inferred boundaries. Reviewed two-axis grading is available when the instructor classifies and groups contributions; ordinary text grading does not separate axes. Confirmed absent initial-post scoring remains unfinished: see CHAT-PASTED-DISCUSSION-AXES. Attachments, unloaded replies and model input limits require explicit disclosure. Browser and real LMS copy verification remain open.'
   question: null
 - id: 'CHAT-PASTED-DISCUSSION-AXES'
   state: 'actionable'

@@ -1,3 +1,4 @@
+import { pastedSubmissionUrl } from "@/lib/grade/pasted-submission-url";
 import { isLengthDeductionThresholdWords } from "@/lib/grade/length-deduction-policy";
 import { isSubmissionFileInventories } from "@/lib/grade/submission-file-inventory";
 import { NextRequest, NextResponse } from "next/server";
@@ -381,7 +382,13 @@ export async function POST(req: NextRequest) {
     // never throws and re-clamps the folded content.
     const outcome = await raceWithTimeout(
       (async () => {
-        const resolved = await resolveEntryLinks(entry);
+        const pastedLink = !!entry.submissionUrl && pastedSubmissionUrl(entry.content) === entry.submissionUrl;
+        if (pastedLink) {
+          const url = new URL(entry.submissionUrl!);
+          if (url.username || url.password) return { unavailablePastedLink: true };
+        }
+        const resolved = await resolveEntryLinks(pastedLink ? { ...entry, gradedRepo: null, gradedRef: null, repoReadNote: null, linkFetch: undefined } : entry);
+        if (pastedLink && (resolved.linkFetch === "failed" || resolved.linkFetch === "flagged" || (resolved.content === entry.content && resolved.submittedFiles.length === entry.submittedFiles.length))) return { unavailablePastedLink: true };
         const unreadableAttachment = resolved.submittedFiles.find((file) => file.mimeType === UNREADABLE_CANVAS_ATTACHMENT_MIME);
         if (unreadableAttachment) return { unreadableAttachment: { name: unreadableAttachment.name } };
         const omittedAttachment = resolved.submittedFiles.find((file) => file.mimeType === OMITTED_CANVAS_ATTACHMENT_MIME);
@@ -425,6 +432,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: describeError(outcome.error), ...diagnosticFor("route error") }, { status: 502 });
     }
 
+    if (outcome.value.unavailablePastedLink) return NextResponse.json({ error: "The linked submission could not be read completely. Check access or upload its contents directly; no grade was produced.", ...diagnosticFor("route error") }, { status: 422 });
     if (outcome.value.unreadableAttachment) {
       return NextResponse.json({ error: `Attachment "${safeCanvasLabel(outcome.value.unreadableAttachment.name)}" could not be read. No grade was produced.`, ...diagnosticFor("route error") }, { status: 422 });
     }

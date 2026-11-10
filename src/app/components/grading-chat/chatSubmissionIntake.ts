@@ -1,3 +1,4 @@
+import { pastedSubmissionUrl } from "@/lib/grade/pasted-submission-url";
 /**
  * GRADING-CHAT wave 1 (docs/grading-chat-waves.md section 3, N1): the pure,
  * client-safe leaf behind the chat surface's ingestion taxonomy. Everything
@@ -140,6 +141,7 @@ export function buildTextEntry(input: { readonly label?: string; readonly conten
   return {
     student,
     content: input.content,
+    ...(pastedSubmissionUrl(input.content) ? { submissionUrl: pastedSubmissionUrl(input.content) } : {}),
     mergedFileCount: 0,
     submittedFiles: [],
   };

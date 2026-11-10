@@ -40,6 +40,12 @@ describe("buildTextEntry", () => {
     expect(entry.student).toBe("x".repeat(500));
   });
 
+  it("hands a sole URL to the existing resolver while retaining the exact text", () => {
+    const content = "Student: Example\nhttps://github.com/example/repo";
+    expect(buildTextEntry({ content }, 1)).toMatchObject({ content, submissionUrl: "https://github.com/example/repo" });
+    expect(buildTextEntry({ content: "Explanation https://example.com" }, 1).submissionUrl).toBeUndefined();
+    expect(buildTextEntry({ content: "https://github.com/example/repo\n---" }, 1).submissionUrl).toBe("https://github.com/example/repo");
+  });
   it("never produces an empty student label", () => {
     const entry = buildTextEntry({ content: "hi" }, 1);
     expect(entry.student.length).toBeGreaterThan(0);

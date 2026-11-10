@@ -8,8 +8,7 @@ export function isPastedDiscussionListing(text: string): boolean {
   const startsExplicit = HEADING.test(lines.find((line) => line.trim()) ?? "");
   if (startsExplicit) return false;
   if (listing.rows.some((row) => row.student)) return true;
-  const hasSeparators = /^\s*---+\s*$/m.test(text);
-  return !hasSeparators;
+  return false;
 }
 
 export function hasSubmissionContent(content: string): boolean {
@@ -19,21 +18,37 @@ export function hasSubmissionContent(content: string): boolean {
 
 /** Recognize explicit student headings only; never guess from prose. */
 export function parsePastedSubmissions(text: string): PastedSubmission[] {
-  if (isPastedDiscussionListing(text)) return parseDiscussionListing(text).rows;
+  const discussion = parseDiscussionListing(text);
+  if (isPastedDiscussionListing(text)) return discussion.rows;
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
   const result: PastedSubmission[] = [];
-  let current: PastedSubmission | undefined;
-  for (const line of lines) {
-    const heading = line.match(HEADING);
-    if (heading) {
-      current = { student: heading[1], content: line };
-      result.push(current);
-    } else if (current) current.content += `${current.content ? "\n" : ""}${line}`;
-    else if (line.trim()) {
-      const parts = text.split(/^\s*---+\s*$/m);
-      return parts.length > 1 && parts.every((part) => part.trim()) ? parts.map((part) => ({ student: "", content: part.trim() })) : [];
+  const headingCount = lines.filter((line) => HEADING.test(line)).length;
+  if (headingCount) {
+    let current: PastedSubmission = { student: "", content: "" };
+    for (const line of lines) {
+      const heading = line.match(HEADING);
+      if (heading) {
+        if (current.content.trim()) result.push(current);
+        current = { student: heading[1], content: line };
+      } else {
+        current.content += `${current.content ? "\n" : ""}${line}`;
+      }
     }
+    if (current.content.trim()) result.push(current);
+    return result;
   }
-  return result.length > 1 ? result.map((row) => ({ ...row, content: row.content.trim() })) : [];
+  const normalized = text.replace(/\r\n?/g, "\n");
+  const separators = [...normalized.matchAll(/^[ \t]*---+[ \t]*$/gm)];
+  if (!separators.length) return discussion.detected && !headingCount ? [{ student: "", content: normalized }] : [];
+  const parts: string[] = [];
+  let start = 0;
+  for (const separator of separators) {
+    const end = separator.index! + separator[0].length;
+    parts.push(normalized.slice(start, end));
+    start = end;
+  }
+  parts.push(normalized.slice(start));
+  if (parts.some((part) => !part.replace(/^[ \t]*---+[ \t]*$/gm, "").trim())) return [];
+  return parts.map((content) => ({ student: "", content }));
 }
 import { parseDiscussionListing } from "./discussionListing";

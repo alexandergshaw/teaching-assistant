@@ -1,4 +1,5 @@
 "use client";
+import { beginManualRepoGrade, manualSkipReason, setManualRepoGradeState, trackManualRepoGrade } from "./manualRepoGradeDiagnostics";
 
 // Repo Grades view - grading and posting action handlers. Pulled out of
 // index.tsx ONLY because that file hit this codebase's 1000-line-per-file cap
@@ -117,6 +118,7 @@ export interface UseRepoGradesGradingActionsParams {
    * keeps gradeRepoAction's 5th argument undefined (no branch-merge check). */
   targetBranch?: string;
   /** The selected course ID, used to scope grading and class trends. */
+  accountId?: string;
   courseId: string;
   /** The selected course, for its name and Canvas URL. Posting is a no-op
    * (both handlers return immediately) while this is null. */
@@ -181,6 +183,7 @@ export function useRepoGradesGradingActions(
     runCodeScoring,
     applyNamingDeduction,
     targetBranch,
+    accountId,
     courseId,
     course,
     provider,
@@ -279,13 +282,16 @@ export function useRepoGradesGradingActions(
     if (!isCurrent() || cell?.status !== "ungraded") return;
     const release = admitRepoGradeTargets(activeTargets.current, courseId, [{ repo: row.repo, folder: column.folder }]);
     if (!release) {
+      beginManualRepoGrade(accountId, row.repo, "single", "blocked", "already-running");
       announceGrade("This repository folder is already being graded.");
       return;
     }
     const key = JSON.stringify([courseId, row.repo, column.folder]);
+    const record = beginManualRepoGrade(accountId, row.repo, "single", "queued");
     const queue = createRepoGradeQueue([key], (target) => target, isCurrent, ({ cells }) => {
       const stage = cells.get(key);
       if (stage === "queued" || stage === "paused" || stage === "stopped") {
+        if (record?.status !== stage) setManualRepoGradeState(record, stage, stage === "stopped" ? "stopped-before-dispatch" : stage);
         setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, { gradeRunStage: stage }));
       }
     });
@@ -333,7 +339,7 @@ export function useRepoGradesGradingActions(
       setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, {
         grading: true, gradeError: null, gradeRunStage: null, gradeAttemptStatus: null,
       }));
-      return timeGradingAction("grade_repo", () => gradeRepoAction(
+      return trackManualRepoGrade(accountId, row.repo, column.folder, "single", () => timeGradingAction("grade_repo", () => gradeRepoAction(
       row.repo,
       instructions,
       resolved.text,
@@ -343,7 +349,7 @@ export function useRepoGradesGradingActions(
       useReadmeInstructions,
       runCodeScoring,
       applyNamingDeduction
-      )).catch(repoGradeTransportError);
+      )), record).catch(repoGradeTransportError);
     });
     if (!isCurrent() || !dispatched) return;
     const result = dispatched.value;
@@ -466,6 +472,7 @@ export function useRepoGradesGradingActions(
     }
     } finally {
       queue.close();
+      if (record && (record.status === "queued" || record.status === "paused")) setManualRepoGradeState(record, "not-dispatched", "run-ended-before-dispatch");
       singleQueues.current.delete(key);
       release();
       if (isCurrent()) {
@@ -657,6 +664,7 @@ export function useRepoGradesGradingActions(
   const {
     runningFolder: bulkRunningFolder, progress: bulkProgress, queue: bulkQueue, controlBulkGrade, runBulkGrade,
   } = useRepoGradesBulkGrade({
+    accountId,
     provider,
     instructions,
     useReadmeInstructions,
@@ -695,6 +703,7 @@ export function useRepoGradesGradingActions(
     if (!isCurrent()) return;
     const plan = buildBulkGradePlan({ rows: mergeRepoGradeLiveScores(rows, cellEdits), folder, selected, selectionOnly: resolveGradeScope(selected, bulkSelectionOnly).selectionOnly });
     if (plan.targets.length === 0) {
+      for (const skipped of plan.skipped) beginManualRepoGrade(accountId, skipped.repo, "bulk", "skipped", manualSkipReason(skipped.reason));
       const reasons = plan.skipped.length > 0 ? plan.skipped.map((s) => `${s.repo}: ${s.reason}`).join("; ") : "no repos have this folder.";
       setPostSummary(`${folder}: nothing to grade - ${reasons}`);
       // A16 wave 3, ruling W3-4: nothing ran, so the previous run's trends
@@ -713,6 +722,8 @@ export function useRepoGradesGradingActions(
     // assignmentId reaches the resolver, once per run - is unchanged.
     const release = admitRepoGradeTargets(activeTargets.current, courseId, plan.targets);
     if (!release) {
+      for (const target of plan.targets) beginManualRepoGrade(accountId, target.repo, "bulk", "blocked", "already-running");
+      for (const skipped of plan.skipped) beginManualRepoGrade(accountId, skipped.repo, "bulk", "skipped");
       announceGrade("A repository folder in this run is already being graded.");
       return;
     }

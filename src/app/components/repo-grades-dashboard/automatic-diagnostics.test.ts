@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { readSessionDiagnosticLogState, resetSessionDiagnosticLogForTests } from "@/lib/session-diagnostic-log";
-import { recordRepoGradesStartup } from "./startup-diagnostics";
+import { backgroundDiagnosticDetail, recordRepoGradesStartup } from "./startup-diagnostics";
+import type { AutomaticRepoGradeRun } from "@/lib/repo-grades-dashboard/automatic-status";
+
+it("aggregates fixed status counts without retaining identities or reason text", () => {
+  const run = { courses: [{ courseId: "private-course", label: "private-name", state: "partial", reason: "private-reason", counts: [{ state: "blocked", count: 2, reason: "private-repo" }, { state: "unknown", count: 1, reason: null }, { state: "running", count: 3, reason: null }] }] } as AutomaticRepoGradeRun;
+  const detail = backgroundDiagnosticDetail(run);
+  expect(detail).toMatchObject({ courseCount: 1, partialCourses: 1, blockedTargets: 2, unknownTargets: 1, runningTargets: 3 });
+  expect(JSON.stringify(detail)).not.toContain("private");
+});
 
 describe("automatic repo grading control diagnostics", () => {
   beforeEach(() => resetSessionDiagnosticLogForTests("2026-11-06T12:00:00.000Z"));

@@ -36,7 +36,12 @@
 // evaluated, which differs between the server prerender of this Client
 // Component and the browser, and printing it would be a hydration mismatch
 // for no benefit.
-import { useState } from "react";
+import { readManualRepoGradeDiagnostics, manualRepoGradeDropped } from "@/app/components/repo-grades/manualRepoGradeDiagnostics";
+import { useLayoutEffect, useRef, useState } from "react";
+import { useSupabase } from "@/context/SupabaseProvider";
+import { readRepoGradeDiagnosticTargetsAction } from "@/app/actions/repo-grade-diagnostic-export";
+import { formatRepoDiagnosticExportJson } from "./repo-diagnostic-json";
+import { createDiagnosticExportAccountFence } from "./diagnostic-export-account";
 import { triggerFileDownload } from "../../components/course-planning/utils";
 import RunLogRow from "../../components/recording/RunLogRow";
 import {
@@ -45,10 +50,10 @@ import {
   SESSION_DIAGNOSTIC_SURFACE_LABELS,
   buildSessionDiagnosticLog,
   formatSessionDiagnosticLogCsv,
-  formatSessionDiagnosticLogJson,
   readSessionDiagnosticLogState,
   recentSessionDiagnosticEntries,
   sessionDiagnosticCoverageLine,
+  sessionDiagnosticRequiresReload,
   sessionDiagnosticLogFileName,
   sessionDiagnosticLogSummaryLine,
   summarizeSessionDiagnosticLog,
@@ -87,6 +92,10 @@ function describeEntryLine(entry: SessionDiagnosticEntry): string {
 
 export default function SessionLogSection({ currentInstitution, currentCourse }: SessionLogSectionProps) {
   const [announcement, setAnnouncement] = useState("");
+  const { user, loading } = useSupabase();
+  const account = loading ? null : user?.id ?? null;
+  const accountFence = useRef(createDiagnosticExportAccountFence());
+  useLayoutEffect(() => { const fence = accountFence.current; fence.commit(account); return () => { fence.commit(null); }; }, [account]);
   // Only the SETTER is used. The store is plain module state with no
   // subscription, so a re-render is what re-reads it: entries recorded by
   // this page's own loads already cause one (each is followed by the page's
@@ -98,7 +107,9 @@ export default function SessionLogSection({ currentInstitution, currentCourse }:
   const summary = summarizeSessionDiagnosticLog(state);
   const recent = recentSessionDiagnosticEntries(state.entries, RECENT_COUNT);
 
-  const handleDownload = (format: "csv" | "json") => {
+  const handleDownload = async (format: "csv" | "json") => {
+    const identity = accountFence.current.snapshot();
+    if (!identity.account) { setAnnouncement("Sign in to download repository diagnostics."); return; }
     // The one clock read in this feature's UI path - everything downstream
     // (the "Generated" field, the filename stamp) takes it as a parameter, so
     // the formatting itself stays pure and pinned by
@@ -121,7 +132,18 @@ export default function SessionLogSection({ currentInstitution, currentCourse }:
       },
       now
     );
-    const text = format === "csv" ? formatSessionDiagnosticLogCsv(full) : formatSessionDiagnosticLogJson(full);
+    const repoTargets = await readRepoGradeDiagnosticTargetsAction(identity.account).catch(() => ({ status: "unavailable" as const, targets: [] }));
+    if (!accountFence.current.current(identity)) { setAnnouncement("Account changed; the diagnostic export was cancelled."); return; }
+    const cell = (value: string) => `"${(/^[=+\-@\t\r]/.test(value) ? "'" + value : value).replace(/"/g, '""')}"`;
+    const sessionLogRequiresReload = sessionDiagnosticRequiresReload();
+    const manualTargets = readManualRepoGradeDiagnostics(identity.account);
+    const manualDropped = manualRepoGradeDropped(identity.account);
+    const manualCsv = ["", cell("=== Manual repository grading attempts (current tab) ==="), ["Attempt", "Started", "Updated", "Repository", "URL", "Link status", "Mode", "Status", "Reason", "Dropped older attempts"].map(cell).join(","), ...manualTargets.map((item) => [item.attemptId, item.at, item.updatedAt, item.repo ?? "", item.url ?? "", item.urlStatus, item.mode, item.status, item.reason, String(manualDropped)].map(cell).join(",")), ...(manualTargets.length ? [] : [["", "", "", "", "", "", "", "", "", String(manualDropped)].map(cell).join(",")])].join("\r\n");
+    const runCount = "runCount" in repoTargets ? String(repoTargets.runCount) : "";
+    const runCap = "runLimitReached" in repoTargets ? String(repoTargets.runLimitReached) : "";
+    const targetCap = "targetLimitReached" in repoTargets ? String(repoTargets.targetLimitReached) : "";
+    const repoCsv = ["", cell("=== Recent automatic repository targets ==="), ["Coverage", "Run count", "Run limit reached", "Target limit reached", "Run started", "Run phase", "Discovery incomplete", "Repository", "URL", "Link status", "State", "Reason"].map(cell).join(","), ...repoTargets.targets.map((target) => [repoTargets.status, runCount, runCap, targetCap, target.runStartedAt, target.runPhase, String(target.discoveryIncomplete), target.repo, target.url, target.linkStatus, target.state, target.reason ?? ""].map(cell).join(",")), ...(repoTargets.targets.length ? [] : [[repoTargets.status, runCount, runCap, targetCap, "", "", "", "", "", "", "", ""].map(cell).join(",")])].join("\r\n");
+    const text = format === "json" ? formatRepoDiagnosticExportJson(full, sessionLogRequiresReload, repoTargets, { scope: "current-tab", dropped: manualDropped, targets: manualTargets }) : formatSessionDiagnosticLogCsv(full) + `\r\n"Session log requires reload after account change","${sessionLogRequiresReload}"` + repoCsv + manualCsv;
     const filename = sessionDiagnosticLogFileName(format, now);
     const mimeType = format === "csv" ? "text/csv;charset=utf-8" : "application/json;charset=utf-8";
     triggerFileDownload(new Blob([text], { type: mimeType }), filename);
@@ -138,10 +160,11 @@ export default function SessionLogSection({ currentInstitution, currentCourse }:
         the real error message behind a failure, which the screen that reported it does not always keep. Download it
         and send it when something goes wrong.
       </p>
+      <p className={styles.help}>Exports include repository names, GitHub links, and statuses from the recent background runs and manual attempts in this tab. Manual entries are limited to the newest 2,000; dropped counts are included. Coverage is marked partial or unavailable when it cannot be proven complete.</p>
 
-      <RunLogRow summary={sessionDiagnosticLogSummaryLine(summary)} onDownload={handleDownload} />
+      <RunLogRow summary={sessionDiagnosticRequiresReload() ? "Session log paused after account change; reload to resume." : sessionDiagnosticLogSummaryLine(summary)} onDownload={handleDownload} />
 
-      <p className={styles.help}>{sessionDiagnosticCoverageLine()}</p>
+      <p className={styles.help}>{sessionDiagnosticRequiresReload() ? "The session log paused after an account change. Reload this page to resume recording; events in the meantime are not included." : sessionDiagnosticCoverageLine()}</p>
 
       <p className={styles.tip}>
         This log is held in memory for this page session only and is never saved anywhere - not on this device and not

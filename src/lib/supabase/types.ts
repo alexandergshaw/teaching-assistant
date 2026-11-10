@@ -623,7 +623,7 @@ export interface Database {
         Relationships: [];
       };
       repo_grade_automatic_runs: {
-        Row: { id: string; user_id: string; created_at: string };
+        Row: { id: string; user_id: string; created_at: string; phase: string };
         Insert: never;
         Update: never;
         Relationships: [];

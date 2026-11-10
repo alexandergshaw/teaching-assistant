@@ -1,5 +1,7 @@
 "use client";
 
+import { setSessionDiagnosticAccount } from "@/lib/session-diagnostic-log";
+import { clearManualRepoGradeDiagnostics } from "@/app/components/repo-grades/manualRepoGradeDiagnostics";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { Session, SupabaseClient, User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
@@ -51,7 +53,12 @@ export function SupabaseProvider({
   useEffect(() => {
     const effect = authObserver.begin();
 
+    let previousAccount: string | null = null;
     function applySession(next: Session | null) {
+      const nextAccount = next?.user.id ?? null;
+      if (previousAccount && previousAccount !== nextAccount) clearManualRepoGradeDiagnostics(previousAccount);
+      setSessionDiagnosticAccount(nextAccount);
+      previousAccount = nextAccount;
       setSession(next);
       // The existing owner transition clears run-form caches and the previous
       // owner's browser state on bootstrap, sign-out, or account switch.

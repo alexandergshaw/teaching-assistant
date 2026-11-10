@@ -17,7 +17,7 @@ export function recordRepoGradeQueueCommand(scope: "folder" | "cell", command: R
     at: new Date().toISOString(),
     surface: "grading",
     operation: "repo_grade_run_control",
-    label: "Control a manual repository grading run",
+    label: "Manual repository grading command accepted",
     outcome: "success",
     detail: { scope, command },
   });

@@ -16,6 +16,8 @@ import {
   recentSessionDiagnosticEntries,
   recordSessionDiagnosticEntry,
   resetSessionDiagnosticLogForTests,
+  setSessionDiagnosticAccount,
+  sessionDiagnosticRequiresReload,
   sanitizeSessionDiagnosticError,
   sessionDiagnosticCoverageLine,
   sessionDiagnosticLogFileName,
@@ -870,5 +872,24 @@ describe("template tool coverage", () => {
     expect(coverage?.covers).toMatch(/PowerPoint and document/);
     expect(coverage?.covers).toMatch(/load, analyze, save, reuse and download/);
     expect(coverage?.covers).toMatch(/no filenames, source text, model responses or replacement values/);
+  });
+});
+
+describe("session diagnostic account transitions", () => {
+  it("clears prior entries on A to B to A and preserves entries across same-account refresh", () => {
+    const add = (label: string) => recordSessionDiagnosticEntry({ at: new Date().toISOString(), surface: "grading", operation: "grade_repo", label, outcome: "success" });
+    setSessionDiagnosticAccount("A"); add("A-only");
+    setSessionDiagnosticAccount("A"); expect(readSessionDiagnosticLogState().entries.map((entry) => entry.label)).toEqual(["A-only"]);
+    setSessionDiagnosticAccount("B"); expect(readSessionDiagnosticLogState().entries).toEqual([]); add("late-A-callback"); add("B-only");
+    expect(readSessionDiagnosticLogState().entries).toEqual([]);
+    expect(readSessionDiagnosticLogState().recordingActive).toBe(false);
+    setSessionDiagnosticAccount("A"); expect(readSessionDiagnosticLogState().entries).toEqual([]); add("new-A");
+    expect(sessionDiagnosticRequiresReload()).toBe(true);
+    expect(readSessionDiagnosticLogState().entries).toEqual([]);
+    setSessionDiagnosticAccount(null); expect(readSessionDiagnosticLogState().entries).toEqual([]);
+    resetSessionDiagnosticLogForTests("2026-11-10T00:00:00.000Z");
+    setSessionDiagnosticAccount("B"); add("after-reload");
+    expect(readSessionDiagnosticLogState().recordingActive).toBe(true);
+    expect(readSessionDiagnosticLogState().entries.map((entry) => entry.label)).toEqual(["after-reload"]);
   });
 });

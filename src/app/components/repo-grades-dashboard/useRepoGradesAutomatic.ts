@@ -10,7 +10,7 @@ import {
 } from "@/app/actions/repo-grade-automatic";
 import type { AutomaticRepoGradeRun, AutomaticRepoGradeStatus } from "@/lib/repo-grades-dashboard/automatic-status";
 import type { AutomaticRepoGradeScheduleDraft } from "@/lib/repo-grades-dashboard/automatic-schedule";
-import { recordRepoGradesStartup } from "./startup-diagnostics";
+import { backgroundDiagnosticDetail, recordRepoGradesStartup } from "./startup-diagnostics";
 
 const POLL_MS = 5_000;
 const unavailable = { status: "unavailable" } as const;
@@ -59,13 +59,13 @@ export function useRepoGradesAutomatic(accountId: string | null) {
       const readAgain = () => void update(() => readRepoGradeAutomaticStatusAction(accountId));
       const run = status.status === "loaded" ? status.run : null;
       const retryAt = status.status === "loaded" ? status.githubRetryAt : null;
-      const diagnostic = [run?.id, run?.phase, status.status, retryAt].join(":");
+      const diagnostic = [run?.id, run?.phase, run?.settling, status.status, retryAt].join(":");
       if (diagnostic !== lastDiagnostic) {
         lastDiagnostic = diagnostic;
         try {
-          const outcome = status.status === "unavailable" ? "unavailable" : run?.phase === "incomplete" ? "incomplete" : "success";
-          recordRepoGradesStartup(retryAt ? "background_github_cooldown" : "background",
-            retryAt ? "blocked" : outcome, startedAt, run?.courses.length);
+          const outcome = status.status === "unavailable" ? "unavailable" : run?.phase === "incomplete" ? "incomplete" : run?.phase === "stopped" ? "stopped" : automaticRepoGradeRunActive(run) || run?.settling ? "in-progress" : "success";
+          if (outcome !== "in-progress" || retryAt) recordRepoGradesStartup(retryAt ? "background_github_cooldown" : "background",
+            retryAt ? "blocked" : outcome, startedAt, run ? backgroundDiagnosticDetail(run) : undefined);
         } catch {
           // The session diagnostic must not interrupt the durable status view.
         }

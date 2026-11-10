@@ -491,6 +491,7 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
     controlGradeCell,
     trendsEntry,
   } = useRepoGradesGradingActions({
+    accountId,
     cellScope,
     isCellScopeCurrent: () => drafts.isCurrent(cellScope),
     rows: sortedRows,

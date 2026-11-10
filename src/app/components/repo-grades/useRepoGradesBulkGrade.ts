@@ -1,4 +1,5 @@
 "use client";
+import { beginManualRepoGrade, manualSkipReason, setManualRepoGradeState, trackManualRepoGrade } from "./manualRepoGradeDiagnostics";
 
 // Repo Grades view - "grade this whole column" bulk run (the sibling half of
 // repoGradesBulkGrade.ts, whose header comment documents the instructor's own
@@ -77,6 +78,7 @@ import type { ResolvedRubric } from "./useRepoGradesRubricSource";
 import { gradingActionNowMs, timeGradingAction } from "../grading/gradingActionSeam";
 
 export interface UseRepoGradesBulkGradeParams {
+  accountId?: string;
   scope?: object;
   isCurrent?: () => boolean;
   /** Grading provider, from the view's existing useLlmProvider(). */
@@ -205,6 +207,7 @@ export interface UseRepoGradesBulkGradeResult {
  * or a rejecting grading call from leaving it stuck (backlog row A27).
  */
 export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): UseRepoGradesBulkGradeResult {
+  const { accountId } = params;
   const { provider, instructions, useReadmeInstructions, runCodeScoring, applyNamingDeduction, targetBranch, onCellUpdate, onAnnounce } = params;
   const { scope, isCurrent = () => true } = params;
   const runLockRef = useRef(new Set<object | undefined>());
@@ -235,7 +238,10 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
     const started = gradingActionNowMs();
     runLockRef.current.add(scope);
     const folder = plan.targets[0]?.folder ?? "";
+    const records = new Map(plan.targets.map((target) => [target.repo, beginManualRepoGrade(accountId, target.repo, "bulk", "queued")]));
+    for (const skipped of plan.skipped) beginManualRepoGrade(accountId, skipped.repo, "bulk", "skipped", manualSkipReason(skipped.reason));
     const queue = createRepoGradeQueue(plan.targets, ({ repo }) => repo, isCurrent, (snapshot) => {
+      for (const [repo, state] of snapshot.cells) { const record = records.get(repo); if (record && state !== "running" && record.status !== state) setManualRepoGradeState(record, state, state === "stopped" ? "stopped-before-dispatch" : state); }
       setDisplay((value) => value?.scope === scope && value ? { ...value, queue: snapshot } : value);
     });
     activeQueues.current.set(scope, { folder, queue });
@@ -247,7 +253,7 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
         recordFolderRun(started, plan, "blocked", "stale_scope");
         return null;
       }
-      return await gradeBulkPlan(plan, resolved, started, queue);
+      return await gradeBulkPlan(plan, resolved, started, queue, records);
     } catch (error) {
       if (queue.stopped().length === plan.targets.length) {
         recordFolderRun(started, plan, "blocked", "stopped", 0, 0, plan.targets.length);
@@ -267,6 +273,7 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
       // named, accepted exception) - this `finally` is what makes that
       // "not expected" a guarantee rather than a hope.
       queue.close();
+      for (const record of records.values()) if (record && (record.status === "queued" || record.status === "paused")) setManualRepoGradeState(record, "not-dispatched", "run-ended-before-dispatch");
       activeQueues.current.delete(scope);
       runLockRef.current.delete(scope);
       if (isCurrent()) {
@@ -284,6 +291,7 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
   const gradeBulkPlan = async (
     plan: BulkGradePlan, resolved: ResolvedRubric, started: number,
     queue: ReturnType<typeof createRepoGradeQueue<BulkGradeTarget>>,
+    records: Map<string, ReturnType<typeof beginManualRepoGrade>>,
   ): Promise<readonly GradeResult[]> => {
     const targets = plan.targets;
 
@@ -312,7 +320,7 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
       // `await` unsettled forever, which used to be what left the whole
       // run's flag, progress and summary stuck (docs/REGRESSION.md,
       // this entry's own baseline).
-      const result = await timeGradingAction("grade_repo", () => gradeRepoAction(
+      const result = await trackManualRepoGrade(accountId, target.repo, target.folder, "bulk", () => timeGradingAction("grade_repo", () => gradeRepoAction(
         target.repo,
         instructions,
         rubricArg,
@@ -322,7 +330,7 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
         useReadmeInstructions,
         runCodeScoring,
         applyNamingDeduction
-      )).catch(repoGradeTransportError);
+      )), records.get(target.repo)).catch(repoGradeTransportError);
       if (!isCurrent()) return { rubricUsed: null };
 
       if ("error" in result) {

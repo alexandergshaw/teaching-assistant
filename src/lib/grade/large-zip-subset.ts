@@ -1,10 +1,9 @@
-import { brightspaceTimestamp } from "./reviewed-zip-mapping";
 import { inspectLargeZipDirectory, type LargeZipMember } from "./recoverable-zip-directory";
 import { ZIP_MAX_ARCHIVE_RATIO, ZIP_MAX_CUMULATIVE_DECLARED_BYTES, ZIP_MAX_CUMULATIVE_ENTRIES, ZIP_MAX_MEMBER_DECLARED_BYTES, ZIP_MAX_MEMBER_RATIO, ZIP_MAX_VIDEO_MEMBERS, ZIP_RATIO_FLOOR_BYTES } from "@/lib/zip-caps";
 import { GRADING_ZIP_MAX_BYTES } from "./grading-zip-transport";
 import { inferStudentPrefix } from "./utils";
 
-type Reason = "nested archive" | "member size" | "unsupported type" | "compression ratio" | "group size" | "unassigned index" | "multiple submission times";
+type Reason = "nested archive" | "member size" | "unsupported type" | "compression ratio" | "group size" | "unassigned index";
 export interface RecoverableGroup { readonly label: string; readonly sourceIdentifier: string; readonly members: readonly LargeZipMember[]; readonly reason?: Reason }
 export type RecoverablePlan = { readonly ok: true; readonly groups: readonly RecoverableGroup[] } | { readonly ok: false; readonly reason: string };
 const supported = new Set(["txt", "md", "py", "ipynb", "csv", "pdf", "docx", "html", "mp4", "m4v", "mov", "webm", "c", "cc", "cpp", "cxx", "h", "hpp"]);
@@ -44,7 +43,6 @@ export async function planRecoverableZip(file: Blob): Promise<RecoverablePlan> {
   return { ok: true, groups: [...groups.values()].map((group) => {
     let reason: Reason | undefined;
     if (group.unassigned) reason = "unassigned index";
-    else if (brightspace && group.members.length > 1 && (group.members.some((member) => !brightspaceTimestamp(member.path)) || new Set(group.members.map((member) => brightspaceTimestamp(member.path))).size > 1)) reason = "multiple submission times";
     else if (group.members.some((member) => member.nestedArchive)) reason = "nested archive";
     else if (group.members.some((member) => member.declaredBytes > ZIP_MAX_MEMBER_DECLARED_BYTES || member.compressedBytes > ZIP_MAX_MEMBER_DECLARED_BYTES)) reason = "member size";
     else if (group.members.some((member) => !supported.has(ext(member.path)))) reason = "unsupported type";
@@ -59,7 +57,7 @@ const crcTable = Uint32Array.from({ length: 256 }, (_, index) => {
 });
 
 /** Verify actual decompressed length and CRC while bounding resident data. */
-async function verifyMember(file: Blob, member: LargeZipMember): Promise<boolean> {
+export async function verifyMember(file: Blob, member: LargeZipMember): Promise<boolean> {
   try {
     let stream = file.slice(member.dataOffset, member.dataOffset + member.compressedBytes).stream();
     if (member.method === 8) stream = stream.pipeThrough(new DecompressionStream("deflate-raw"));

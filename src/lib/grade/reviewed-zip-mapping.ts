@@ -28,11 +28,6 @@ export function reviewedZipLookup(submissions: Record<string, string>, mapping: 
   const byRaw = new Map<string, { studentDisplay: string; citationFileName: string }>();
   const mappedBySource = new Map<string, string>(), sourceByMapped = new Map<string, string>();
   const brightspace = isReviewedBrightspacePaths(paths);
-  if (brightspace) {
-    const timestamps = new Map<string, Set<string>>();
-    for (const path of paths) { const key = path.slice(0, path.indexOf(" - ")); const group = timestamps.get(key) ?? new Set<string>(); group.add(brightspaceTimestamp(path) ?? ""); timestamps.set(key, group); }
-    if ([...timestamps.entries()].some(([key, group]) => group.size > 1 || (group.has("") && paths.filter((path) => path.startsWith(`${key} - `)).length > 1))) throw new Error("Different submission times require separate review. Nothing was queued.");
-  }
   for (const path of paths) {
     const expected = mapping[path]?.trim();
     if (!expected) throw new Error("Reviewed student mapping is incomplete. Nothing was queued.");

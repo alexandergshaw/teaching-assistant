@@ -1,89 +1,71 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, LinearProgress, Stack, TextField, Typography } from "@mui/material";
+import { Alert, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, LinearProgress, Stack, Tooltip, Typography } from "@mui/material";
 import type { PartialHashProgress, PartialHashReview } from "./partialHandoff";
 import { buildRecoverableZip, planRecoverableZip, type RecoverableGroup } from "@/lib/grade/large-zip-subset";
+import { inferArchiveNames } from "@/lib/grade/recoverable-zip-names";
+import { submitBoundedGroups } from "./partialGroupBatch";
 
-/** Build a partial download only after reviewing the original member inventory. */
 export function LargeZipRecovery({ onSubmit, incomingFile, onClose }: { incomingFile?: File | null; onClose?: () => void; onSubmit: (source: File, file: File, selected: readonly RecoverableGroup[], omitted: readonly RecoverableGroup[], mapping: Readonly<Record<string, string>>, review?: PartialHashReview) => Promise<string | null> }) {
   const [open, setOpen] = useState(!!incomingFile), [file, setFile] = useState<File | null>(incomingFile ?? null);
-  const [groups, setGroups] = useState<readonly RecoverableGroup[]>([]), [selected, setSelected] = useState<string[]>([]);
-  const [confirmed, setConfirmed] = useState(false), [busy, setBusy] = useState(!!incomingFile), [error, setError] = useState("");
-  const [manifest, setManifest] = useState<string | null>(null);
-  const [mapping, setMapping] = useState<Record<string, string>>({});
-  const [attempts, setAttempts] = useState<Record<string, boolean>>({});
-  const [hashProgress, setHashProgress] = useState<PartialHashProgress | null>(null);
-  const [uncertain, setUncertain] = useState(false);
+  const [groups, setGroups] = useState<readonly RecoverableGroup[]>([]), [selected, setSelected] = useState<string[]>([]), [names, setNames] = useState<Readonly<Record<string, string>>>({});
+  const [busy, setBusy] = useState(!!incomingFile), [error, setError] = useState(""), [progress, setProgress] = useState<PartialHashProgress | null>(null), [completed, setCompleted] = useState(0), [uncertain, setUncertain] = useState(false);
   const generation = useRef(0), hashing = useRef(false);
   useEffect(() => () => { generation.current++; }, []);
-  const close = () => { generation.current++; setOpen(false); setFile(null); setGroups([]); setSelected([]); setMapping({}); setAttempts({}); setConfirmed(false); setBusy(false); setHashProgress(null); setError(""); setManifest(null); onClose?.(); };
+  const close = () => { generation.current++; setOpen(false); setFile(null); setGroups([]); setSelected([]); setNames({}); setBusy(false); setError(""); setProgress(null); setCompleted(0); onClose?.(); };
   const choose = async (next: File | undefined) => {
-    const token = ++generation.current; setFile(next ?? null); setGroups([]); setSelected([]); setMapping({}); setAttempts({}); setConfirmed(false); setError(""); setManifest(null);
-    if (!next) return;
+    const token = ++generation.current; setFile(next ?? null); setGroups([]); setSelected([]); setNames({}); setError(""); setCompleted(0); setUncertain(false);
+    if (!next) { setBusy(false); return; }
     setBusy(true);
     try {
       const result = await planRecoverableZip(next); if (token !== generation.current) return;
       if (!result.ok) { setError(`Archive could not be reviewed: ${result.reason}.`); return; }
-      setGroups(result.groups);
+      const inferred = await inferArchiveNames(next, result.groups); if (token !== generation.current) return;
+      const eligible = result.groups.filter((group) => !group.reason && !!inferred[group.label]);
+      const counts = new Map<string, number>(); for (const group of eligible) { const key = inferred[group.label].normalize("NFKC").toLocaleLowerCase(); counts.set(key, (counts.get(key) ?? 0) + 1); }
+      setNames(inferred); setGroups(result.groups); setSelected(eligible.filter((group) => counts.get(inferred[group.label].normalize("NFKC").toLocaleLowerCase()) === 1).map((group) => group.label));
     } catch { if (token === generation.current) setError("Archive review failed. Try choosing the file again."); }
     finally { if (token === generation.current) setBusy(false); }
   };
-  useEffect(() => {
-    if (!incomingFile) return; const token = ++generation.current;
-    void planRecoverableZip(incomingFile).then((result) => { if (token !== generation.current) return; if (result.ok) setGroups(result.groups); else setError(`Archive could not be reviewed: ${result.reason}.`); }).catch(() => { if (token === generation.current) setError("Archive review failed. Try choosing the file again."); }).finally(() => { if (token === generation.current) setBusy(false); });
-  }, [incomingFile]);
-  const mappedNames = selected.map((label) => mapping[label]?.trim().normalize("NFKC").toLocaleLowerCase() ?? "");
-  const mapped = selected.length > 0 && mappedNames.every(Boolean) && new Set(mappedNames).size === mappedNames.length;
-  const attemptsReviewed = selected.every((label) => !/^\d+-\d+$/.test(label) || !!attempts[label]);
+  useEffect(() => { let current = true; if (incomingFile) void Promise.resolve().then(() => { if (current) return choose(incomingFile); }); return () => { current = false; }; }, [incomingFile]);
+  const nameCounts = new Map<string, number>(); for (const group of groups) { const name = names[group.label]; if (name && !group.reason) { const key = name.normalize("NFKC").toLocaleLowerCase(); nameCounts.set(key, (nameCounts.get(key) ?? 0) + 1); } }
+  const blocked = (group: RecoverableGroup) => group.reason ?? (!names[group.label] ? "student identity could not be resolved" : nameCounts.get(names[group.label].normalize("NFKC").toLocaleLowerCase()) !== 1 ? "student identity is ambiguous" : undefined);
+  const eligible = groups.filter((group) => !blocked(group));
   const grade = async () => {
-    if (!file || !confirmed || !mapped || !attemptsReviewed || busy || uncertain) return;
-    const token = generation.current; setBusy(true); setError("");
+    if (!file || !selected.length || busy || uncertain || selected.some((label) => !eligible.some((group) => group.label === label))) return;
+    const token = generation.current; let dispatched = 0; setBusy(true); setError(""); setCompleted(0);
     try {
-      const result = await buildRecoverableZip(file, selected, true); if (token !== generation.current) return;
-      if (!result.ok) { setError(`Partial archive could not be prepared: ${result.reason}.`); return; }
-      setUncertain(true);
-      const refusal = await onSubmit(file, new File([result.archive], "reviewed-partial-submissions.zip", { type: "application/zip" }), result.selected, result.omitted, mapping, { current: () => token === generation.current, onProgress: (progress) => { if (token === generation.current) { hashing.current = !!progress; setHashProgress(progress); } } });
-      if (token !== generation.current) return;
-      if (refusal) { if (hashing.current) setUncertain(false); setError(refusal); } else { setUncertain(false); close(); }
-    } catch { if (token === generation.current) setError("The handoff could not be confirmed. Check results before retrying."); }
-    finally { if (token === generation.current) { hashing.current = false; setHashProgress(null); setBusy(false); } }
+      await submitBoundedGroups(selected, async (labels) => {
+        const result = await buildRecoverableZip(file, labels, true); if (token !== generation.current) throw new Error("Archive review was closed.");
+        return result.ok ? { ok: true, value: result } : result;
+      }, async (result, count) => {
+        setUncertain(true);
+        const refusal = await onSubmit(file, new File([result.archive], "reviewed-partial-submissions.zip", { type: "application/zip" }), result.selected, result.omitted, names, { current: () => token === generation.current, onProgress: (value) => { if (token === generation.current) { hashing.current = !!value; setProgress(value); } } });
+        if (token !== generation.current) throw new Error("The session changed; check results before retrying.");
+        if (refusal) { if (hashing.current && dispatched === 0) setUncertain(false); throw new Error(refusal); }
+        dispatched += count; setCompleted(dispatched); setUncertain(false);
+      });
+      if (token === generation.current) close();
+    }
+    catch (failure) { if (token === generation.current) { if (dispatched > 0) setUncertain(true); setError(`${failure instanceof Error ? failure.message : "The handoff could not be confirmed."}${dispatched ? ` ${dispatched} groups were already submitted; check results before retrying.` : ""}`); } }
+    finally { if (token === generation.current) { hashing.current = false; setProgress(null); setBusy(false); } }
   };
-  const build = async () => {
-    if (!file || !confirmed || !selected.length || !attemptsReviewed || busy) return;
-    const token = generation.current; setBusy(true); setError(""); setManifest(null);
-    try {
-      const result = await buildRecoverableZip(file, selected); if (token !== generation.current) return;
-      if (!result.ok) { setError(`Partial archive could not be built: ${result.reason}.`); return; }
-      const describe = (group: RecoverableGroup) => ({ label: group.label, sourceField: group.sourceIdentifier, files: group.members.map((member) => member.path), reason: group.reason ?? null });
-      setManifest(JSON.stringify({ source: { name: file.name, bytes: file.size, lastModified: file.lastModified }, partialArchive: "reviewed-partial-submissions.zip", ownershipVerifiedBySoftware: false, instructorConfirmedOwnership: true, selected: result.selected.map(describe), omitted: result.omitted.map(describe), note: "Filename metadata does not prove ownership; this manifest is not cryptographically bound to the archive." }, null, 2));
-      download(result.archive, "reviewed-partial-submissions.zip");
-    } catch { if (token === generation.current) setError("Partial archive could not be downloaded. Try again."); }
-    finally { if (token === generation.current) setBusy(false); }
-  };
-  const download = (blob: Blob, name: string) => { const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = name; try { link.click(); } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); } };
   return <>
     <Button onClick={() => setOpen(true)}>Review oversized ZIP</Button>
     <Dialog open={open} onClose={() => { if (!busy) close(); }} fullWidth maxWidth="md" aria-labelledby="large-zip-title">
       <DialogTitle id="large-zip-title">Review oversized ZIP</DialogTitle>
       <DialogContent><Stack spacing={2}>
-        <Alert severity="warning">Names and numeric fields come from filenames; they do not prove ownership. Check every listed file against the original class roster. Groups not selected are omitted. A record of names, files and omissions is saved in this browser before grading. Overlap checks cover only byte-identical source archives in this browser, not repackaged archives or other browsers. The review download contains a marker and cannot be graded directly.</Alert>
+        <Alert severity="info">Names come from the LMS export and filenames. Files with the same LMS group ID are graded together, including files with different submission times. Groups with unresolved identities or unsupported files are held; omitted groups are recorded before submission.</Alert>
         <Button component="label" variant="outlined" disabled={busy}>Choose ZIP<input hidden type="file" accept=".zip,application/zip" onChange={(event) => void choose(event.target.files?.[0])} /></Button>
         {file && <Typography>{file.name}</Typography>}
-        {busy && <Typography role="status">{hashProgress ? `Checking ${hashProgress.phase === "source" ? "original archive" : "selected files"}: ${hashProgress.written} of ${hashProgress.total} bytes` : "Reviewing archive..."}</Typography>}
-        {hashProgress && <LinearProgress variant={hashProgress.total ? "determinate" : "indeterminate"} value={hashProgress.total ? (hashProgress.written / hashProgress.total) * 100 : undefined} aria-label="Archive verification progress" />}
-        {error && <Alert severity="error">{error}</Alert>}
-        {uncertain && <Alert severity="warning">Submission may have started. Check the results before attempting another submission.</Alert>}
-        {groups.map((group) => <Stack key={group.label} spacing={0.5}>
-          <FormControlLabel control={<Checkbox checked={selected.includes(group.label)} disabled={busy || !!group.reason} onChange={(_, checked) => { setSelected((previous) => checked ? [...previous, group.label] : previous.filter((label) => label !== group.label)); setAttempts((previous) => ({ ...previous, [group.label]: false })); setConfirmed(false); setManifest(null); }} />} label={`${group.label} (source field ${group.sourceIdentifier})${group.reason ? ` — excluded: ${group.reason}` : ""}`} />
-          <Typography variant="body2">{group.members.map((member) => member.path).join(", ")}</Typography>
-          {selected.includes(group.label) && /^\d+-\d+$/.test(group.label) && <FormControlLabel control={<Checkbox disabled={busy} checked={!!attempts[group.label]} onChange={(_, checked) => { setAttempts((previous) => ({ ...previous, [group.label]: checked })); setConfirmed(false); }} />} label="I checked the original submission and confirmed these files belong to the same attempt. Matching timestamps alone do not prove this." />}
-          {selected.includes(group.label) && <TextField label={`Student for ${group.label}`} value={mapping[group.label] ?? ""} onChange={(event) => { setMapping((previous) => ({ ...previous, [group.label]: event.target.value })); setConfirmed(false); }} helperText="Enter the actual student name after checking all files against the source roster. Each selected group must have a distinct name." disabled={busy} />}
-        </Stack>)}
-        {!!groups.length && <FormControlLabel control={<Checkbox checked={confirmed} disabled={busy || !selected.length} onChange={(_, checked) => setConfirmed(checked)} />} label="I checked ownership and all files in the selected groups against the original records." />}
-        {manifest && <Alert severity="warning">Download the review manifest separately and keep it with the partial archive. The grader does not automatically read it; it records omitted groups and is not cryptographically bound to the ZIP. <Button onClick={() => { try { download(new Blob([manifest], { type: "application/json" }), "partial-submissions-review.json"); } catch { setError("Manifest download failed. Try again."); } }}>Download review manifest</Button></Alert>}
+        {busy && <Typography role="status">{progress ? `Checking ${progress.phase === "source" ? "original archive" : "selected files"}: ${progress.written} of ${progress.total} bytes` : `Preparing submissions${completed ? `; ${completed} groups submitted` : ""}...`}</Typography>}
+        {progress && <LinearProgress variant={progress.total ? "determinate" : "indeterminate"} value={progress.total ? progress.written / progress.total * 100 : undefined} aria-label="Archive verification progress" />}
+        {error && <Alert severity="error">{error}</Alert>}{uncertain && <Alert severity="warning">Submission may have started. Check results before retrying.</Alert>}
+        {!!groups.length && <FormControlLabel control={<Checkbox disabled={busy || !eligible.length} checked={eligible.length > 0 && selected.length === eligible.length} indeterminate={selected.length > 0 && selected.length < eligible.length} onChange={(_, checked) => setSelected(checked ? eligible.map((group) => group.label) : [])} />} label={`Select all eligible (${eligible.length})`} />}
+        <Stack spacing={0} sx={{ maxHeight: 320, overflowY: "auto" }}>{groups.map((group) => <Stack key={group.label} spacing={0.5}><FormControlLabel control={<Checkbox checked={selected.includes(group.label)} disabled={busy || !!blocked(group)} onChange={(_, checked) => setSelected((previous) => checked ? [...previous, group.label] : previous.filter((label) => label !== group.label))} />} label={`${names[group.label] ?? group.label}${blocked(group) ? ` — held: ${blocked(group)}` : ""}`} /><Tooltip title={group.members.map((member) => member.path).join(", ")}><Typography variant="body2" tabIndex={0}>{group.members.length} {group.members.length === 1 ? "file" : "files"}</Typography></Tooltip></Stack>)}</Stack>
       </Stack></DialogContent>
-      <DialogActions><Button disabled={busy && !hashProgress} onClick={() => { if (busy && !hashing.current) return; if (hashing.current) setUncertain(false); close(); }}>{hashProgress ? "Cancel verification" : "Close"}</Button><Button disabled={busy || !confirmed || !mapped || !attemptsReviewed} onClick={() => void build()}>Download review copy</Button><Button variant="contained" disabled={busy || uncertain || !confirmed || !mapped || !attemptsReviewed} onClick={() => void grade()}>Grade selected groups</Button></DialogActions>
+      <DialogActions><Button disabled={busy && !progress} onClick={() => { if (busy && !hashing.current) return; if (hashing.current) setUncertain(false); close(); }}>{progress ? "Cancel verification" : "Close"}</Button><Button variant="contained" disabled={busy || uncertain || !selected.length} onClick={() => void grade()}>Grade selected ({selected.length})</Button></DialogActions>
     </Dialog>
   </>;
 }

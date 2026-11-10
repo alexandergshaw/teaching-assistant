@@ -17,21 +17,13 @@ describe("recoverable large ZIP subset", () => {
     const source = new Blob([new Uint8Array(await zip.generateAsync({ type: "uint8array" })).buffer]);
     expect(await planRecoverableZip(source)).toEqual({ ok: false, reason: "ambiguous member identity" });
   });
-  it("holds mixed submission times and keeps same-time files together", async () => {
-    const zip = new JSZip(); zip.file("100-200 - Last-First-Nov 5, 2026 400 PM.cpp", "int a;"); zip.file("100-200 - Last-First-Nov 5, 2026 402 PM.txt", "x"); zip.file("300-400 - Last-First-Nov 5, 2026 400 PM.cpp", "int b;"); zip.file("300-400 - Last-First-Nov 5, 2026 400 PM.h", "int c;");
+  it("retains all files from one LMS group across different or unknown times", async () => {
+    const zip = new JSZip(); zip.file("100-200 - Last-First-Nov 5, 2026 400 PM.cpp", "int a;"); zip.file("100-200 - Last-First-Nov 5, 2026 402 PM.txt", "reflection"); zip.file("100-200 - unknown.h", "int b;");
     const bytes = await zip.generateAsync({ type: "uint8array" }); const source = new Blob([new Uint8Array(bytes).buffer]);
-    const plan = await planRecoverableZip(source); expect(plan.ok).toBe(true); if (!plan.ok) return;
-    expect(plan.groups.map((group) => group.reason)).toEqual(["multiple submission times", undefined]);
-    expect((await buildRecoverableZip(source, ["100-200"], true)).ok).toBe(false);
-    const mapping = Object.fromEntries(Object.keys(zip.files).map((path) => [path, path.startsWith("100-") ? "First" : "Second"]));
-    await expect(ingestZipEntries(new Uint8Array(bytes).buffer, { requireSupportedFiles: true, reviewedMapping: mapping })).rejects.toThrow(/submission times/i);
-  });
-  it("holds multiple files when any submission time is unknown", async () => {
-    for (const second of ["100-200 - other.cpp", "100-200 - Other-First-Nov 5, 2026 400 PM.cpp"]) {
-      const zip = new JSZip(); zip.file("100-200 - unknown.cpp", "int a;"); zip.file(second, "int b;"); const bytes = await zip.generateAsync({ type: "uint8array" });
-      const plan = await planRecoverableZip(new Blob([new Uint8Array(bytes).buffer])); expect(plan.ok).toBe(true); if (!plan.ok) return; expect(plan.groups[0].reason).toBe("multiple submission times");
-      await expect(ingestZipEntries(new Uint8Array(bytes).buffer, { requireSupportedFiles: true, reviewedMapping: Object.fromEntries(Object.keys(zip.files).map((path) => [path, "Student"])) })).rejects.toThrow(/submission times/i);
-    }
+    const plan = await planRecoverableZip(source); expect(plan.ok).toBe(true); if (!plan.ok) return; expect(plan.groups[0].reason).toBeUndefined();
+    const built = await buildRecoverableZip(source, ["100-200"], true); expect(built.ok).toBe(true); if (!built.ok) return;
+    const mapping = Object.fromEntries(Object.keys(zip.files).map((path) => [path, "Student"]));
+    const result = await ingestZipEntries(await built.archive.arrayBuffer(), { requireSupportedFiles: true, reviewedMapping: mapping }); expect(result.entries).toHaveLength(1); expect(result.entries[0].mergedFileCount).toBe(3); expect(result.entries[0].content).toContain("reflection");
   });
   it("passes Brightspace code, header and reflection together through reviewed extraction", async () => {
     const zip = new JSZip(); zip.file("100-200 - Main-First-Nov 5, 2026 400 PM.cpp", "int main() { return 0; }"); zip.file("100-200 - Vector-First-Nov 5, 2026 400 PM.hpp", "int value;"); zip.file("100-200 - Reflect-First-Nov 5, 2026 400 PM.txt", "Synthetic reflection.");

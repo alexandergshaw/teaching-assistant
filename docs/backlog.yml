@@ -3221,3 +3221,15 @@
   from: 'Independent review 2026-11-07 of uncommitted default-off grading-chat schedule drafts observed at HEAD 36fbc568; schedule SQL is documentation rather than an applied migration, and no deployed recurring trigger or closed-browser completion has been verified.'
   note: 'Owner: coordinator. This focuses scheduled execution; assignment session persistence and browser navigation remain tracked by CHAT-DURABLE-ASSIGNMENT-SESSIONS. Keep the scheduler disabled until registration, actual concurrency tests and owner/browser/provider verification pass. Text-only behavior does not establish video scheduling.'
   question: null
+- id: 'CHAT-BRIGHTSPACE-NESTED-PROJECT-INTAKE'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'grading-setup-interaction-cost'
+  title: 'Recover Brightspace submissions with nested source projects and reflections.'
+  owns: ['src/app/components/grading-chat/', 'src/app/actions/grading-chat-intake.ts', 'src/lib/grade/', 'src/lib/office-extract.ts']
+  verify: null
+  blocked_by: []
+  instrument: 'Exercise the supplied 282 MB Brightspace export and synthetic adversarial variants through review, explicit student mapping, bounded nested-project inventory, source and reflection extraction, excluded-artifact disclosure and grading. Preserve every relevant file and complete student group; never execute code or silently drop unknown files. Cover collisions, corrupted archives, zip bombs, unsupported and oversized files, cancellation, partial outcomes, retry, account changes and rendered keyboard/focus behavior.'
+  from: 'Owner supplied a Vector Sorting Brightspace download. Live oversized ZIP review rejected its numeric export naming. Aggregate metadata inspection found 39 outer files and 14 nested projects, including large build artifacts; no submission text was printed or executed.'
+  note: 'Owner: coordinator. Work in progress: strict numeric export inventory and reviewed student grouping; nested-project recovery and artifact exclusion remain unimplemented and must not be treated as graded. Original archive must remain unchanged.'
+  question: null

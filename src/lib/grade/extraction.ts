@@ -50,7 +50,7 @@ import {
 import { chargeVideoCount, stageVideoMember, type StageVideoFn, type VideoStaging } from "./video-leaf";
 import { emptyVideoOutcomes, withAcceptedVideo, withFailedVideo, type VideoFailureClass, type VideoOutcomes } from "./video-failure";
 import { toPreviewContent, groupSubmissionsByStudent, assignUnclaimedLabel, parseSubmissionFileName } from "./utils";
-import { reviewedZipLookup } from "./reviewed-zip-mapping";
+import { isReviewedBrightspacePaths, reviewedZipLookup } from "./reviewed-zip-mapping";
 import { decideCollisionRefusal, describeCollisionRefusal } from "./collisionRefusal";
 import { classifySubmissionZip } from "./classify-submission-zip";
 import { looksLikeGithubUrl } from "../submission-repo";
@@ -372,7 +372,9 @@ export async function ingestZipEntries(
   // characterisation 28 pinned tests depend on). Strictly before the
   // filename inference below too, so a colliding zip never pays a model
   // call (design section 4.3 step 2 before step 3; instrument notes M4).
-  const collisionMessage = describeCollisionRefusal(decideCollisionRefusal(submissions, zipParents, options?.knownStudents), zipParents);
+  const reviewedLookup = options?.reviewedMapping ? reviewedZipLookup(submissions, options.reviewedMapping, zipParents) : undefined;
+  const reviewedBrightspace = !!reviewedLookup && isReviewedBrightspacePaths(Object.keys(submissions));
+  const collisionMessage = reviewedBrightspace ? null : describeCollisionRefusal(decideCollisionRefusal(submissions, zipParents, options?.knownStudents), zipParents);
   if (collisionMessage) {
     throw new Error(collisionMessage);
   }
@@ -389,7 +391,7 @@ export async function ingestZipEntries(
   let inferredLookup = options?.inferFileNamesWith && !options.reviewedMapping
     ? await inferFileNameConvention(Object.keys(submissions), options.inferFileNamesWith)
     : undefined;
-  if (options?.reviewedMapping) inferredLookup = reviewedZipLookup(submissions, options.reviewedMapping, zipParents);
+  if (reviewedLookup) inferredLookup = reviewedLookup;
   const entries: StudentSubmissionEntry[] = groupSubmissionsByStudent(submissions, inferredLookup, rawData, zipParents, videoStaging, documentVisuals);
   if (deferredLinks && deferredLinks.size > 0) {
     attachDeferredLinkUrls(entries, deferredLinks, inferredLookup, zipParents);

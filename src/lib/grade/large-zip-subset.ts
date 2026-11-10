@@ -1,22 +1,35 @@
+import { brightspaceTimestamp } from "./reviewed-zip-mapping";
 import { inspectLargeZipDirectory, type LargeZipMember } from "./recoverable-zip-directory";
 import { ZIP_MAX_ARCHIVE_RATIO, ZIP_MAX_CUMULATIVE_DECLARED_BYTES, ZIP_MAX_CUMULATIVE_ENTRIES, ZIP_MAX_MEMBER_DECLARED_BYTES, ZIP_MAX_MEMBER_RATIO, ZIP_MAX_VIDEO_MEMBERS, ZIP_RATIO_FLOOR_BYTES } from "@/lib/zip-caps";
 import { GRADING_ZIP_MAX_BYTES } from "./grading-zip-transport";
 import { inferStudentPrefix } from "./utils";
 
-type Reason = "nested archive" | "member size" | "unsupported type" | "compression ratio" | "group size";
+type Reason = "nested archive" | "member size" | "unsupported type" | "compression ratio" | "group size" | "unassigned index" | "multiple submission times";
 export interface RecoverableGroup { readonly label: string; readonly sourceIdentifier: string; readonly members: readonly LargeZipMember[]; readonly reason?: Reason }
 export type RecoverablePlan = { readonly ok: true; readonly groups: readonly RecoverableGroup[] } | { readonly ok: false; readonly reason: string };
-const supported = new Set(["txt", "md", "py", "ipynb", "csv", "pdf", "docx", "html", "mp4", "m4v", "mov", "webm"]);
+const supported = new Set(["txt", "md", "py", "ipynb", "csv", "pdf", "docx", "html", "mp4", "m4v", "mov", "webm", "c", "cc", "cpp", "cxx", "h", "hpp"]);
 const videos = new Set(["mp4", "m4v", "mov", "webm"]);
 const ext = (path: string) => path.split(".").pop()?.toLowerCase() ?? "";
 
-/** Conservative plan: only root-level Canvas-style names; no inferred groups. */
+/** Conservative plan: root-level Canvas or numeric Brightspace-style names only. */
 export async function planRecoverableZip(file: Blob): Promise<RecoverablePlan> {
   const inventory = await inspectLargeZipDirectory(file);
   if (!inventory.ok) return { ok: false, reason: inventory.reason };
-  const groups = new Map<string, { label: string; sourceIdentifier: string; members: LargeZipMember[] }>();
+  const groups = new Map<string, { label: string; sourceIdentifier: string; members: LargeZipMember[]; unassigned?: boolean }>();
   const identityByName = new Map<string, string>(), nameByIdentity = new Map<string, string>();
+  const brightspace = inventory.members.some((member) => /^\d+-\d+ - [^/]+$/.test(member.path));
   for (const member of inventory.members) {
+    if (brightspace && member.path.toLowerCase() === "index.html") { groups.set("unassigned:index", { label: "Unassigned index.html", sourceIdentifier: "unassigned", members: [member], unassigned: true }); continue; }
+    const d2l = brightspace ? /^(\d+)-(\d+) - ([^/]+)$/.exec(member.path) : null;
+    if (d2l) {
+      const label = `${d2l[1]}-${d2l[2]}`, key = `d2l:${label}`, downstream = inferStudentPrefix(member.path);
+      const previous = identityByName.get(downstream.key);
+      if (previous && previous !== key) return { ok: false, reason: "ambiguous member identity" };
+      identityByName.set(downstream.key, key);
+      const group = groups.get(key) ?? { label, sourceIdentifier: label, members: [] };
+      group.members.push(member); groups.set(key, group); continue;
+    }
+    if (brightspace) return { ok: false, reason: "unrecognized member identity" };
     const match = /^([^/]+?)_(\d+)_\d+_.+$/.exec(member.path);
     if (!match) return { ok: false, reason: "unrecognized member identity" };
     const key = match[1].normalize("NFKC").toLocaleLowerCase();
@@ -30,7 +43,9 @@ export async function planRecoverableZip(file: Blob): Promise<RecoverablePlan> {
   }
   return { ok: true, groups: [...groups.values()].map((group) => {
     let reason: Reason | undefined;
-    if (group.members.some((member) => member.nestedArchive)) reason = "nested archive";
+    if (group.unassigned) reason = "unassigned index";
+    else if (brightspace && group.members.length > 1 && (group.members.some((member) => !brightspaceTimestamp(member.path)) || new Set(group.members.map((member) => brightspaceTimestamp(member.path))).size > 1)) reason = "multiple submission times";
+    else if (group.members.some((member) => member.nestedArchive)) reason = "nested archive";
     else if (group.members.some((member) => member.declaredBytes > ZIP_MAX_MEMBER_DECLARED_BYTES || member.compressedBytes > ZIP_MAX_MEMBER_DECLARED_BYTES)) reason = "member size";
     else if (group.members.some((member) => !supported.has(ext(member.path)))) reason = "unsupported type";
     else if (group.members.some((member) => member.declaredBytes >= ZIP_RATIO_FLOOR_BYTES && (!member.compressedBytes || member.declaredBytes / member.compressedBytes > ZIP_MAX_MEMBER_RATIO))) reason = "compression ratio";

@@ -156,6 +156,30 @@ failure mode may legitimately carry none, but that absence is STATED and
 justified in the criteria, never assumed. A new behaviour shipped with no
 diagnostic rep is an unmet criterion, the same as a missing test.
 
+**Target-level diagnostics and exports.** When a feature reports a collection of
+individual targets, acceptance criteria and independent verification must name:
+
+- `inventory`: the authoritative target inventory and how it is reconciled with
+  what the user can inspect or export, including targets never discovered.
+- `lifecycle`: each target identity and the states and actionable reasons to
+  report, including active, failed, stopped and not-attempted cases.
+- `completeness`: how incomplete discovery, pagination limits, errors and
+  concurrent changes are disclosed; do not claim a complete snapshot without one.
+- `privacy`: which identities and details may appear in ordinary logs versus an
+  explicit export, and how sensitive content and credentials are excluded.
+- `exportRoundTrip`: an actual export test covering multiple targets and distinct
+  states and reasons, plus links and the downloaded format where applicable.
+- `ownerIsolation`: tests for mismatched owner and account changes during an
+  in-flight request, including a return to the original account.
+
+Record each field as a nonempty string in a JSON evidence file, citing the
+source and test command or explaining a justified inapplicable case. Run
+`npm run diagnostics:evidence -- path/to/evidence.json` before independent
+review. This is an explicitly invoked presence check only: it cannot establish
+that the citations are true, that tests exercise real behavior, or that the
+check was run. The reviewer must inspect evidence and execute relevant tests.
+A gap remains a delivery gap; an incomplete report must say so.
+
 **Design seats, in DEPENDENCY WAVES - never all at once.** Wave 1 is structure
 and state (architect + reuse survey, data and storage) plus anything that only
 reads and reports (baseline, external-facts research). Wave 2 is constraints

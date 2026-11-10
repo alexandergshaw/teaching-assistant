@@ -1,3 +1,15 @@
+- id: 'REPO-GRADES-SHARED-GRID-ALIGNMENT'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'repo-grader-workflow'
+  title: 'Align every Repo Grades table cell, column header and row header to the same grid.'
+  owns: ['src/app/components/repo-grades/']
+  verify: null
+  blocked_by: []
+  instrument: 'Verify header and body track alignment for variable column counts, labels, horizontal scrolling, sticky headers and row headers, resizing, keyboard focus and narrow viewports. Use rendered browser evidence as well as focused regression tests.'
+  from: 'Owner request in this chat: every cell, column header and row header in the Repo Grades table must adhere to the same grid layout.'
+  note: 'Implementation and independent layout audit started in parallel. Preserve existing grading and editing interactions.'
+  question: null
 - id: 'PRESENTATIONS-PIPELINE-TEMPLATES-AUDIT'
   state: 'actionable'
   kind: 'bug'

@@ -1,3 +1,15 @@
+- id: 'CHAT-RESULT-EDIT-SESSION-ISOLATION'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'grading-setup-interaction-cost'
+  title: 'Keep Chat grading feedback and score edits scoped to the correct account and session.'
+  owns: ['src/app/components/grading-chat/', 'src/app/components/grading-results/', 'src/app/components/GradingResults.tsx']
+  verify: null
+  blocked_by: []
+  instrument: 'Verify two independently mounted browser tabs, new sessions, account changes and same-named students cannot read each other''s stored grade or feedback edits. Preserve edits and explicit accepted regrades within the same session. Exercise failed-to-successful retry with unchanged system feedback and separately with instructor edits, and verify rendered results match current producer outcomes. Do not use legacy unscoped feedback for a fresh Chat session. Verify keyboard, focus and current browser behavior.'
+  from: 'Live test showed a successful Chat diagnostic alongside prior failure text for the same label; source review identified shared grading-chat-0 edit keys across fresh mounts.'
+  note: 'Owner: coordinator. A live same-label retest showed old failure feedback on a newly graded result, while a new label produced the current result. The isolated candidate scopes new Chat edits by mount, account and session, excludes legacy fallback, and remounts Chat on account changes. Existing edits are not deleted. Same-session retry can retain stale generated failure feedback, and name-keyed edits can collide for duplicate or changed sources: implement recoverable edits and stable source identity before reconciling. Independent review and rendered account-transition and retry verification remain open.'
+  question: null
 - id: 'CHAT-LENGTH-DEDUCTION-OFF-IGNORED'
   state: 'actionable'
   kind: 'bug'

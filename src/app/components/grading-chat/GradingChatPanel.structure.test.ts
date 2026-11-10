@@ -13,6 +13,11 @@ const PANEL = "src/app/components/grading-chat/GradingChatPanel.tsx";
 const COMPOSER = "src/app/components/grading-chat/ChatComposer.tsx";
 
 describe("GradingChatPanel - empty results", () => {
+  it("remounts the chat on an account switch and fences outstanding work at unmount", () => {
+    const source = read(PANEL);
+    expect(source).toContain('<GradingChatPanelForAccount key={user?.id ?? "signed-out"}');
+    expect(source).toContain('useLayoutEffect(() => () => resetOnUnmount.current(), [])');
+  });
   it("omits the introductory block while retaining active results", () => {
     const source = read(PANEL);
     expect(source).not.toContain("This session is not saved");
@@ -163,9 +168,9 @@ describe("GradingChatPanel - W2 O2: provenance components are imported AND rende
 });
 
 describe("GradingChatPanel - W2 O4 half 2: the edits key is session-scoped", () => {
-  it("feeds editsSurface from driver.runKey, not a constant", () => {
+  it("scopes edits to a mounted instance, account and session", () => {
     const slice = resultsMountSlice(withoutLineComments(read(PANEL)));
-    expect(slice).toMatch(/editsSurface=\{\s*driver\.runKey\s*\}/);
+    expect(slice).toMatch(/editsSurface=\{\s*chatEditScope\(editInstance,\s*user\?\.id,\s*driver\.sessionId\)\s*\}/);
     expect(slice).not.toMatch(/editsSurface="grading-chat"/);
   });
 });
@@ -336,7 +341,8 @@ describe("GradingChatPanel - LMS-META-OVERRIDE-OFFER wiring (reachability pins)"
   it("the offer is computed only in ensureSession, which the Canvas URL submit reaches", () => {
     const source = withoutLineComments(read(PANEL));
     expect(source.split("computeOverrideOffer(").length - 1).toBe(1);
-    expect(source).toMatch(/ensureSession\(url,\s*undefined,\s*\(\)\s*=>\s*dropSessionEpoch\.current === epoch\)/);
+    expect(source).toMatch(/current\s*=\s*\(\)\s*=>\s*dropSessionEpoch\.current === epoch\s*&&\s*zipReview\.owns\(account, token\)/);
+    expect(source).toMatch(/ensureSession\(url,\s*undefined,\s*current\)/);
   });
 });
 
@@ -491,9 +497,9 @@ describe("GradingChatPanel - composite W2: tray wiring", () => {
     const start = source.indexOf("const handleSubmitComposite");
     expect(start).toBeGreaterThan(-1);
     const body = source.slice(start, source.indexOf("const busy", start));
-    expect(body).toContain("await ensureSession()");
+    expect(body).toContain("await ensureSession(undefined, undefined, current)");
     expect(body).toMatch(/driver\.submit\(\{\s*kind:\s*"composite",\s*student,\s*parts\s*\}\)/);
-    expect(body.indexOf("ensureSession()")).toBeLessThan(body.indexOf("driver.submit("));
+    expect(body.indexOf("ensureSession(undefined, undefined, current)")).toBeLessThan(body.indexOf("driver.submit("));
   });
 });
 

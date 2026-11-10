@@ -15,7 +15,7 @@ import type { ReviewedPastedDiscussion } from "@/lib/grade/reviewed-pasted-discu
 // RecordingTab in page.tsx (P2) - this component itself does not know or care
 // about visibility; the wrapper's display:none/undefined toggle is what
 // preserves the in-flight run across navigation (architecture section 7).
-import { useEffect, useRef, useState, type DragEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from "react";
 import { fetchCanvasMetaAction } from "../../actions/grading";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
@@ -51,6 +51,8 @@ import { recordGradingDiagnosticEntry } from "../grading/gradingDiagnosticLog";
 import { submitFilesSequentially } from "./chatFileBatch";
 import { useZipDuplicateReview } from "./useZipDuplicateReview";
 import { pastedSubmissionUrl } from "@/lib/grade/pasted-submission-url";
+import { chatEditScope, newChatEditInstance } from "./chatEditScope";
+import { ChatEditRecovery } from "./ChatEditRecovery";
 import type { CompositePartInput } from "./chatSubmissionIntake";
 import { deriveChatScope, describeChatSetupOrigin, loadChatSetupMemory, saveChatSetupMemory } from "./chatSetupMemory";
 import type { PreviewFile } from "../FilePreviewModal";
@@ -241,7 +243,14 @@ function GradingProgress({ status }: { status: RunStatus | null }) {
   );
 }
 
-export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingChatPanelProps) {
+/** A committed account switch remounts the entire chat, including its queued work. */
+export function GradingChatPanel(props: GradingChatPanelProps) {
+  const { user } = useSupabase();
+  return <GradingChatPanelForAccount key={user?.id ?? "signed-out"} {...props} />;
+}
+
+function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: GradingChatPanelProps) {
+  const [editInstance] = useState(newChatEditInstance);
   const panelRef = useRef<HTMLDivElement>(null);
   const sessionActionsRef = useRef<HTMLDivElement>(null);
   const setupRef = useRef<HTMLDivElement>(null);
@@ -287,6 +296,9 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const driver = useContinuousGradingRun({ provider: "gemini", commentSplit: true });
   const { supabase, user } = useSupabase();
   const zipReview = useZipDuplicateReview(user?.id);
+  const resetOnUnmount = useRef(driver.reset);
+  useLayoutEffect(() => { resetOnUnmount.current = driver.reset; }, [driver.reset]);
+  useLayoutEffect(() => () => resetOnUnmount.current(), []);
 
   // Restore the stored harshness after mount (a state initializer would
   // mismatch the server render); setState only after an await.
@@ -903,6 +915,8 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
 
       {setupNote && <p role="status" className={styles.ghMeta}>{setupNote}</p>}
 
+      <ChatEditRecovery account={user?.id} />
+
       {hasRows && driver.run && (
         <div className={chatStyles.stream}>
         {driver.run && <RubricProvenance run={driver.run} />}
@@ -913,7 +927,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           getVersionedResult={driver.getVersionedResult}
           canvasUrl={driver.canvasUrl}
           runKey={driver.runKey}
-          editsSurface={driver.runKey}
+          editsSurface={chatEditScope(editInstance, user?.id, driver.sessionId)}
           assignmentName=""
           copiedKey={copiedKey}
           onCopy={onCopy}

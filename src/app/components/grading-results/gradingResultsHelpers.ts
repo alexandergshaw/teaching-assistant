@@ -668,7 +668,7 @@ export function loadGradingResultsEdits(canvasUrl: string, run: GradingRun, surf
     // stranded. Read-only: never re-written here, so once a surface saves its
     // own edit it stops reading this fallback (persistGradingResultsEdits
     // below always writes to the new scoped key).
-    if (raw === null && !canvasUrl) {
+    if (raw === null && !canvasUrl && !surface.startsWith("grading-chat-session-")) {
       return loadPersistedEdits(localStorage.getItem(LEGACY_EMPTY_CANVAS_URL_EDITS_KEY), run);
     }
     return loadPersistedEdits(raw, run);

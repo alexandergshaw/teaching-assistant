@@ -1,3 +1,15 @@
+- id: 'REPO-GRADING-INCOMPLETE-DIAGNOSTICS'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'repo-grader-workflow'
+  title: 'Expose causes and every repository link for incomplete grading runs.'
+  owns: ['src/app/components/repo-grades/', 'src/lib/', 'src/app/actions/']
+  verify: null
+  blocked_by: []
+  instrument: 'Exercise automatic background runs and sanitized diagnostic exports for discovered, blocked, incomplete, failed, unknown and completed targets; preserve repo name and link for each target regardless of status, report inventory truncation or unknown outcomes, and do not include credentials or student work. Verify timeout, interruption, concurrent updates and live export.'
+  from: 'Owner supplied session diagnostic exports and requested missing process logs with repository names and links regardless of status.'
+  note: 'The supplied export recorded incomplete background runs without per-target reasons or identities. An authenticated bounded all-target diagnostic export and process instrumentation are in progress; the existing export cannot retrospectively identify the missing repositories.'
+  question: null
 - id: 'REPO-GRADES-SHARED-GRID-ALIGNMENT'
   state: 'actionable'
   kind: 'bug'

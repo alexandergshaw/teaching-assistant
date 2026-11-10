@@ -13,6 +13,7 @@ import { SYLLABUS_UPLOAD_BUCKET, syllabusUploadStoragePath } from "@/lib/syllabu
 import { checkFileWireBudget, formatMB, maxFileBytesForWireBudget } from "@/lib/upload-budget";
 import { ZIP_MAX_CUMULATIVE_DECLARED_BYTES } from "@/lib/zip-caps";
 import { IMAGE_EXTENSIONS } from "./constants";
+import { raceWithTimeout } from "@/lib/bounded-race";
 
 /**
  * Whether the server-side streaming ingest (BW2, POST /api/grade-submission-zip)
@@ -155,8 +156,9 @@ export async function uploadGradingZip(
     const { error } = await storage
       .from(SYLLABUS_UPLOAD_BUCKET)
       .upload(storagePath, file, { contentType: file.type || "application/zip", upsert: false });
-    if (error) return { ok: false, message: `Could not upload "${file.name}" - try again.` };
+    if (error) { await raceWithTimeout(deleteGradingZipBestEffort(storage, storagePath), 2000); return { ok: false, message: `Could not upload "${file.name}" - try again.` }; }
   } catch {
+    await raceWithTimeout(deleteGradingZipBestEffort(storage, storagePath), 2000);
     return { ok: false, message: `Could not upload "${file.name}" - try again.` };
   }
   return { ok: true, storagePath };

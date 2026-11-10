@@ -15,6 +15,7 @@ import {
 } from "./grading-zip-transport";
 import { isKnownUploadPath } from "@/lib/syllabus-upload-source";
 import { maxFileBytesForWireBudget } from "@/lib/upload-budget";
+import { zipUploadFallback } from "@/app/components/grading-chat/zipUploadFallback";
 
 const MB = 1024 * 1024;
 
@@ -41,10 +42,31 @@ describe("uploadGradingZip builds only a grading-uploads path", () => {
   });
 
   it("reports a worded failure and no path when the upload errors", async () => {
-    const { storage } = fakeStorage({ message: "boom" });
+    const { storage, remove } = fakeStorage({ message: "boom" });
     const file = new File(["zip"], "class.zip");
     const result = await uploadGradingZip(storage, "user-1", file, "abc-123");
     expect(result).toEqual({ ok: false, message: 'Could not upload "class.zip" - try again.' });
+    expect(remove).toHaveBeenCalledWith(["user-1/grading-uploads/abc-123.zip"]);
+  });
+  it("cleans up an ambiguous thrown upload before reporting failure", async () => {
+    const { storage, upload, remove } = fakeStorage(); upload.mockRejectedValueOnce(new Error("connection lost"));
+    expect(await uploadGradingZip(storage, "user-1", new File(["zip"], "class.zip"), "abc-123")).toMatchObject({ ok: false });
+    expect(remove).toHaveBeenCalledWith(["user-1/grading-uploads/abc-123.zip"]);
+  });
+  it("bounds stalled cleanup and rechecks the session before fallback", async () => {
+    vi.useFakeTimers();
+    try {
+      const { storage, remove } = fakeStorage({ message: "upload failed" });
+      remove.mockImplementation(() => new Promise(() => {}));
+      const body = vi.fn(async () => ({ kind: "accepted" as const, entryCount: 1 }));
+      let current = true;
+      const attempt = uploadGradingZip(storage, "user-1", new File(["zip"], "class.zip"), "abc-123").then((result) => result.ok ? null : zipUploadFallback(result.message, true, () => current, body));
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(await attempt).toEqual({ kind: "accepted", entryCount: 1 });
+      const stale = uploadGradingZip(storage, "user-1", new File(["zip"], "class.zip"), "abc-124").then((result) => result.ok ? null : zipUploadFallback(result.message, true, () => current, body));
+      current = false; await vi.advanceTimersByTimeAsync(2000);
+      expect(await stale).toMatchObject({ kind: "refused" }); expect(body).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
   });
 });
 

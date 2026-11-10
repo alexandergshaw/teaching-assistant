@@ -51,7 +51,7 @@ import {
 import { resolveSetupFill, type ResolveSetupFillResult } from "./chatSetupFill";
 import { applyOverride, computeOverrideOffer, countOverriddenFields, type OverrideDecision } from "./chatOverrideOffer";
 import { recordGradingDiagnosticEntry } from "../grading/gradingDiagnosticLog";
-import { submitFilesSequentially } from "./chatFileBatch";
+import { submitFilesSequentially } from "./chatFileBatch"; import { zipUploadFallback } from "./zipUploadFallback";
 import { useZipDuplicateReview } from "./useZipDuplicateReview";
 import { pastedSubmissionUrl } from "@/lib/grade/pasted-submission-url";
 import { chatEditScope, newChatEditInstance } from "./chatEditScope";
@@ -63,7 +63,7 @@ import { chatSeamNowMs, classifyChatSeamFailure, recordChatSeamSettled } from ".
 import { preflightUploadFile } from "@/lib/grade/zip-upload-preflight";
 import {
   chooseSingleFileTransport,
-  chooseZipTransport,
+  chooseZipTransport, GRADING_ZIP_STORAGE_INGEST_ENABLED,
   deleteGradingZipBestEffort,
   isZipFileName,
   uploadGradingZip,
@@ -537,14 +537,14 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
   // driver. If the ingest call rejects or throws, the temp object is removed
   // best-effort (R10); the server's own delete and the orphan sweep remain the
   // real guarantees.
-  const submitStoragedZip = async (file: File, current: () => boolean, reviewedZipMapping?: Readonly<Record<string, string>>): Promise<SubmitOutcome> => {
+  const submitStoragedZip = async (file: File, current: () => boolean, reviewedZipMapping?: Readonly<Record<string, string>>, fallbackBody = false): Promise<SubmitOutcome> => {
     if (!user) return { kind: "refused", reason: "You must be signed in to upload a zip." };
     if (current()) setZipPhase("uploading");
     try {
       const uploaded = await uploadGradingZip(supabase.storage, user.id, file);
       if (!uploaded.ok) {
         safeIntake(() => recordIntakeGate({ stage: "upload", file, transport: "storage", rawReason: uploaded.message }));
-        return { kind: "refused", reason: uploaded.message };
+        return zipUploadFallback(uploaded.message, fallbackBody, current, () => driver.submit({ kind: "file", file, reviewedZipMapping }));
       }
       if (current()) setZipPhase("preparing");
       try {
@@ -609,18 +609,18 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
       // LARGE-SINGLE-FILE W2: a non-zip office/text file over the body budget
       // takes the single-file Storage lane; small files stay on the body path.
       const isZip = isZipFileName(file.name);
-      const transport = isZip ? chooseZipTransport(file) : chooseSingleFileTransport(file);
+      const chosen = isZip ? chooseZipTransport(file) : chooseSingleFileTransport(file); const transport = isZip && VIDEO_GRADING_ENABLED && GRADING_ZIP_STORAGE_INGEST_ENABLED && chosen.kind === "body" ? { kind: "storage" as const } : chosen;
       if (transport.kind === "refused") {
         safeIntake(() => recordIntakeGate({ stage: "gate", file, transport: "refused", rawReason: transport.message }));
         return { kind: "refused", reason: transport.message };
       }
-      const preflight = transport.kind === "storage" ? { ok: true as const } : preflightUploadFile(file, "This file");
+      const preflight = chosen.kind === "body" ? preflightUploadFile(file, "This file") : { ok: true as const };
       if (!preflight.ok) {
         safeIntake(() => recordIntakeGate({ stage: "gate", file, transport: "body", rawReason: preflight.message }));
         return { kind: "refused", reason: preflight.message };
       }
       if (!safeCurrent()) return { kind: "refused", reason: "File intake was canceled." };
-      const submit = () => transport.kind === "storage" ? (isZip ? submitStoragedZip(file, safeCurrent, reviewedZipMapping) : submitStoragedSingleFile(file, fileLabel, safeCurrent)) : driver.submit({ kind: "file", file, label: fileLabel, reviewedZipMapping });
+      const submit = () => transport.kind === "storage" ? (isZip ? submitStoragedZip(file, safeCurrent, reviewedZipMapping, chosen.kind === "body") : submitStoragedSingleFile(file, fileLabel, safeCurrent)) : driver.submit({ kind: "file", file, label: fileLabel, reviewedZipMapping });
       try { const outcome = await submit(); if (isZip && zipReview.owns(account, accountToken) && outcome.kind !== "refused") zipReview.remember([file]); return outcome; }
       catch (error) { if (isZip && zipReview.owns(account, accountToken)) zipReview.remember([file]); throw error; }
     });

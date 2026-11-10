@@ -24,6 +24,8 @@ import {
   VIDEO_PENDING_MESSAGE,
   VIDEO_UNSUPPORTED_FORMAT_MESSAGE,
   assertNeverUploadKind,
+  isVideoFile,
+  isVideoName,
 } from "@/lib/grade/video-grading";
 import { VIDEO_HEAD_BYTES, sniffVideoContainer } from "@/lib/grade/video-magic";
 import { extractCanvasEntries, ingestZipEntries } from "@/lib/grade/extraction";
@@ -244,7 +246,8 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
         // before any ticket exists - caught below, surfaced verbatim (AC-9).
         // ingestZipEntries is called directly (not extractStudentEntries) so
         // the zip's class-vs-single classification is not discarded.
-        const ingested = await ingestZipEntries(await file.arrayBuffer(), { inferFileNamesWith: provider, requireSupportedFiles: true, deferLinks: data.deferArchiveLinks, reviewedMapping: data.reviewedMapping });
+        const ingested = await ingestZipEntries(await file.arrayBuffer(), { inferFileNamesWith: provider, videoEnabled: true, requireSupportedFiles: true, deferLinks: data.deferArchiveLinks, reviewedMapping: data.reviewedMapping });
+        if (ingested.entries.some((entry) => entry.submittedFiles.some((submitted) => (isVideoName(submitted.name) || isVideoName(`file.${submitted.extension}`) || isVideoFile(submitted)) && !submitted.videoRef))) return { kind: "refused", reason: "A video in this ZIP could not be prepared for grading. Upload the ZIP from the grading chat to process its video; nothing was queued.", refusalClass: "video-pending", videoFailure: "not supported here" };
         if (!data.deferArchiveLinks && ingested.entries.some((entry) => entry.linkFetch === "failed" || entry.linkFetch === "flagged")) return { kind: "refused", reason: "A linked submission could not be read completely. Check access or upload its contents directly.", refusalClass: "read-failed" };
         const unreadable = unreadableArchiveReason(ingested.failedSupportedFiles);
         if (unreadable) return { kind: "refused", reason: unreadable, refusalClass: "read-failed" };
@@ -322,7 +325,8 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
           // Own ArrayBuffer, not Node's pooled one; A44's collision refusal
           // throws from here and is surfaced verbatim by the catch below.
           const bytes = new Uint8Array(fetched.buffer).slice().buffer;
-          const ingested = await ingestZipEntries(bytes, { inferFileNamesWith: provider, requireSupportedFiles: true, deferLinks: data.deferArchiveLinks });
+          const ingested = await ingestZipEntries(bytes, { inferFileNamesWith: provider, videoEnabled: true, requireSupportedFiles: true, deferLinks: data.deferArchiveLinks });
+          if (ingested.entries.some((entry) => entry.submittedFiles.some((submitted) => (isVideoName(submitted.name) || isVideoName(`file.${submitted.extension}`) || isVideoFile(submitted)) && !submitted.videoRef))) return { kind: "refused", reason: "A video in this ZIP could not be prepared for grading. Download the ZIP and upload it from the grading chat; nothing was queued.", refusalClass: "video-pending", videoFailure: "not supported here" };
           if (!data.deferArchiveLinks && ingested.entries.some((entry) => entry.linkFetch === "failed" || entry.linkFetch === "flagged")) return { kind: "refused", reason: "A linked submission could not be read completely. Check access or upload its contents directly.", refusalClass: "read-failed" };
           const unreadable = unreadableArchiveReason(ingested.failedSupportedFiles);
           if (unreadable) return { kind: "refused", reason: unreadable, refusalClass: "read-failed" };

@@ -14,10 +14,12 @@ import { useContinuousGradingRun } from "./useContinuousGradingRun";
 import { createChatFileRolesController } from "./useChatFileRoles";
 import { submitFilesSequentially } from "./chatFileBatch";
 import { createDirectFileIntake } from "./chatDirectFileIntake";
+import { claimIntake, releaseIntake } from "./intakeFence";
 import { resolveSetupFill } from "./chatSetupFill";
 import { applyOverride, computeOverrideOffer, countOverriddenFields } from "./chatOverrideOffer";
 import { LENGTH_THRESHOLD_ERROR, parseLengthDeductionThreshold, recordLengthDeductionThresholdChange } from "./chatLengthDeduction";
 import { LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT } from "@/lib/grade/length-deduction-policy";
+import { pastedSubmissionUrl } from "@/lib/grade/pasted-submission-url";
 import { readSessionDiagnosticLogState, resetSessionDiagnosticLogForTests } from "@/lib/session-diagnostic-log";
 import type { GradeResult } from "@/lib/grade/types";
 import type { GradeRunItemRequestBody } from "../grading/incrementalRunPlan";
@@ -38,6 +40,43 @@ function setupCallback(driver: ReturnType<typeof useContinuousGradingRun>, instr
     sessionRefusalRef: { current: "refused" }, setSubmitError: vi.fn(), setInstructions: vi.fn(), setRubric: vi.fn(), setSetupNote: vi.fn() });
 }
 describe("actual role controller -> Panel setup/transport callbacks -> continuous driver", () => {
+  it("holds a whole-panel ZIP drop at shared review and fences a second drop", async () => {
+    let decide!: (value: boolean) => void;
+    const check = vi.fn((_files: readonly File[], _current: () => boolean, _unknown: boolean) => new Promise<boolean>((resolve) => { decide = resolve; }));
+    const submit = vi.fn(async () => ({ kind: "accepted", entryCount: 1 }));
+    const consume = callback("handleConfirmedFiles", { driver: { submit, pendingVideoCount: () => 0 }, zipReview: { check, capture: () => 0, owns: () => true, remember: vi.fn() }, submitFilesSequentially, submitLooseVideo: vi.fn(async () => null), user: { id: "owner" }, supabase: { storage: {} }, VIDEO_GRADING_ENABLED: false,
+      isZipFileName: (name: string) => name.endsWith(".zip"), chooseZipTransport: () => ({ kind: "body" }), chooseSingleFileTransport: () => ({ kind: "body" }), preflightUploadFile: () => ({ ok: true }),
+      safeIntake: (fn: () => void) => fn(), recordIntakeGate: vi.fn(), submitStoragedZip: vi.fn(), submitStoragedSingleFile: vi.fn(), sessionRefusalRef: { current: "refused" }, setSubmitError: vi.fn() });
+    const latch = { busy: false, generation: 0 }, error = vi.fn();
+    const drop = callback("handlePanelDrop", { setIsDragging: vi.fn(), sharedIntakeLatch: latch, claimIntake, releaseIntake, setSubmitError: error, handleSubmitFiles: (files: File[]) => consume(files, undefined, () => true) });
+    const zip = new File(["zip"], "class.zip"), event = { preventDefault: vi.fn(), dataTransfer: { files: [zip] } };
+    drop(event); await Promise.resolve(); drop(event); expect(check).toHaveBeenCalledTimes(1); expect(submit).not.toHaveBeenCalled(); expect(error).toHaveBeenCalled();
+    decide(true); await new Promise((resolve) => setTimeout(resolve, 0)); expect(submit).toHaveBeenCalledTimes(1);
+  });
+  it("does not dispatch a composite ZIP when its session changes during review", async () => {
+    let decide!: (value: boolean) => void; const epoch = { current: 0 }, submit = vi.fn(), setError = vi.fn();
+    const composite = callback("handleSubmitComposite", { withPreparing: (work: () => unknown) => work(), dropSessionEpoch: epoch, user: { id: "owner" }, zipReview: { check: () => new Promise<boolean>((resolve) => { decide = resolve; }), capture: () => 0, owns: () => true, remember: vi.fn() }, ensureSession: vi.fn(async () => true), driver: { submit }, sessionRefusalRef: { current: "refused" }, setSubmitError: setError });
+    const pending = composite("Student", [{ kind: "file", file: new File(["zip"], "class.zip") }]); epoch.current++; decide(true);
+    expect((await pending).kind).toBe("refused"); expect(submit).not.toHaveBeenCalled(); expect(setError).not.toHaveBeenCalled();
+  });
+  it("discloses unknown URL and LMS comparisons without blocking ordinary submissions", async () => {
+    const epoch = { current: 0 }, submit = vi.fn(async () => ({ kind: "accepted", entryCount: 1 })), rememberUnknown = vi.fn(), noteUnknown = vi.fn();
+    const route = callback("handleSubmitUrl", { withPreparing: (work: () => unknown) => work(), dropSessionEpoch: epoch, user: { id: "owner" }, zipReview: { noteUnknown, capture: () => 0, owns: () => true, rememberUnknown }, ensureSession: vi.fn(async () => true), driver: { submit }, sessionRefusalRef: { current: "refused" }, setSubmitError: vi.fn() });
+    expect((await route("https://canvas.example/courses/1/assignments/2")).kind).toBe("accepted");
+    expect(noteUnknown).toHaveBeenCalledTimes(1); expect(submit).toHaveBeenCalledTimes(1); expect(rememberUnknown).toHaveBeenCalledTimes(1);
+  });
+  it("discloses URL-only text inside a composite without blocking it", async () => {
+    const submit = vi.fn(async () => ({ kind: "accepted", entryCount: 1 })), epoch = { current: 0 }, check = vi.fn(async (_files: readonly File[], _current: () => boolean, _unknown: boolean) => true), noteUnknown = vi.fn();
+    const composite = callback("handleSubmitComposite", { withPreparing: (work: () => unknown) => work(), dropSessionEpoch: epoch, user: { id: "owner" }, zipReview: { check, noteUnknown, capture: () => 0, owns: () => true, remember: vi.fn(), rememberUnknown: vi.fn() }, pastedSubmissionUrl, ensureSession: vi.fn(async () => true), driver: { submit }, sessionRefusalRef: { current: "refused" }, setSubmitError: vi.fn() });
+    expect((await composite("Student", [{ kind: "text", content: "https://drive.google.com/file/d/abc/view" }])).kind).toBe("accepted");
+    expect(check.mock.calls[0][2]).toBe(false); expect(noteUnknown).toHaveBeenCalledTimes(1); expect(submit).toHaveBeenCalledTimes(1);
+  });
+  it("discloses a URL-only composer message and remembers it without blocking ordinary text", async () => {
+    const epoch = { current: 0 }, submit = vi.fn(async () => ({ kind: "accepted", entryCount: 1 })), noteUnknown = vi.fn(), rememberUnknown = vi.fn();
+    const route = callback("handleSubmitText", { withPreparing: (work: () => unknown) => work(), dropSessionEpoch: epoch, user: { id: "owner" }, zipReview: { noteUnknown, rememberUnknown, capture: () => 0, owns: () => true }, pastedSubmissionUrl, ensureSession: vi.fn(async () => true), driver: { submit }, setSubmitError: vi.fn() });
+    await route("An ordinary essay", "Student"); expect(submit).toHaveBeenCalledTimes(1); expect(noteUnknown).not.toHaveBeenCalled();
+    await route("https://drive.google.com/file/d/abc/view", "Student"); expect(submit).toHaveBeenCalledTimes(2); expect(noteUnknown).toHaveBeenCalledTimes(1); expect(rememberUnknown).toHaveBeenCalledTimes(1);
+  });
   it.each(["resolving", "ready", "preparing"])("Clear all and length toggle preserve visible/frozen policy during %s", async (mode) => {
     resetSessionDiagnosticLogForTests("2026-10-25T00:00:00Z");
     const ready = { kind: "ok", effectiveRubric: "RUBRIC", rubricFingerprint: "fixed", criteriaNames: [], rubricUsed: "provided" };
@@ -166,7 +205,7 @@ describe("actual role controller -> Panel setup/transport callbacks -> continuou
     h.begin(); const driver = useContinuousGradingRun({ provider: "gemini", dispatchItem: dispatch });
     const start = callback("ensureSession", { driver, sessionRefusalRef: { current: "refused" }, setSubmitError: vi.fn() });
     const video = vi.fn(async () => null), upload = vi.fn();
-    const consume = callback("handleConfirmedFiles", { driver, submitFilesSequentially, submitLooseVideo: video, user: { id: "owner" }, supabase: { storage: {} }, VIDEO_GRADING_ENABLED: false,
+    const consume = callback("handleConfirmedFiles", { driver, zipReview: { check: async () => true, capture: () => 0, owns: () => true, remember: vi.fn() }, submitFilesSequentially, submitLooseVideo: video, user: { id: "owner" }, supabase: { storage: {} }, VIDEO_GRADING_ENABLED: false,
       isZipFileName: (name: string) => name.endsWith(".zip"), chooseZipTransport: () => ({ kind: "body" }), chooseSingleFileTransport: () => ({ kind: "body" }), preflightUploadFile: () => ({ ok: true }),
       safeIntake: (fn: () => void) => fn(), recordIntakeGate: vi.fn(), submitStoragedZip: upload, submitStoragedSingleFile: upload, sessionRefusalRef: { current: "refused" }, setSubmitError: vi.fn() });
     const options = { harshness: "strict" as const, feedbackWordTarget: 80, applyNamingDeduction: false, applyLengthDeduction: true, lengthDeductionThresholdWords: 25 };
@@ -195,7 +234,7 @@ describe("actual role controller -> Panel setup/transport callbacks -> continuou
     let driver = useDriver(); const stage = vi.fn(), intake = createDirectFileIntake();
     const route = (instructions: string) => {
       const start = callback("ensureSession", { driver, sessionRefusalRef: { current: "refused" }, setSubmitError: vi.fn() });
-      const consume = callback("handleConfirmedFiles", { driver, submitFilesSequentially, submitLooseVideo: vi.fn(async () => null), user: { id: "owner" }, supabase: { storage: {} }, VIDEO_GRADING_ENABLED: false,
+      const consume = callback("handleConfirmedFiles", { driver, zipReview: { check: async () => true, capture: () => 0, owns: () => true, remember: vi.fn() }, submitFilesSequentially, submitLooseVideo: vi.fn(async () => null), user: { id: "owner" }, supabase: { storage: {} }, VIDEO_GRADING_ENABLED: false,
         isZipFileName: (name: string) => name.endsWith(".zip"), chooseZipTransport: () => ({ kind: "body" }), chooseSingleFileTransport: () => ({ kind: "body" }), preflightUploadFile: () => ({ ok: true }),
         safeIntake: (fn: () => void) => fn(), recordIntakeGate: vi.fn(), submitStoragedZip: vi.fn(), submitStoragedSingleFile: vi.fn(), sessionRefusalRef: { current: "refused" }, setSubmitError: vi.fn() });
       return callback("handleSubmitFiles", { directIntake: { current: intake }, preparing: false, driver, roleIntake: { isPending: () => false, stage }, includeSetupFiles: false,

@@ -49,6 +49,8 @@ import { resolveSetupFill, type ResolveSetupFillResult } from "./chatSetupFill";
 import { applyOverride, computeOverrideOffer, countOverriddenFields, type OverrideDecision } from "./chatOverrideOffer";
 import { recordGradingDiagnosticEntry } from "../grading/gradingDiagnosticLog";
 import { submitFilesSequentially } from "./chatFileBatch";
+import { useZipDuplicateReview } from "./useZipDuplicateReview";
+import { pastedSubmissionUrl } from "@/lib/grade/pasted-submission-url";
 import type { CompositePartInput } from "./chatSubmissionIntake";
 import { deriveChatScope, describeChatSetupOrigin, loadChatSetupMemory, saveChatSetupMemory } from "./chatSetupMemory";
 import type { PreviewFile } from "../FilePreviewModal";
@@ -284,6 +286,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
 
   const driver = useContinuousGradingRun({ provider: "gemini", commentSplit: true });
   const { supabase, user } = useSupabase();
+  const zipReview = useZipDuplicateReview(user?.id);
 
   // Restore the stored harshness after mount (a state initializer would
   // mismatch the server render); setState only after an await.
@@ -388,6 +391,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       return;
     }
     dropSessionEpoch.current += 1; setVisibleDropEpoch(dropSessionEpoch.current);
+    zipReview.cancel();
     resetIntake(sharedIntakeLatch);
     directIntake.current.cancel();
     setDirectPreparing(false);
@@ -503,9 +507,13 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
 
   const handleSubmitText = (content: string, label: string | undefined) =>
     withPreparing(async () => {
-      if (!(await ensureSession())) return;
-      const outcome = await driver.submit({ kind: "text", content, label });
-      setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
+      const epoch = dropSessionEpoch.current, account = user?.id, token = zipReview.capture(), current = () => dropSessionEpoch.current === epoch && zipReview.owns(account, token);
+      const hasUrl = !!pastedSubmissionUrl(content); if (hasUrl) zipReview.noteUnknown();
+      if (!(await ensureSession(undefined, undefined, current)) || !current()) return;
+      let outcome: SubmitOutcome;
+      try { outcome = await driver.submit({ kind: "text", content, label }); if (hasUrl && zipReview.owns(account, token) && outcome.kind !== "refused") zipReview.rememberUnknown(); }
+      catch (error) { if (hasUrl && zipReview.owns(account, token)) zipReview.rememberUnknown(); throw error; }
+      if (current()) setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
     });
   // Uploads a large zip straight to Storage, then hands the path to the
   // driver. If the ingest call rejects or throws, the temp object is removed
@@ -552,12 +560,14 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     }
   };
   const handleConfirmedFiles = async (files: File[], label: string | undefined, current: () => boolean): Promise<SubmitOutcome[]> => {
+    const account = user?.id, accountToken = zipReview.capture(), safeCurrent = () => current() && zipReview.owns(account, accountToken);
+    if (!(await zipReview.check(files, safeCurrent)) || !safeCurrent()) return files.map(() => ({ kind: "refused", reason: "ZIP review was deferred or the session changed. Nothing was submitted." }));
     // A label names ONE student's ONE submission: forwarded only for a
     // single-file pick; a multi-file batch falls back to the filenames.
     const fileLabel = files.length === 1 ? label : undefined;
     // The session is begun once for the whole batch, not once per file.
     const outcomes = await submitFilesSequentially<SubmitOutcome>(files, async (file) => {
-      if (!current()) return { kind: "refused", reason: "File intake was canceled." };
+      if (!safeCurrent()) return { kind: "refused", reason: "File intake was canceled." };
       // VIDEO-GRADING W4: a video is decided FIRST (the zip preflight's "split
       // the archive" wording is wrong for it) and goes straight to Storage; a
       // non-video returns null and takes the unchanged path below.
@@ -568,9 +578,9 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         storage: supabase.storage,
         pendingStaged: driver.pendingVideoCount(),
         enabled: VIDEO_GRADING_ENABLED,
-        ensureSession: async () => current(),
+        ensureSession: async () => safeCurrent(),
         sessionRefusal: () => sessionRefusalRef.current,
-        submit: (input) => current() ? driver.submit(input) : Promise.resolve({ kind: "refused", reason: "File intake was canceled." }),
+        submit: (input) => safeCurrent() ? driver.submit(input) : Promise.resolve({ kind: "refused", reason: "File intake was canceled." }),
       });
       if (videoOutcome !== null) return videoOutcome;
       // FIX-1 size pre-flight: an oversized file is refused here, with a
@@ -591,15 +601,16 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         safeIntake(() => recordIntakeGate({ stage: "gate", file, transport: "body", rawReason: preflight.message }));
         return { kind: "refused", reason: preflight.message };
       }
-      if (!current()) return { kind: "refused", reason: "File intake was canceled." };
-      if (transport.kind === "storage") return isZip ? submitStoragedZip(file, current) : submitStoragedSingleFile(file, fileLabel, current);
-      return driver.submit({ kind: "file", file, label: fileLabel });
+      if (!safeCurrent()) return { kind: "refused", reason: "File intake was canceled." };
+      const submit = () => transport.kind === "storage" ? (isZip ? submitStoragedZip(file, safeCurrent) : submitStoragedSingleFile(file, fileLabel, safeCurrent)) : driver.submit({ kind: "file", file, label: fileLabel });
+      try { const outcome = await submit(); if (isZip && zipReview.owns(account, accountToken) && outcome.kind !== "refused") zipReview.remember([file]); return outcome; }
+      catch (error) { if (isZip && zipReview.owns(account, accountToken)) zipReview.remember([file]); throw error; }
     });
     const reasons: string[] = [];
     outcomes.forEach((outcome, index) => {
       if (outcome.kind !== "accepted") reasons.push(`${files[index].name}: ${outcome.reason}`);
     });
-    if (current()) setSubmitError(reasons.length > 0 ? reasons.join(" ") : null);
+    if (safeCurrent()) setSubmitError(reasons.length > 0 ? reasons.join(" ") : null);
     return outcomes;
   };
   const handleSubmitFiles = (files: File[], label?: string) => {
@@ -616,19 +627,29 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
 
   const handleSubmitUrl = (url: string, label?: string) =>
     withPreparing(async () => {
-      const epoch = dropSessionEpoch.current;
-      if (!(await ensureSession(url, undefined, () => dropSessionEpoch.current === epoch))) return { kind: "refused" as const, reason: sessionRefusalRef.current ?? "Session setup was not completed." };
-      if (dropSessionEpoch.current !== epoch) return { kind: "refused" as const, reason: "The session changed before the submission was queued." };
-      const outcome = await driver.submit({ kind: "url", url, label });
-      if (dropSessionEpoch.current === epoch) setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
+      const epoch = dropSessionEpoch.current, account = user?.id, token = zipReview.capture(), current = () => dropSessionEpoch.current === epoch && zipReview.owns(account, token);
+      zipReview.noteUnknown();
+      if (!(await ensureSession(url, undefined, current))) return { kind: "refused" as const, reason: sessionRefusalRef.current ?? "Session setup was not completed." };
+      if (!current()) return { kind: "refused" as const, reason: "The session changed before the submission was queued." };
+      let outcome: SubmitOutcome;
+      try { outcome = await driver.submit({ kind: "url", url, label }); if (zipReview.owns(account, token) && outcome.kind !== "refused") zipReview.rememberUnknown(); }
+      catch (error) { if (zipReview.owns(account, token)) zipReview.rememberUnknown(); throw error; }
+      if (current()) setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
       return outcome;
     });
 
   const handleSubmitComposite = (student: string, parts: CompositePartInput[]) =>
     withPreparing(async () => {
-      if (!(await ensureSession())) return { kind: "refused" as const, reason: sessionRefusalRef.current ?? "Session setup was not completed." };
-      const outcome = await driver.submit({ kind: "composite", student, parts });
-      setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
+      const epoch = dropSessionEpoch.current, account = user?.id, accountToken = zipReview.capture(), current = () => dropSessionEpoch.current === epoch && zipReview.owns(account, accountToken);
+      const files = parts.flatMap((part) => part.kind === "file" ? [part.file] : []);
+      const hasUrl = parts.some((part) => part.kind === "url" || (part.kind === "text" && !!pastedSubmissionUrl(part.content)));
+      if (hasUrl) zipReview.noteUnknown();
+      if (!(await zipReview.check(files, current, hasUrl && files.some((file) => /\.zip$/i.test(file.name)))) || !current()) return { kind: "refused" as const, reason: "ZIP review was deferred or the session changed. Nothing was submitted." };
+      if (!(await ensureSession(undefined, undefined, current)) || !current()) return { kind: "refused" as const, reason: sessionRefusalRef.current ?? "Session setup was not completed." };
+      let outcome: SubmitOutcome;
+      try { outcome = await driver.submit({ kind: "composite", student, parts }); if (zipReview.owns(account, accountToken) && outcome.kind !== "refused") { zipReview.remember(files); if (hasUrl) zipReview.rememberUnknown(); } }
+      catch (error) { if (zipReview.owns(account, accountToken)) { zipReview.remember(files); if (hasUrl) zipReview.rememberUnknown(); } throw error; }
+      if (current()) setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
       return outcome;
     });
 
@@ -912,6 +933,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       )}
 
       <div className={chatStyles.auxiliary}>
+        {zipReview.view}
         {submitError && (
           <p role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
             {submitError}

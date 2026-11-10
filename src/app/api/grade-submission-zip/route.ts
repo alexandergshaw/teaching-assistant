@@ -7,6 +7,7 @@ import { readBoundedZipStream } from "@/lib/grade/bounded-zip-stream";
 import { normalizeProvider } from "@/lib/llm";
 import { raceWithTimeout } from "@/lib/bounded-race";
 import { ingestZipEntries } from "@/lib/grade/extraction";
+import { parseReviewedZipMapping } from "@/lib/grade/reviewed-zip-mapping";
 import { SYLLABUS_UPLOAD_BUCKET, isKnownUploadPath, withUploadedSyllabusFile } from "@/lib/syllabus-upload-source";
 import { GRADING_ZIP_MAX_BYTES } from "@/lib/grade/grading-zip-transport";
 import { buildIngestLines, encodeIngestLine } from "@/lib/grade/ndjson-ingest-parser";
@@ -133,6 +134,8 @@ export async function POST(req: NextRequest) {
   const body = (typeof rawBody === "object" && rawBody !== null ? rawBody : {}) as Record<string, unknown>;
   const storagePath = typeof body.storagePath === "string" ? body.storagePath : "";
   const provider = normalizeProvider(typeof body.provider === "string" ? body.provider : null);
+  const reviewedMapping = body.reviewedZipMapping === undefined ? undefined : parseReviewedZipMapping(body.reviewedZipMapping);
+  if (body.reviewedZipMapping !== undefined && !reviewedMapping) return NextResponse.json({ error: "The reviewed file mapping is invalid. Nothing was queued." }, { status: 400 });
 
   // SEGMENT BIND, before any Storage call: isKnownUploadPath (inside the
   // lifecycle) only checks membership in the SHARED segment union, so a
@@ -235,7 +238,7 @@ export async function POST(req: NextRequest) {
         try {
           const bytes = await blob.arrayBuffer();
           if (downloadAbort.signal.aborted) throw new Error(TIMED_OUT_MESSAGE);
-          return await ingestZipEntries(bytes, { inferFileNamesWith: provider, deferLinks: true, stageVideo, requireSupportedFiles: true });
+          return await ingestZipEntries(bytes, { inferFileNamesWith: provider, deferLinks: true, stageVideo, requireSupportedFiles: true, reviewedMapping: reviewedMapping ?? undefined });
         } catch (err) {
           ingestError = err;
           throw err;

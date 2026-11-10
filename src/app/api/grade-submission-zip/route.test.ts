@@ -127,6 +127,20 @@ beforeEach(() => {
 });
 
 describe("POST /api/grade-submission-zip", () => {
+  it("passes a reviewed mapping into ZIP extraction and refuses malformed mappings before storage", async () => {
+    const mapping = { "ada_1_2_work.txt": "ada" };
+    await readLines(await POST(jsonRequest({ storagePath: GOOD_PATH, reviewedZipMapping: mapping })));
+    expect(ingestZipEntriesMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ reviewedMapping: mapping }));
+    ingestZipEntriesMock.mockClear(); listMock.mockClear();
+    const response = await POST(jsonRequest({ storagePath: GOOD_PATH, reviewedZipMapping: { bad: 42 } }));
+    expect(response.status).toBe(400); expect(listMock).not.toHaveBeenCalled(); expect(ingestZipEntriesMock).not.toHaveBeenCalled();
+  });
+  it("emits no entries when reviewed mapping merges source groups", async () => {
+    ingestZipEntriesMock.mockRejectedValue(new Error("Reviewed student mapping would split or merge archive groups. Nothing was queued."));
+    const lines = await readLines(await POST(jsonRequest({ storagePath: GOOD_PATH, reviewedZipMapping: { "a_1_1_x.txt": "Student", "b_2_2_x.txt": "Student" } })));
+    expect(lines.some((line) => line.type === "entry")).toBe(false);
+    expect(JSON.stringify(lines)).toMatch(/split or merge/i);
+  });
   it("guard first: an unauthenticated POST is 401 and the body is never read, no Storage call", async () => {
     requireAppOwnerMock.mockRejectedValue(new Error("Not authorized"));
     const req = jsonRequest({ storagePath: GOOD_PATH });

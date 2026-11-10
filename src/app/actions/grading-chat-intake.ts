@@ -27,6 +27,7 @@ import {
 } from "@/lib/grade/video-grading";
 import { VIDEO_HEAD_BYTES, sniffVideoContainer } from "@/lib/grade/video-magic";
 import { extractCanvasEntries, ingestZipEntries } from "@/lib/grade/extraction";
+import { parseReviewedZipMapping } from "@/lib/grade/reviewed-zip-mapping";
 import { fetchGradableRepoContent, type GradableRepoContent } from "@/lib/grade/repo-content";
 import { parseSubmissionGithubUrl } from "@/lib/submission-repo";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
@@ -146,6 +147,12 @@ export async function prepareChatSubmissionAction(formData: FormData): Promise<I
   await requireAppOwner();
 
   const kind = (formData.get("kind") as string | null) ?? "";
+  const rawMapping = formData.get("reviewedZipMapping");
+  let reviewedMapping: Readonly<Record<string, string>> | undefined;
+  if (rawMapping !== null) {
+    try { reviewedMapping = typeof rawMapping === "string" && rawMapping.length <= 1_000_000 ? parseReviewedZipMapping(JSON.parse(rawMapping)) ?? undefined : undefined; } catch { /* Refuse malformed mapping below. */ }
+    if (!reviewedMapping || kind !== "file") return { kind: "refused", reason: "The reviewed file mapping is invalid. Nothing was queued.", refusalClass: "read-failed" };
+  }
   return resolveOnePart(kind, {
     provider: normalizeProvider(formData.get("provider") as string | null),
     content: (formData.get("content") as string | null) ?? "",
@@ -155,6 +162,7 @@ export async function prepareChatSubmissionAction(formData: FormData): Promise<I
     url: ((formData.get("url") as string | null) ?? "").trim(),
     labelled: (((formData.get("label") as string | null) ?? "").trim().length > 0),
     deferArchiveLinks: true,
+    reviewedMapping,
   });
 }
 
@@ -173,6 +181,7 @@ interface PartData {
   readonly labelled: boolean;
   /** Composite merges cannot preserve an unresolved per-part URL. */
   readonly deferArchiveLinks?: boolean;
+  readonly reviewedMapping?: Readonly<Record<string, string>>;
 }
 
 /** Module-private per-kind resolution shared by prepareChatSubmissionAction
@@ -199,6 +208,7 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
     }
 
     const uploadKind = classifyGradingUpload(file.name);
+    if (data.reviewedMapping && uploadKind !== "zip") return { kind: "refused", reason: "A reviewed mapping requires a ZIP archive. Nothing was queued.", refusalClass: "read-failed" };
     if (uploadKind === "unsupported") {
       return {
         kind: "refused",
@@ -234,7 +244,7 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
         // before any ticket exists - caught below, surfaced verbatim (AC-9).
         // ingestZipEntries is called directly (not extractStudentEntries) so
         // the zip's class-vs-single classification is not discarded.
-        const ingested = await ingestZipEntries(await file.arrayBuffer(), { inferFileNamesWith: provider, requireSupportedFiles: true, deferLinks: data.deferArchiveLinks });
+        const ingested = await ingestZipEntries(await file.arrayBuffer(), { inferFileNamesWith: provider, requireSupportedFiles: true, deferLinks: data.deferArchiveLinks, reviewedMapping: data.reviewedMapping });
         if (!data.deferArchiveLinks && ingested.entries.some((entry) => entry.linkFetch === "failed" || entry.linkFetch === "flagged")) return { kind: "refused", reason: "A linked submission could not be read completely. Check access or upload its contents directly.", refusalClass: "read-failed" };
         const unreadable = unreadableArchiveReason(ingested.failedSupportedFiles);
         if (unreadable) return { kind: "refused", reason: unreadable, refusalClass: "read-failed" };

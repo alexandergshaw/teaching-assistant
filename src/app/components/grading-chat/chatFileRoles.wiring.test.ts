@@ -15,6 +15,8 @@ import { createChatFileRolesController } from "./useChatFileRoles";
 import { submitFilesSequentially } from "./chatFileBatch";
 import { createDirectFileIntake } from "./chatDirectFileIntake";
 import { claimIntake, releaseIntake } from "./intakeFence";
+import { createPartialHandoffHandler } from "./partialHandoff";
+import { webcrypto } from "node:crypto";
 import { resolveSetupFill } from "./chatSetupFill";
 import { applyOverride, computeOverrideOffer, countOverriddenFields } from "./chatOverrideOffer";
 import { LENGTH_THRESHOLD_ERROR, parseLengthDeductionThreshold, recordLengthDeductionThresholdChange } from "./chatLengthDeduction";
@@ -40,6 +42,30 @@ function setupCallback(driver: ReturnType<typeof useContinuousGradingRun>, instr
     sessionRefusalRef: { current: "refused" }, setSubmitError: vi.fn(), setInstructions: vi.fn(), setRubric: vi.fn(), setSetupNote: vi.fn() });
 }
 describe("actual role controller -> Panel setup/transport callbacks -> continuous driver", () => {
+  it("locks the actual partial handoff, records omissions before dispatch, and blocks an overlapping retry", async () => {
+    const records = new Map<string, string>();
+    const storage = { get length() { return records.size; }, key: (i: number) => [...records.keys()][i] ?? null, getItem: (key: string) => records.get(key) ?? null, setItem: (key: string, value: string) => { records.set(key, value); } };
+    const latch = { busy: false, generation: 0 }, epoch = { current: 0 }, submitted = vi.fn(async () => [{ kind: "accepted" }]);
+    const lock = vi.fn(async (_key: string, work: () => Promise<unknown>) => work());
+    vi.stubGlobal("navigator", { locks: { request: lock } }); vi.stubGlobal("crypto", webcrypto); vi.stubGlobal("localStorage", storage);
+    const run = callback("handlePartialHandoff", { createPartialHandoffHandler, sharedIntakeLatch: latch, dropSessionEpoch: epoch, user: { id: "owner" }, zipReview: { capture: () => 0, owns: () => true }, setPartialOmissions: vi.fn(), setPartialRecords: vi.fn(), handleSubmitFiles: submitted });
+    const group = { label: "archive-name", members: [{ path: "work.txt" }] }, omitted = [{ label: "omitted", reason: "member size", members: [{ path: "video.mp4" }] }];
+    expect(await run(new File(["source"], "source.zip"), new File(["subset"], "subset.zip"), [group], omitted, { "archive-name": "Student" })).toBeNull();
+    expect(submitted).toHaveBeenCalledWith([expect.any(File)], undefined, { "work.txt": "Student" });
+    expect([...records.values()][0]).toContain("video.mp4");
+    expect(await run(new File(["source"], "source.zip"), new File(["subset"], "subset.zip"), [group], omitted, { "archive-name": "Student" })).toMatch(/overlap/i);
+    expect(submitted).toHaveBeenCalledTimes(1); expect(lock).toHaveBeenCalledTimes(2);
+    const interrupted = vi.fn(async () => { throw new Error("connection lost"); });
+    const uncertainRun = callback("handlePartialHandoff", { createPartialHandoffHandler, sharedIntakeLatch: latch, dropSessionEpoch: epoch, user: { id: "owner" }, zipReview: { capture: () => 0, owns: () => true }, setPartialOmissions: vi.fn(), setPartialRecords: vi.fn(), handleSubmitFiles: interrupted });
+    expect(await uncertainRun(new File(["other"], "source.zip"), new File(["subset"], "subset.zip"), [group], omitted, { "archive-name": "Student" })).toMatch(/could not be confirmed/i);
+    expect([...records.values()].some((value) => JSON.parse(value).status === "unknown")).toBe(true);
+    expect(await uncertainRun(new File(["other"], "source.zip"), new File(["subset"], "subset.zip"), [group], omitted, { "archive-name": "Student" })).toMatch(/overlap/i);
+    expect(interrupted).toHaveBeenCalledTimes(1);
+    const staleRun = callback("handlePartialHandoff", { createPartialHandoffHandler, sharedIntakeLatch: latch, dropSessionEpoch: epoch, user: { id: "owner" }, zipReview: { capture: () => 0, owns: () => false }, setPartialOmissions: vi.fn(), setPartialRecords: vi.fn(), handleSubmitFiles: submitted });
+    expect(await staleRun(new File(["stale"], "source.zip"), new File(["subset"], "subset.zip"), [group], omitted, { "archive-name": "Student" })).toMatch(/session changed/i);
+    expect(submitted).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
   it("holds a whole-panel ZIP drop at shared review and fences a second drop", async () => {
     let decide!: (value: boolean) => void;
     const check = vi.fn((_files: readonly File[], _current: () => boolean, _unknown: boolean) => new Promise<boolean>((resolve) => { decide = resolve; }));

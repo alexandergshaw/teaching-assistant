@@ -154,6 +154,22 @@ describe("prepareChatSubmissionAction - text", () => {
 });
 
 describe("prepareChatSubmissionAction - file", () => {
+  it("passes reviewed mapping to ZIP extraction and refuses malformed mapping", async () => {
+    const mapping = { "ada_1_2_work.txt": "ada" };
+    mockIngestZipEntries.mockResolvedValue(ingested([canvasEntry]));
+    const file = new File(["zip"], "submissions.zip", { type: "application/zip" });
+    await prepareChatSubmissionAction(fileFormData(file, { reviewedZipMapping: JSON.stringify(mapping) }));
+    expect(mockIngestZipEntries).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ reviewedMapping: mapping }));
+    mockIngestZipEntries.mockClear();
+    const refused = await prepareChatSubmissionAction(fileFormData(file, { reviewedZipMapping: "{" }));
+    expect(refused.kind).toBe("refused"); expect(mockIngestZipEntries).not.toHaveBeenCalled();
+  });
+  it("surfaces a server mapping collision as a refusal", async () => {
+    mockIngestZipEntries.mockRejectedValue(new Error("Reviewed student mapping would split or merge archive groups. Nothing was queued."));
+    const file = new File(["zip"], "submissions.zip", { type: "application/zip" });
+    const outcome = await prepareChatSubmissionAction(fileFormData(file, { reviewedZipMapping: JSON.stringify({ "a_1_1_x.txt": "Student", "b_2_2_x.txt": "Student" }) }));
+    expect(outcome).toMatchObject({ kind: "refused", reason: expect.stringMatching(/split or merge/i) });
+  });
   it("refuses an unsupported file extension with a named reason, not a graded-as-empty entry", async () => {
     const file = new File(["binary"], "photo.xyz");
     const outcome = await prepareChatSubmissionAction(fileFormData(file));

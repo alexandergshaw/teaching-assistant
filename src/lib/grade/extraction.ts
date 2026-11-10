@@ -50,6 +50,7 @@ import {
 import { chargeVideoCount, stageVideoMember, type StageVideoFn, type VideoStaging } from "./video-leaf";
 import { emptyVideoOutcomes, withAcceptedVideo, withFailedVideo, type VideoFailureClass, type VideoOutcomes } from "./video-failure";
 import { toPreviewContent, groupSubmissionsByStudent, assignUnclaimedLabel, parseSubmissionFileName } from "./utils";
+import { reviewedZipLookup } from "./reviewed-zip-mapping";
 import { decideCollisionRefusal, describeCollisionRefusal } from "./collisionRefusal";
 import { classifySubmissionZip } from "./classify-submission-zip";
 import { looksLikeGithubUrl } from "../submission-repo";
@@ -140,6 +141,7 @@ export async function extractSubmissions(
       chain: zipChain,
       onSkip: (name) => { if (!isArchiveBookkeeping(name)) unsupportedFiles.push(name); },
       classify: (name) => {
+        if (name === "PARTIAL_ARCHIVE_REQUIRES_REVIEW.json") return "skip";
         if (isArchiveBookkeeping(parentPath ? `${parentPath}/${name}` : name)) return "skip";
         const extension = getFileExtension(name);
         if (extension === "zip" && depth < MAX_NESTED_ZIP_DEPTH) return "nested";
@@ -347,6 +349,8 @@ export async function ingestZipEntries(
     readonly knownStudents?: readonly string[];
     /** Refuse unsupported or unreadable members before inference or linked fetches. */
     readonly requireSupportedFiles?: boolean;
+    /** Explicitly reviewed file-to-student mapping for a partial archive. */
+    readonly reviewedMapping?: Readonly<Record<string, string>>;
   }
 ): Promise<{
   entries: StudentSubmissionEntry[];
@@ -382,9 +386,10 @@ export async function ingestZipEntries(
   } else {
     ({ repos: inlineRepos, issues: inlineOtherIssues } = await resolveLinkSubmissions(submissions, rawData));
   }
-  const inferredLookup = options?.inferFileNamesWith
+  let inferredLookup = options?.inferFileNamesWith && !options.reviewedMapping
     ? await inferFileNameConvention(Object.keys(submissions), options.inferFileNamesWith)
     : undefined;
+  if (options?.reviewedMapping) inferredLookup = reviewedZipLookup(submissions, options.reviewedMapping, zipParents);
   const entries: StudentSubmissionEntry[] = groupSubmissionsByStudent(submissions, inferredLookup, rawData, zipParents, videoStaging, documentVisuals);
   if (deferredLinks && deferredLinks.size > 0) {
     attachDeferredLinkUrls(entries, deferredLinks, inferredLookup, zipParents);

@@ -23,6 +23,7 @@ export function appendChatSetupVersion(history: ChatSetupHistory, expectedCurren
     feedbackWordTarget: setup.feedbackWordTarget,
     applyNamingDeduction: setup.applyNamingDeduction,
     applyLengthDeduction: setup.applyLengthDeduction,
+    suppressLengthDeduction: setup.suppressLengthDeduction,
     lengthDeductionThresholdWords: setup.lengthDeductionThresholdWords,
   });
   const version = Object.freeze({ version: history.current + 1, setup: snapshot });

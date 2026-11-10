@@ -24,3 +24,11 @@ describe("versioned chat setup foundation", () => {
     expect(appendChatSetupVersion({ current: 2, versions: first.versions }, 2, original)).toBeNull();
   });
 });
+
+it("freezes disabled length policy for admitted requests", () => {
+  const first = appendChatSetupVersion({ current: 0, versions: [] }, 0, { ...original, suppressLengthDeduction: true })!;
+  const pending = requestForChatSetup(first.versions[0], { sourceIndex: 0, entry });
+  const second = appendChatSetupVersion(first, 1, { ...original, applyLengthDeduction: true })!;
+  expect(pending.suppressLengthDeduction).toBe(true);
+  expect(requestForChatSetup(second.versions[1], { sourceIndex: 1, entry }).suppressLengthDeduction).toBeUndefined();
+});

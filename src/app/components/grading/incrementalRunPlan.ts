@@ -73,6 +73,7 @@ export interface GradeRunItemRequestBody {
   readonly applyNamingDeduction?: boolean;
   /** Length deduction; type-only here, sent only as true (default off), buildRunItemRequests leaves it unset. */
   readonly applyLengthDeduction?: boolean;
+  readonly suppressLengthDeduction?: boolean;
   /** Minimum word shortfall that permits a length deduction; absent keeps legacy policy. */
   readonly lengthDeductionThresholdWords?: number;
   /** Recording split: grade only this segment of a multi-submission video; absent = whole recording. */

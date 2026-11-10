@@ -724,9 +724,9 @@ describe("GradingChatPanel - deduction controls W2: length deduction control and
     expect(driver).toMatch(/applyLengthDeductionRef\.current\s*=\s*sessionParams\.applyLengthDeduction\s*\?\?\s*false/);
   });
 
-  it("the driver conditional-spreads the flag only when ON, default wire byte-identical", () => {
+  it("the driver explicitly carries the off policy when the toggle is off", () => {
     const driver = withoutLineComments(read(DRIVER));
-    expect(driver).toMatch(/\.\.\.\(applyLengthDeductionRef\.current\s*\?\s*\{\s*applyLengthDeduction:\s*true,\s*lengthDeductionThresholdWords:\s*lengthDeductionThresholdWordsRef\.current\s*\}\s*:\s*\{\}\)/);
+    expect(driver).toMatch(/\.\.\.\(applyLengthDeductionRef\.current\s*\?\s*\{\s*applyLengthDeduction:\s*true,\s*lengthDeductionThresholdWords:\s*lengthDeductionThresholdWordsRef\.current\s*\}\s*:\s*\{\s*suppressLengthDeduction:\s*true\s*\}\)/);
     expect(driver).not.toMatch(/^\s*applyLengthDeduction(:|,)/m);
   });
 });

@@ -1,3 +1,4 @@
+import { LENGTH_DEDUCTION_OFF_DIRECTIVE } from "./prompts";
 import { isLengthDeductionThresholdWords, lengthDeductionThresholdDirective } from "./length-deduction-policy";
 import { getGeminiMaxCharsPerSubmission } from "../gemini";
 import { freezeRepositorySnapshot } from "./repository-evidence-entry";
@@ -15,7 +16,9 @@ export async function reviewRepositoryProposal(request: RepositoryReviewRequest,
   validateRepositoryCandidate(frozen.proposal, prepared.criteria, prepared.evidenceIds);
   for (const key of ["prior", "current"] as const) if (JSON.stringify([frozen[key].rubricAreas, frozen[key].totalScore, frozen[key].strengths, frozen[key].improvements]) !== JSON.stringify([frozen.proposal[key].rubricAreas, frozen.proposal[key].totalScore, frozen.proposal[key].strengths, frozen.proposal[key].improvements])) throw new Error("Review base scores differ from the candidate.");
   const review: ProposalReview = { proposalId: frozen.proposal.proposalId, revision: frozen.revision, attemptId: frozen.attemptId, status: "failed", findings: [] };
-  const lengthPolicy = isLengthDeductionThresholdWords(frozen.base.lengthDeductionThresholdWords)
+  const lengthPolicy = frozen.base.suppressLengthDeduction === true
+    ? { applyLengthDeduction: false, directive: LENGTH_DEDUCTION_OFF_DIRECTIVE }
+    : isLengthDeductionThresholdWords(frozen.base.lengthDeductionThresholdWords)
     ? { applyLengthDeduction: frozen.base.applyLengthDeduction === true, lengthDeductionThresholdWords: frozen.base.lengthDeductionThresholdWords, directive: frozen.base.applyLengthDeduction === true ? lengthDeductionThresholdDirective(frozen.base.lengthDeductionThresholdWords) : "Length deduction is off. Do not apply a length deduction; other rubric and content deductions remain unchanged." }
     : undefined;
   const reviewText = JSON.stringify({ ...(lengthPolicy ? { lengthPolicy } : {}), rubric: frozen.base.rubric, assignmentInstructions: frozen.base.assignmentInstructions, criteria: prepared.criteria.map((criterion, index) => ({ criterionId: `${index}:${criterion.name}`, ...criterion })), identityBasis: "instructor-supplied session mapping; no authenticated Canvas receipt", candidate: frozen.proposal, evidencePolicy: repositoryEvidenceInstructions(prepared.evidence), actualSource: prepared.entry.content });

@@ -19,3 +19,8 @@ const base = { entry: { student: "Student", content: "words", mergedFileCount: 1
 it.each([1, 25, 1_000_000])("admits frozen proposal threshold %s", (value) => expect(validateRepositoryProposalBase({ ...base, lengthDeductionThresholdWords: value })).toBe(true));
 it.each([null, "25", 1.5, NaN, Infinity, 0, -1, 1_000_001, undefined])("refuses malformed frozen proposal threshold %s", (value) => expect(validateRepositoryProposalBase({ ...base, lengthDeductionThresholdWords: value })).toBe(false));
 it("keeps legacy proposal omission valid", () => expect(validateRepositoryProposalBase(base)).toBe(true));
+
+it("accepts explicit suppression and rejects a contradictory length policy", () => {
+  expect(validateRepositoryProposalBase({ ...base, suppressLengthDeduction: true })).toBe(true);
+  expect(validateRepositoryProposalBase({ ...base, suppressLengthDeduction: true, applyLengthDeduction: true })).toBe(false);
+});

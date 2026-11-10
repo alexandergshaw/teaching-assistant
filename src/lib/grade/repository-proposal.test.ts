@@ -196,3 +196,15 @@ it("snapshots the threshold before asynchronous evidence collection", async () =
   expect(wire.contents[0].parts[0].text).toContain("shortfall >= 25 words");
   expect(wire.contents[0].parts[0].text).not.toContain("shortfall >= 1 words");
 });
+
+it("keeps explicit disabled length policy in proposal and independent review", async () => {
+  const input = await request(); input.base.applyLengthDeduction = false; input.base.suppressLengthDeduction = true;
+  fetcher.mockClear(); const response = await send(input); expect(response.status).toBe(200);
+  const result: RepositoryProposeResponse = await response.json();
+  const calls = fetcher.mock.calls.filter((call) => String(call[0]).includes("generativelanguage"));
+  expect(JSON.stringify(calls[0][1].body)).toContain("Length deductions are disabled");
+  expect((await send({ ...input, operation: "review", attemptId: "review-length-off", proposal: result.proposal })).status).toBe(200);
+  const reviewCalls = fetcher.mock.calls.filter((call) => String(call[0]).includes("generativelanguage"));
+  const review = JSON.parse(JSON.parse(reviewCalls[1][1].body).contents[0].parts[0].text);
+  expect(review.lengthPolicy.directive).toContain("Length deductions are disabled");
+});

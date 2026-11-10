@@ -110,7 +110,8 @@ export function buildSystemPrompt(
    *  so every existing call is byte-identical. True appends the length rule. */
   applyLengthDeduction: boolean = false,
   evidenceOutputContract?: string,
-  lengthDeductionThresholdWords?: number
+  lengthDeductionThresholdWords?: number,
+  suppressLengthDeduction = false
 ): string {
   const separateStrengths = praiseRouting === "separate-strengths";
   // Locus 69 (shape). Default: no "strengths" key at all - a narrowed
@@ -245,11 +246,14 @@ ${resubmissionRule}
   if (harshnessDirective) parts.push(harshnessDirective);
   const lengthDirective = feedbackLengthDirective(feedbackWordTarget);
   if (lengthDirective) parts.push(lengthDirective);
-  if (applyLengthDeduction) parts.push(isLengthDeductionThresholdWords(lengthDeductionThresholdWords)
+  if (suppressLengthDeduction) parts.push(LENGTH_DEDUCTION_OFF_DIRECTIVE);
+  else if (applyLengthDeduction) parts.push(isLengthDeductionThresholdWords(lengthDeductionThresholdWords)
     ? lengthDeductionThresholdDirective(lengthDeductionThresholdWords)
     : LENGTH_DEDUCTION_DIRECTIVE);
   return parts.join("\n\n");
 }
+
+export const LENGTH_DEDUCTION_OFF_DIRECTIVE = "Length deductions are disabled by the instructor. Do not reduce scores or award less credit solely because the submission is shorter than a word, character, page, or time minimum, even if the rubric or assignment specifies a length penalty. Evaluate substantive requirements and content quality independently, and do not present length alone as a scoring deficiency.";
 
 /** Length-deduction rule (too-short reading; owner may refine, residual
  *  R-GCDC-2). The ONE swappable wording for the grading-chat "Deduct for length"

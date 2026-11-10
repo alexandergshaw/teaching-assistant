@@ -6,7 +6,7 @@ vi.mock("@/lib/grade/extraction", () => ({ resolveEntryLinks: resolve }));
 vi.mock("@/lib/code-runner", () => ({ runSubmittedCode: runner }));
 vi.mock("@/lib/llm", async (original) => ({ ...await original<object>(), callLlm: llm }));
 import { POST } from "./route";
-import { LENGTH_DEDUCTION_DIRECTIVE } from "@/lib/grade/prompts";
+import { LENGTH_DEDUCTION_DIRECTIVE, LENGTH_DEDUCTION_OFF_DIRECTIVE } from "@/lib/grade/prompts";
 const base = { sourceIndex: 0, entry: { student: "Student", content: "student words", mergedFileCount: 1, submittedFiles: [] }, assignmentInstructions: "Minimum 500 words", rubric: "Content (10 pts): reasoning", provider: "gemini", pointsPossible: 10 };
 const send = (body: unknown) => POST({ headers: new Headers({ "content-type": "application/json" }), json: async () => body } as NextRequest);
 beforeEach(() => {
@@ -36,4 +36,15 @@ it("omission preserves legacy and OFF makes numeric policy inert", async () => {
   llm.mockClear(); await send({ ...base, applyLengthDeduction: false, lengthDeductionThresholdWords: 25 });
   expect(JSON.stringify(llm.mock.calls[0][0])).not.toContain("shortfall >=");
   expect(JSON.stringify(llm.mock.calls[0][0])).not.toContain(LENGTH_DEDUCTION_DIRECTIVE);
+});
+
+it("explicit Chat off policy reaches the real engine and returns a grade without requesting a length penalty", async () => {
+  const response = await send({ ...base, rubric: "Content (10 pts): reasoning; deduct for fewer than 500 words", suppressLengthDeduction: true });
+  expect(response.status).toBe(200); expect(JSON.stringify(llm.mock.calls[0][0])).toContain(LENGTH_DEDUCTION_OFF_DIRECTIVE);
+  expect(JSON.stringify(llm.mock.calls[0][0])).toContain("deduct for fewer than 500 words");
+  const result = await response.json(); expect(JSON.stringify(result)).toContain("10/10");
+});
+it("leaves legacy callers unchanged and refuses contradictory policies", async () => {
+  await send(base); expect(JSON.stringify(llm.mock.calls[0][0])).not.toContain(LENGTH_DEDUCTION_OFF_DIRECTIVE);
+  llm.mockClear(); expect((await send({ ...base, applyLengthDeduction: true, suppressLengthDeduction: true })).status).toBe(400); expect(llm).not.toHaveBeenCalled();
 });

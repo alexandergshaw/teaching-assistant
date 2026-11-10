@@ -363,6 +363,7 @@ export interface GradingRunOptions {
   /** Grading-chat length deduction. Unset means false (no directive), keeping
    *  every other caller byte-identical. */
   readonly applyLengthDeduction?: boolean;
+  readonly suppressLengthDeduction?: boolean;
   /** Minimum word shortfall that permits a length deduction; absent keeps legacy policy. */
   readonly lengthDeductionThresholdWords?: number;
   /** Opt out of automatic compiler/interpreter execution for submitted code.
@@ -456,19 +457,19 @@ async function gradeStudentEntries(
   // once; WHICH one an entry uses is chosen PER ENTRY (3.3/3.6). singleAxisPrompt
   // is today's call, byte for byte (ALL criteria, axisScope "all").
   const singleAxisPrompt = commentSplit
-    ? buildSystemPrompt(assignmentInstructions, rubric, criteria, "some", "separate-strengths", "all", harshness, feedbackWordTarget, namingDeduction, lengthDeduction, undefined, options.lengthDeductionThresholdWords)
-    : buildSystemPrompt(assignmentInstructions, rubric, criteria, "some", "in-overall-comment", "all", harshness, feedbackWordTarget, namingDeduction, lengthDeduction, undefined, options.lengthDeductionThresholdWords);
+    ? buildSystemPrompt(assignmentInstructions, rubric, criteria, "some", "separate-strengths", "all", harshness, feedbackWordTarget, namingDeduction, lengthDeduction, undefined, options.lengthDeductionThresholdWords, options.suppressLengthDeduction)
+    : buildSystemPrompt(assignmentInstructions, rubric, criteria, "some", "in-overall-comment", "all", harshness, feedbackWordTarget, namingDeduction, lengthDeduction, undefined, options.lengthDeductionThresholdWords, options.suppressLengthDeduction);
   const [axisMode, axisRouting] = commentSplit
     ? (["some", "separate-strengths"] as const)
     : (["some", "in-overall-comment"] as const);
   const initialCriteria = criteria.filter((c) => c.axis !== "reply");
   const replyCriteria = criteria.filter((c) => c.axis === "reply");
   const hasReplySection = replyCriteria.length > 0;
-  const initialAxisPrompt = buildSystemPrompt(assignmentInstructions, rubric, initialCriteria, axisMode, axisRouting, "initial-post-only", harshness, feedbackWordTarget, namingDeduction, lengthDeduction, undefined, options.lengthDeductionThresholdWords);
+  const initialAxisPrompt = buildSystemPrompt(assignmentInstructions, rubric, initialCriteria, axisMode, axisRouting, "initial-post-only", harshness, feedbackWordTarget, namingDeduction, lengthDeduction, undefined, options.lengthDeductionThresholdWords, options.suppressLengthDeduction);
   const replyAxisPrompt = hasReplySection
-    ? buildSystemPrompt(assignmentInstructions, rubric, replyCriteria, axisMode, axisRouting, "reply-only", harshness, feedbackWordTarget, namingDeduction, lengthDeduction, undefined, options.lengthDeductionThresholdWords)
+    ? buildSystemPrompt(assignmentInstructions, rubric, replyCriteria, axisMode, axisRouting, "reply-only", harshness, feedbackWordTarget, namingDeduction, lengthDeduction, undefined, options.lengthDeductionThresholdWords, options.suppressLengthDeduction)
     : null;
-  const evidencePrompt = evidenceOnly ? buildSystemPrompt(assignmentInstructions, rubric, criteria, "some", axisRouting, "all", harshness, feedbackWordTarget, namingDeduction, lengthDeduction, options.evidenceContext?.provenance, options.lengthDeductionThresholdWords) : singleAxisPrompt;
+  const evidencePrompt = evidenceOnly ? buildSystemPrompt(assignmentInstructions, rubric, criteria, "some", axisRouting, "all", harshness, feedbackWordTarget, namingDeduction, lengthDeduction, options.evidenceContext?.provenance, options.lengthDeductionThresholdWords, options.suppressLengthDeduction) : singleAxisPrompt;
   const results: GradeResult[] = [];
 
   // N13a: entry 0 always STARTS (it does not follow that results[0] is a

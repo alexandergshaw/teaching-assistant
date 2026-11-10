@@ -25,6 +25,7 @@ describe("continuous grading frozen word shortfall threshold", () => {
     const dispatch = vi.fn(async (request: GradeRunItemRequestBody) => grade(request.entry.student)); h.begin(); const driver = useContinuousGradingRun({ provider: "gemini", dispatchItem: dispatch });
     await driver.beginSession({ assignmentInstructions: "Minimum 500 words", rubric: "RUBRIC", applyLengthDeduction: enabled }); await driver.submit({ kind: "text", content: "Student", label: "Student" });
     expect(dispatch.mock.calls[0][0].lengthDeductionThresholdWords).toBe(enabled ? 1 : undefined);
+    expect(dispatch.mock.calls[0][0].suppressLengthDeduction).toBe(enabled ? undefined : true);
   });
   it("ignores invalid unused OFF value and resets the driver default for a new session", async () => {
     const dispatch = vi.fn(async (request: GradeRunItemRequestBody) => grade(request.entry.student)); h.begin(); const driver = useContinuousGradingRun({ provider: "gemini", dispatchItem: dispatch });
@@ -45,4 +46,15 @@ describe("continuous grading frozen word shortfall threshold", () => {
     expect(dispatch).toHaveBeenCalledTimes(5); expect(header).toHaveBeenCalledTimes(1);
     for (const [request] of dispatch.mock.calls) expect(request).toMatchObject({ lengthDeductionThresholdWords: 25, applyLengthDeduction: true });
   });
+  it("retains OFF policy through retry and file intake", async () => {
+    const dispatch = vi.fn(async (request: GradeRunItemRequestBody) => grade(request.entry.student)); dispatch.mockRejectedValueOnce(new Error("retry"));
+    prepare.mockResolvedValue({ kind: "entries", entries: [{ student: "File", content: "work", submittedFiles: [], mergedFileCount: 1 }], pointsPossible: 10 });
+    h.begin(); const driver = useContinuousGradingRun({ provider: "gemini", dispatchItem: dispatch });
+    await driver.beginSession({ assignmentInstructions: "Minimum 500 words", rubric: "RUBRIC", applyLengthDeduction: false });
+    await driver.submit({ kind: "text", content: "text", label: "Text" }); await flush(); driver.retry(0); await flush();
+    await driver.submit({ kind: "file", file: new File(["work"], "student.txt") }); await flush();
+    expect(dispatch).toHaveBeenCalledTimes(3);
+    for (const [request] of dispatch.mock.calls) expect(request.suppressLengthDeduction).toBe(true);
+  });
+
 });

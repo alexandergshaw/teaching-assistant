@@ -60,6 +60,12 @@ describe("parsePastedSubmissions", () => {
   it("holds a single Canvas-style timestamp as an inferred author requiring review", () => {
     expect(parsePastedSubmissions("Jordan Example\nSep 6, 2026 at 10pm\nSummary")).toEqual([{ student: "Jordan Example", content: "Jordan Example\nSep 6, 2026 at 10pm\nSummary" }]);
   });
+  it("recognizes copied Canvas nested entries with duplicate names and two dates without losing controls", () => {
+    const text = "Collapse Subdiscussion\nJordan Example\nJordan Example\nSep 6, 2026\nSep 6 at 10pm\nManage Discussion Entry\n\nFirst synthetic response\nCollapse Subdiscussion\nTaylor Example\nTaylor Example\nSep 7, 2026\nSep 7 at 9:30am\nManage Discussion Entry\n\nNested synthetic reply";
+    const rows = parsePastedSubmissions(text);
+    expect(rows.map((row) => row.student)).toEqual(["", "Jordan Example", "Taylor Example"]);
+    expect(rows.map((row) => row.content).join("\n")).toBe(text);
+  });
   it("keeps same-name posts separate until an instructor confirms they are the same student", () => {
     const text = "Alex Kim posted 10/1/2026\nInitial\nAlex Kim posted 10/2/2026\nReply";
     expect(parsePastedSubmissions(text)).toEqual([{ student: "Alex Kim", content: "Alex Kim posted 10/1/2026\nInitial" }, { student: "Alex Kim", content: "Alex Kim posted 10/2/2026\nReply" }]);

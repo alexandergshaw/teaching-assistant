@@ -40,3 +40,10 @@ describe("pasted discussion listings", () => {
     expect(parseDiscussionListing("Student: Ada\nFirst response\nStudent: Grace\nSecond response")).toEqual({ detected: false, rows: [] });
   });
 });
+
+describe("Canvas copied metadata", () => {
+  it("does not treat repeated names, dates and controls as response text", () => {
+    expect(hasDiscussionResponseContent("Jordan Example\nJordan Example\nSep 6, 2026\nSep 6 at 10pm\nManage Discussion Entry")).toBe(false);
+    expect(hasDiscussionResponseContent("Jordan Example\nJordan Example\nSep 6, 2026\nSep 6 at 10pm\nManage Discussion Entry\nReal synthetic reply")).toBe(true);
+  });
+});

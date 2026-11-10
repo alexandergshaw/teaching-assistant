@@ -90,6 +90,15 @@ describe("SubmissionDrop actual handlers", () => {
     expect(onReviewed).toHaveBeenCalledTimes(1); expect(text(tree)).toContain("Needs review");
     expect(nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission 2")!.props.value).toContain("Second answer");
   });
+  it("holds copied Canvas nested posts as distinct editable review rows", async () => {
+    const h = harness(); let tree = h.render(); h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    const value = "Collapse Subdiscussion\nJordan Example\nJordan Example\nSep 6, 2026\nSep 6 at 10pm\nManage Discussion Entry\n\nFirst synthetic response\nCollapse Subdiscussion\nTaylor Example\nTaylor Example\nSep 7, 2026\nSep 7 at 9:30am\nManage Discussion Entry\n\nNested synthetic reply";
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value } }); tree = h.render();
+    expect(nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Student 2")!.props.value).toBe("Jordan Example");
+    expect(nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Student 3")!.props.value).toBe("Taylor Example");
+    expect(nodes(tree).filter((n) => n.type === "TextField" && /^Submission \d+$/.test(String(n.props.label))).map((n) => n.props.value).join("\n")).toBe(value);
+    h.button(tree, "Grade reviewed submissions").props.onClick(); await flush(); expect(h.onText).not.toHaveBeenCalled();
+  });
   it("keeps a suspected whole board out of the single-student fallback", async () => {
     const onText = vi.fn().mockResolvedValue({ kind: "accepted", entryCount: 1 });
     const h = harness(undefined, undefined, onText); let tree = h.render();

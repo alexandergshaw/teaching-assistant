@@ -6,9 +6,10 @@ const DATE = String.raw`(?:\d{1,4}[/.-]\d{1,2}[/.-]\d{1,4}|(?:Jan(?:uary)?|Feb(?
 const INLINE = new RegExp(String.raw`^(.{2,100}?)\s+(?:posted|wrote)\s+(?:on\s+)?(${DATE}.*)$`, "i");
 const TIMESTAMP = new RegExp(String.raw`^(?:posted|wrote)\s+(?:on\s+)?(${DATE}.*)$`, "i");
 const CANVAS_TIME = new RegExp(String.raw`^${DATE}(?:,?\s+\d{4})?\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)$`, "i");
+const CANVAS_DATE = new RegExp(String.raw`^${DATE},?\s+\d{4}$`, "i");
 const NAVIGATION = /^(?:last\s+(?:post|reply)|repl(?:y|ies)|unread|views?|profile|discussion|topic)\b/i;
 const SIGNAL = /\b(?:unread|last\s+(?:post|reply)|repl(?:y|ies)|views?|discussion)\b/i;
-const ONLY_FURNITURE = /^(?:unread(?:\s+posts?)?|(?:\d+\s+)?(?:repl(?:y|ies)|views?|unread)|last\s+(?:post|reply)\b.*|view\s+profile|profile|(?:week\s+\d+\s+)?discussion(?:\s+(?:topic|board))?)$/i;
+const ONLY_FURNITURE = /^(?:collapse\s+subdiscussion|manage\s+discussion\s+entry|unread(?:\s+posts?)?|(?:\d+\s+)?(?:repl(?:y|ies)|views?|unread)|last\s+(?:post|reply)\b.*|view\s+profile|profile|(?:week\s+\d+\s+)?discussion(?:\s+(?:topic|board))?)$/i;
 
 function plausibleAuthor(value: string): boolean {
   const name = value.trim();
@@ -22,7 +23,7 @@ export function hasDiscussionResponseContent(content: string): boolean {
   const lines = content.replace(/\r\n?/g, "\n").split("\n");
   return lines.some((line, index) => {
     const value = line.trim();
-    return !!value && !INLINE.test(value) && !TIMESTAMP.test(value) && !CANVAS_TIME.test(value) && !TIMESTAMP.test((lines[index + 1] ?? "").trim()) && !CANVAS_TIME.test((lines[index + 1] ?? "").trim()) && !ONLY_FURNITURE.test(value) && !/^---+$/.test(value);
+    return !!value && !INLINE.test(value) && !TIMESTAMP.test(value) && !CANVAS_TIME.test(value) && !CANVAS_DATE.test(value) && !CANVAS_DATE.test((lines[index + 1] ?? "").trim()) && !(value === (lines[index + 1] ?? "").trim() && CANVAS_DATE.test((lines[index + 2] ?? "").trim())) && !TIMESTAMP.test((lines[index + 1] ?? "").trim()) && !CANVAS_TIME.test((lines[index + 1] ?? "").trim()) && !ONLY_FURNITURE.test(value) && !/^---+$/.test(value);
   });
 }
 
@@ -39,7 +40,9 @@ export function parseDiscussionListing(text: string): DiscussionListingResult {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     const inline = line.match(INLINE);
-    if (inline && plausibleAuthor(inline[1])) headers.push({ index: i, student: inline[1].trim() });
+    const canvasDetailed = CANVAS_TIME.test(line) && i >= 3 && /^manage\s+discussion\s+entry$/i.test((lines[i + 1] ?? "").trim()) && CANVAS_DATE.test(lines[i - 1].trim()) && lines[i - 2].trim() === lines[i - 3].trim() && plausibleAuthor(lines[i - 2]);
+    if (canvasDetailed) headers.push({ index: i - 3, student: lines[i - 2].trim() });
+    else if (inline && plausibleAuthor(inline[1])) headers.push({ index: i, student: inline[1].trim() });
     else if ((TIMESTAMP.test(line) || (canvasCandidates >= 1 && CANVAS_TIME.test(line))) && i > 0 && plausibleAuthor(lines[i - 1])) headers.push({ index: i - 1, student: lines[i - 1].trim() });
   }
   const detected = headers.length > 0 || (SIGNAL.test(normalized) && /\b(?:posted|wrote|unread)\b/i.test(normalized));

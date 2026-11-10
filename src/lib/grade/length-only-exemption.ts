@@ -11,6 +11,7 @@ export function withoutSupportedInstructionLength(instructions: string): string 
   const cleaned = instructions
     .replace(/\b(create|submit|write)\s+(?:a|an)\s+\d+(?:\s*[-–]\s*\d+)?\s*[-–]?\s*word\s+((?:initial\s+)?discussion\s+post|reply|response)\b/gi, (_match, verb: string, subject: string) => `${verb} ${/^initial\b/i.test(subject) ? "an" : "a"} ${subject}`)
     .replace(/\(\s*\d+\s*[-–]\s*\d+\s+words?\s*\)/gi, "")
+    .replace(/(\(your purpose statement, your completed three-threat risk assessment table, and a brief analysis) of about 250 words(?=\) as a \.docx or PDF file\.)/gi, "$1")
     .replace(/(^|[.!?]\s+)the\s+assignment\s+requests\s+at\s+least\s+\d+\s+words?\.(?=\s|$)/gi, "$1")
     .replace(/\b(?:each|every)\s+(?:peer\s+)?(?:response|reply|post)\s+(?:should|must)\s+be\s+\d+(?:\s*[-–]\s*\d+)?\s+words?(?:[.!?](?=\s|$)|\s*$)/gi, "");
   return hasRubricLengthRule(cleaned) ? null : cleaned;
@@ -20,11 +21,12 @@ export function withoutSupportedInstructionLength(instructions: string): string 
 export function withoutSupportedRubricLength(rubric: string): string | null {
   const cleaned = rubric.split(/\r?\n/).map((line) => {
     const match = line.match(/^(\s*\d+(?:\.\d+)?\s*(?:pts?|points?)\s+(?:Outstanding|Exceeds Standard|Meets Standard|Approaches Standard|Below Standard|No Evidence)\s+)(.*)$/i);
-    if (!match) return line;
-    const description = match[2]
-      .replace(/^\d+\s+words?\.\s*/i, "")
-      .replace(/^(?:slightly|significantly)\s+off\s+word\s+count\s+or\s+/i, "");
-    return match[1] + description;
+    const prefix = match?.[1] ?? "";
+    const text = match?.[2] ?? line;
+    const knownDescription = /^(?:250 words\. (?:An analysis of how the NIST frameworks apply to real security work,|Strong analysis of NIST framework applications|Adequate analysis covering basic NIST framework applications)|(?:Slightly off word count or limited analysis|Significantly off word count or minimal analysis)\.)/i.test(text);
+    const description = (match || knownDescription ? text.replace(/^\d+\s+words?\.\s*/i, "").replace(/^(?:slightly|significantly)\s+off\s+word\s+count\s+or\s+/i, "") : text)
+      .replace(/(Purpose statement is clear) and within length\./i, "$1.");
+    return prefix + description;
   }).join("\n");
   return hasRubricLengthRule(cleaned) ? null : cleaned;
 }

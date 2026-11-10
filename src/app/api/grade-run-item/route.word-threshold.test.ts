@@ -162,6 +162,11 @@ it.each(["Each response should be 100 words and include analysis.", "Each respon
   const result = (await response.json()).result; expect(result.ungraded.kind).toBe("grading-failed");
   expect(llm).not.toHaveBeenCalled();
 });
+it.each(["Write an analysis of about 250 words from the glossary, comparing their meanings.", "Analyze vocabulary (an analysis of about 250 words)."])("refuses an ambiguous analysis of glossary words: %s", async (assignmentInstructions) => {
+  const response = await send({ ...base, assignmentInstructions, suppressLengthDeduction: true });
+  const result = (await response.json()).result;
+  expect(result.ungraded.kind).toBe("grading-failed"); expect(llm).not.toHaveBeenCalled();
+});
 it("removes only the observed length phrases from NIST rating tiers and preserves substantive requirements", async () => {
   const rubric = "NIST Framework Analysis (20 points): evaluate the analysis.\n20 pts Outstanding 250 words. An analysis of how the NIST frameworks apply to real security work, covering the framework's benefits, its systematic approach to assessment, and how it improves professional communication. All the prompts are addressed clearly.\n19 pts Exceeds Standard 250 words. Strong analysis of NIST framework applications with good understanding of professional security work applications.\n17 pts Meets Standard 250 words. Adequate analysis covering basic NIST framework applications. Shows understanding but may lack depth or insight.\n15 pts Approaches Standard Slightly off word count or limited analysis. Basic understanding of NIST frameworks but lacks detail or professional context.\n13 pts Below Standard Significantly off word count or minimal analysis. Poor understanding of NIST framework applications.\n0 pts No Evidence No analysis submitted.";
   llm.mockResolvedValue({ ok: true, text: JSON.stringify({ overallComment: "The analysis addresses the framework.", rubricResults: [{ area: "NIST Framework Analysis", score: "18/20" }] }) });
@@ -170,4 +175,42 @@ it("removes only the observed length phrases from NIST rating tiers and preserve
   const prompt = JSON.stringify(llm.mock.calls[0][0]); expect(prompt).not.toContain("250 words."); expect(prompt).not.toContain("off word count");
   expect(prompt).toContain("systematic approach to assessment"); expect(prompt).toContain("limited analysis"); expect(prompt).toContain("minimal analysis"); expect(prompt).toContain("15 pts Approaches Standard");
   expect(result.overallComment).toContain("Length requirements were not used for scoring.");
+});
+it("retains support for previously accepted scored rating lines", async () => {
+  const rubric = "Content (10 pts): evaluate the response.\n10 pts Outstanding 100 words. Shows excellent reasoning.\n5 pts Approaches Standard Slightly off word count or limited reasoning.";
+  llm.mockResolvedValue({ ok: true, text: JSON.stringify({ overallComment: "Clear", rubricResults: [{ area: "Content", score: "10/10" }] }) });
+  const response = await send({ ...base, rubric, pointsPossible: 10, suppressLengthDeduction: true });
+  expect((await response.json()).result.ungraded).toBeUndefined();
+  const prompt = JSON.stringify(llm.mock.calls[0][0]);
+  expect(prompt).toContain("10 pts Outstanding Shows excellent reasoning."); expect(prompt).toContain("5 pts Approaches Standard limited reasoning.");
+  expect(prompt).not.toContain("100 words."); expect(prompt).not.toContain("off word count");
+});
+it("grades the Canvas line-separated NIST rubric without its length modifiers", async () => {
+  const rubric = `NIST Framework Analysis (20 points): evaluate the analysis.
+20 pts
+Outstanding
+Identifies three appropriate threats with the vulnerabilities behind them, grounded in the scenario. Purpose statement is clear and within length.
+250 words. An analysis of how the NIST frameworks apply to real security work, covering the framework's benefits, its systematic approach to assessment, and how it improves professional communication. All the prompts are addressed clearly.
+19 pts
+Exceeds Standard
+250 words. Strong analysis of NIST framework applications with good understanding of professional security work applications.
+17 pts
+Meets Standard
+250 words. Adequate analysis covering basic NIST framework applications. Shows understanding but may lack depth or insight.
+15 pts
+Approaches Standard
+Slightly off word count or limited analysis. Basic understanding of NIST frameworks but lacks detail or professional context.
+13 pts
+Below Standard
+Significantly off word count or minimal analysis. Poor understanding of NIST framework applications.`;
+  const assignmentInstructions = "Submit one completed assignment document (your purpose statement, your completed three-threat risk assessment table, and a brief analysis of about 250 words) as a .docx or PDF file.";
+  llm.mockResolvedValue({ ok: true, text: JSON.stringify({ overallComment: "The analysis addresses the framework.", rubricResults: [{ area: "NIST Framework Analysis", score: "18/20" }] }) });
+  const response = await send({ ...base, assignmentInstructions, rubric, pointsPossible: 20, suppressLengthDeduction: true });
+  const result = (await response.json()).result;
+  expect(result.ungraded).toBeUndefined(); expect(result.totalScore).toBe("18/20");
+  const prompt = JSON.stringify(llm.mock.calls[0][0]);
+  expect(prompt).toContain("Purpose statement is clear."); expect(prompt).toContain("completed three-threat risk assessment table");
+  expect(prompt).toContain("brief analysis) as a .docx or PDF file"); expect(prompt).toContain("systematic approach to assessment");
+  expect(prompt).toContain("limited analysis"); expect(prompt).toContain("minimal analysis");
+  expect(prompt).not.toContain("within length"); expect(prompt).not.toContain("250 words"); expect(prompt).not.toContain("off word count");
 });

@@ -81,6 +81,17 @@ it("awards full credit for the explicitly disabled length-only criterion and gra
   expect(result.rubricAreas).toEqual(expect.arrayContaining([expect.objectContaining({ area: "Accuracy", score: "10/10" }), expect.objectContaining({ area: "Length", score: "5/5", comment: "Length deductions are disabled." })]));
   expect(JSON.stringify(llm.mock.calls[0][0])).not.toContain("deduct points if fewer than 200 words");
 });
+it("grades the exact live setup with its standalone assignment length sentence disabled", async () => {
+  llm.mockResolvedValue({ ok: true, text: JSON.stringify({ overallComment: "Accurate.", totalScore: "10/10", rubricResults: [{ area: "Accuracy", score: "10/10", comment: "Correct." }] }) });
+  const response = await send({ ...base, assignmentInstructions: "Explain the freezing point of water. The assignment requests at least 200 words.", entry: { ...base.entry, content: "Water freezes at 0 degrees Celsius at standard atmospheric pressure." }, rubric: "Accuracy (10 pts): state the freezing point of water correctly.\nLength (5 pts): deduct points if fewer than 200 words.", pointsPossible: 15, suppressLengthDeduction: true });
+  const result = (await response.json()).result; expect(result.ungraded).toBeUndefined(); expect(result.totalScore).toBe("15/15");
+  const prompt = JSON.stringify(llm.mock.calls[0][0]); expect(prompt).toContain("Explain the freezing point of water."); expect(prompt).not.toContain("The assignment requests at least 200 words.");
+  expect(result.overallComment).toContain("Length requirements were not used for scoring.");
+});
+it.each(["Explain the freezing point. The assignment requests at least 200 words and citations.", "The assignment requests at least 200 words, with citations."])("refuses to discard a mixed assignment sentence: %s", async (assignmentInstructions) => {
+  const response = await send({ ...base, assignmentInstructions, suppressLengthDeduction: true });
+  expect((await response.json()).result.ungraded.kind).toBe("grading-failed"); expect(llm).not.toHaveBeenCalled();
+});
 it("leaves the same length criterion with the model when length deductions are enabled", async () => {
   llm.mockResolvedValue({ ok: true, text: JSON.stringify({ overallComment: "Deducted points for word count.", rubricResults: [{ area: "Accuracy", score: "10/10" }, { area: "Length", score: "3/5" }] }) });
   const response = await send({ ...base, rubric: "Accuracy (10 pts): correct.\nLength (5 pts): deduct points if fewer than 200 words.", pointsPossible: 15, applyLengthDeduction: true });

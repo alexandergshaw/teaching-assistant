@@ -11,6 +11,7 @@ export function withoutSupportedInstructionLength(instructions: string): string 
   const cleaned = instructions
     .replace(/\b(create|submit|write)\s+(?:a|an)\s+\d+(?:\s*[-–]\s*\d+)?\s*[-–]?\s*word\s+((?:initial\s+)?discussion\s+post|reply|response)\b/gi, (_match, verb: string, subject: string) => `${verb} ${/^initial\b/i.test(subject) ? "an" : "a"} ${subject}`)
     .replace(/\(\s*\d+\s*[-–]\s*\d+\s+words?\s*\)/gi, "")
+    .replace(/(^|[.!?]\s+)the\s+assignment\s+requests\s+at\s+least\s+\d+\s+words?\.(?=\s|$)/gi, "$1")
     .replace(/\b(?:each|every)\s+(?:peer\s+)?(?:response|reply|post)\s+(?:should|must)\s+be\s+\d+(?:\s*[-–]\s*\d+)?\s+words?(?:[.!?](?=\s|$)|\s*$)/gi, "");
   return hasRubricLengthRule(cleaned) ? null : cleaned;
 }

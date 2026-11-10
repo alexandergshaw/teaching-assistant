@@ -257,6 +257,18 @@ function linkEntry(url: string): StudentSubmissionEntry {
 }
 
 describe("ingestZipEntries - deferLinks (BW3 ingest half)", () => {
+  it("resolves a small Canvas ZIP Google Doc to its content or an explicit failure", async () => {
+    const zip = await zipOf({ "ada_1_2_link.html": linkHtml(DOC_URL) });
+    const { entries } = await ingestZipEntries(zip, { deferLinks: true });
+    expect(entries[0].submissionUrl).toBe(DOC_URL);
+    mockFetchDrive.mockResolvedValueOnce({ name: "response.txt", buffer: Buffer.from("synthetic document text") });
+    const resolved = await resolveEntryLinks(entries[0]);
+    expect(resolved.content).toContain("synthetic document text");
+    expect(resolved.linkFetch).toBe("ok");
+    mockFetchDrive.mockResolvedValueOnce({ error: "not shared" });
+    const failed = await resolveEntryLinks(entries[0]);
+    expect(failed.linkFetch).toBe("failed");
+  });
   // Convention-prefixed names (name_id_id_file) so the citation-name keying is
   // exercised: a flat-named fixture would false-pass a path-keyed map.
   it("I-defer-ingest: no fetch at ingest; each link student carries submissionUrl + a bare note", async () => {

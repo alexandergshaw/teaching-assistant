@@ -525,6 +525,46 @@ describe("POST /api/grade-run-item (behavioral, mocked seam)", () => {
       expect(mockGradeEntries).not.toHaveBeenCalled();
       expect((await res.json()).error).toContain("no grade was produced");
     });
+    it.each(["failed", "flagged"] as const)("refuses an unreadable Canvas ZIP link before grading (%s)", async (linkFetch) => {
+      const url = "https://docs.google.com/document/d/example123/edit";
+      const file = { name: "link.html", extension: "html", previewContent: "", previewTruncated: false };
+      mockResolveEntryLinks.mockImplementationOnce(async (entry) => ({ ...entry, linkFetch }));
+      settle();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, content: `File: link.html\n\nSubmitted link: ${url}`, submittedFiles: [file], submissionUrl: url, linkFetch: "ok" } }) as any);
+      expect(res.status).toBe(422);
+      expect(mockResolveEntryLinks.mock.calls[0][0].linkFetch).toBeUndefined();
+      expect(mockGradeEntries).not.toHaveBeenCalled();
+    });
+    it("grades the fetched Canvas ZIP document only after its contents resolve", async () => {
+      const url = "https://docs.google.com/document/d/example123/edit";
+      const file = { name: "link.html", extension: "html", previewContent: "", previewTruncated: false };
+      mockResolveEntryLinks.mockImplementationOnce(async (entry) => ({ ...entry, content: "actual document content", linkFetch: "ok" }));
+      mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
+      settle();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, content: `File: link.html\n\nSubmitted link: ${url}`, submittedFiles: [file], submissionUrl: url } }) as any);
+      expect(res.status).toBe(200);
+      expect(mockGradeEntries.mock.calls[0][0][0].content).toBe("actual document content");
+    });
+    it("refuses a Canvas ZIP link whose URL could not be attributed", async () => {
+      const file = { name: "link.html", extension: "html", previewContent: "", previewTruncated: false };
+      settle();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, content: "File: link.html\n\nSubmitted link: https://example.test/missing", submittedFiles: [file] } }) as any);
+      expect(res.status).toBe(422);
+      expect(mockResolveEntryLinks).not.toHaveBeenCalled();
+      expect(mockGradeEntries).not.toHaveBeenCalled();
+    });
+    it("refuses a Canvas ZIP link whose declared URL differs from the submitted link", async () => {
+      const file = { name: "link.html", extension: "html", previewContent: "", previewTruncated: false };
+      settle();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, content: "File: link.html\n\nSubmitted link: https://docs.google.com/document/d/one/edit", submittedFiles: [file], submissionUrl: "https://docs.google.com/document/d/two/edit" } }) as any);
+      expect(res.status).toBe(422);
+      expect(mockResolveEntryLinks).not.toHaveBeenCalled();
+      expect(mockGradeEntries).not.toHaveBeenCalled();
+    });
     it("refuses an unreadable URL-only segment while preserving its separator", async () => {
       mockResolveEntryLinks.mockImplementationOnce(async (entry) => ({ ...entry, linkFetch: "flagged" }));
       settle();

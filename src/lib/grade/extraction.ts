@@ -735,7 +735,10 @@ function attachDeferredLinkUrls(
     let ambiguous = false;
     for (const file of entry.submittedFiles) {
       const slot = byKey.get(linkKey(entry.student, file.name));
-      if (!slot) continue;
+      if (!slot) {
+        if (/^Submitted link:\s*https?:\/\//i.test(file.previewContent)) ambiguous = true;
+        continue;
+      }
       if (slot.linkPaths.size === 1) urls.add(slot.url);
       else ambiguous = true;
     }

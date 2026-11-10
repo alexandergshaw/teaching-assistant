@@ -389,12 +389,17 @@ export async function POST(req: NextRequest) {
     const outcome = await raceWithTimeout(
       (async () => {
         const pastedLink = !!entry.submissionUrl && pastedSubmissionUrl(entry.content) === entry.submissionUrl;
-        if (pastedLink) {
+        const archiveLink = entry.content.includes("Submitted link:") && entry.submittedFiles.some((file) => /\.html?$/i.test(file.name));
+        if (archiveLink && !entry.submissionUrl) return { unavailablePastedLink: true };
+        const archiveUrls = archiveLink ? [...entry.content.matchAll(/(?:^|\n)Submitted link:\s*(\S+)/g)].map((match) => match[1]) : [];
+        if (archiveLink && (!archiveUrls.length || archiveUrls.some((url) => url !== entry.submissionUrl))) return { unavailablePastedLink: true };
+        const needsLink = pastedLink || (archiveLink && !!entry.submissionUrl);
+        if (needsLink) {
           const url = new URL(entry.submissionUrl!);
           if (url.username || url.password) return { unavailablePastedLink: true };
         }
-        const resolved = await resolveEntryLinks(pastedLink ? { ...entry, gradedRepo: null, gradedRef: null, repoReadNote: null, linkFetch: undefined } : entry);
-        if (pastedLink && (resolved.linkFetch === "failed" || resolved.linkFetch === "flagged" || (resolved.content === entry.content && resolved.submittedFiles.length === entry.submittedFiles.length))) return { unavailablePastedLink: true };
+        const resolved = await resolveEntryLinks(needsLink ? { ...entry, gradedRepo: null, gradedRef: null, repoReadNote: null, linkFetch: undefined } : entry);
+        if (needsLink && (resolved.linkFetch === "failed" || resolved.linkFetch === "flagged" || (resolved.content === entry.content && resolved.submittedFiles.length === entry.submittedFiles.length))) return { unavailablePastedLink: true };
         const unreadableAttachment = resolved.submittedFiles.find((file) => file.mimeType === UNREADABLE_CANVAS_ATTACHMENT_MIME);
         if (unreadableAttachment) return { unreadableAttachment: { name: unreadableAttachment.name } };
         const omittedAttachment = resolved.submittedFiles.find((file) => file.mimeType === OMITTED_CANVAS_ATTACHMENT_MIME);

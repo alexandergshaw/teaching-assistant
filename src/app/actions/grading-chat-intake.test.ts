@@ -190,10 +190,17 @@ describe("prepareChatSubmissionAction - file", () => {
     mockIngestZipEntries.mockResolvedValue(ingested([canvasEntry]));
     const file = new File(["zip bytes"], "submissions.zip", { type: "application/zip" });
     const outcome = await prepareChatSubmissionAction(fileFormData(file));
+    expect(mockIngestZipEntries).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ deferLinks: true }));
     expect(outcome.kind).toBe("entries");
     if (outcome.kind === "entries") {
       expect(outcome.entries).toEqual([canvasEntry]);
     }
+  });
+  it("refuses an unresolved link in a composite archive", async () => {
+    mockIngestZipEntries.mockResolvedValue(ingested([{ ...canvasEntry, linkFetch: "flagged", repoReadNote: "unreadable link" }]));
+    const outcome = await prepareCompositeSubmissionAction(compositeFormData("Ada", [{ kind: "file", file: new File(["zip"], "work.zip") }]));
+    expect(outcome.kind).toBe("refused");
+    if (outcome.kind === "refused") expect(outcome.reason).toContain("linked submission could not be read");
   });
 
   it("refuses a partially unreadable archive with the failed filename", async () => {

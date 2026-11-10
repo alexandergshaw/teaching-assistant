@@ -154,6 +154,7 @@ export async function prepareChatSubmissionAction(formData: FormData): Promise<I
     file: formData.get("file") as File | null,
     url: ((formData.get("url") as string | null) ?? "").trim(),
     labelled: (((formData.get("label") as string | null) ?? "").trim().length > 0),
+    deferArchiveLinks: true,
   });
 }
 
@@ -170,6 +171,8 @@ interface PartData {
   /** True when the caller already knows this submission's name (a typed
    * label, or a composite's single owning student): inference is suppressed. */
   readonly labelled: boolean;
+  /** Composite merges cannot preserve an unresolved per-part URL. */
+  readonly deferArchiveLinks?: boolean;
 }
 
 /** Module-private per-kind resolution shared by prepareChatSubmissionAction
@@ -231,7 +234,8 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
         // before any ticket exists - caught below, surfaced verbatim (AC-9).
         // ingestZipEntries is called directly (not extractStudentEntries) so
         // the zip's class-vs-single classification is not discarded.
-        const ingested = await ingestZipEntries(await file.arrayBuffer(), { inferFileNamesWith: provider, requireSupportedFiles: true });
+        const ingested = await ingestZipEntries(await file.arrayBuffer(), { inferFileNamesWith: provider, requireSupportedFiles: true, deferLinks: data.deferArchiveLinks });
+        if (!data.deferArchiveLinks && ingested.entries.some((entry) => entry.linkFetch === "failed" || entry.linkFetch === "flagged")) return { kind: "refused", reason: "A linked submission could not be read completely. Check access or upload its contents directly.", refusalClass: "read-failed" };
         const unreadable = unreadableArchiveReason(ingested.failedSupportedFiles);
         if (unreadable) return { kind: "refused", reason: unreadable, refusalClass: "read-failed" };
         if (ingested.entries.length === 0) return { kind: "refused", reason: "No student submissions were found in this archive.", refusalClass: "read-failed" };
@@ -308,7 +312,8 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
           // Own ArrayBuffer, not Node's pooled one; A44's collision refusal
           // throws from here and is surfaced verbatim by the catch below.
           const bytes = new Uint8Array(fetched.buffer).slice().buffer;
-          const ingested = await ingestZipEntries(bytes, { inferFileNamesWith: provider, requireSupportedFiles: true });
+          const ingested = await ingestZipEntries(bytes, { inferFileNamesWith: provider, requireSupportedFiles: true, deferLinks: data.deferArchiveLinks });
+          if (!data.deferArchiveLinks && ingested.entries.some((entry) => entry.linkFetch === "failed" || entry.linkFetch === "flagged")) return { kind: "refused", reason: "A linked submission could not be read completely. Check access or upload its contents directly.", refusalClass: "read-failed" };
           const unreadable = unreadableArchiveReason(ingested.failedSupportedFiles);
           if (unreadable) return { kind: "refused", reason: unreadable, refusalClass: "read-failed" };
           if (ingested.entries.length === 0) return { kind: "refused", reason: "No student submissions were found in this archive.", refusalClass: "read-failed" };

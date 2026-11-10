@@ -180,6 +180,8 @@
   /* Saved-only columns must have the same room as columns with controls. */
   min-width: calc(var(--rg-student-width) + var(--rg-assignment-count) * 20rem);
   table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: var(--font-size-md);
 }
 
@@ -192,6 +194,8 @@
   padding: var(--space-2) var(--space-3);
   text-align: left;
   vertical-align: top;
+  box-sizing: border-box;
+  border-right: 1px solid var(--border-soft);
   border-bottom: 1px solid var(--border-soft);
   overflow-wrap: anywhere;
 }
@@ -213,10 +217,6 @@
   z-index: 2;
   vertical-align: top;
   box-shadow: inset 0 -1px 0 var(--border-soft);
-}
-
-.grid tbody tr:last-child > * {
-  border-bottom: none;
 }
 
 .repoIdentity {
@@ -252,17 +252,15 @@
   padding: var(--space-1);
 }
 
-@media (min-width: 701px) {
-  .grid .studentColumn {
-    position: sticky;
-    left: 0;
-    background: var(--field-background);
-    z-index: 1;
-  }
+.grid .studentColumn {
+  position: sticky;
+  left: 0;
+  background: var(--field-background);
+  z-index: 1;
+}
 
-  .grid thead .studentColumn {
-    z-index: 3;
-  }
+.grid thead .studentColumn {
+  z-index: 3;
 }
 
 .repoLink {
@@ -677,96 +675,29 @@
   font-weight: 600;
 }
 
-/* At the existing narrow breakpoint, stack rows as cards and keep the
-   header controls visible. Explicit roles and scope preserve the table
-   associations when CSS changes the elements' native display. */
+/* Repeat assignment names in cells at narrow widths so the full header can
+   scroll away without obscuring the gradebook. */
 @media (max-width: 700px) {
-  /* B4 - un-stick, following TasksGrid.module.css:956's own WCAG 2.2
-     SC 1.4.10 (Reflow) precedent: a sticky header stops helping once the
-     view has already reflowed to a single narrow column, and at high zoom a
-     sticky element can eat most of the visible viewport. */
-  .grid thead th,
-  .stickyWorkingHeader {
+  .grid {
+    --rg-student-width: 8rem;
+  }
+
+  .grid thead th {
     position: static;
   }
 
-  /* Table -> block flow so rows can stack as cards. thead/tbody must leave
-     their table-group displays together with tr/th/td - leaving any one of
-     them as a table-* display while its siblings change produces undefined,
-     inconsistent layout, not a graceful partial reflow. */
-  table.grid,
-  .grid thead,
-  .grid tbody {
-    display: block;
-    width: 100%;
-    min-width: 0;
-  }
-
-  .grid colgroup {
-    display: none;
-  }
-
-  .columnTitle {
-    -webkit-line-clamp: unset;
-  }
-
-  .columnFolder {
-    white-space: normal;
-  }
-
-  .grid thead tr {
-    display: block;
-    padding-bottom: var(--space-2);
-    margin-bottom: var(--space-2);
-    border-bottom: 1px solid var(--border-soft);
-  }
-
-  .grid tbody tr {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    padding: var(--space-3) var(--space-3);
-    margin-bottom: var(--space-3);
-    border: 1px solid var(--card-border);
-    border-radius: var(--radius-md);
-  }
-
-  .grid tbody tr:last-child {
-    margin-bottom: 0;
-  }
-
-  /* Let each cell fill the card and wrap on narrow screens. */
-  .grid th,
-  .grid td {
-    display: block;
-    width: 100%;
-    white-space: normal;
-    border-bottom: none;
-    padding: var(--space-1) 0;
-  }
-
-  .bindingCell,
-  .columnHeader,
-  .cellControl {
-    min-width: 0;
-  }
-
-  /* AM5 - tracked-uppercase micro-label idiom: --font-size-2xs, weight 700,
-     letter-spacing 0.06em, --text-secondary. */
   .cellColumnLabel {
     display: block;
     font-size: var(--font-size-2xs);
     font-weight: 700;
     color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
     margin-bottom: var(--space-1);
   }
 
-  /* B2 - every control in the column header and the binding picker must be
-     able to shrink below its intrinsic content width, or a long assignment
-     name or roster name alone could still force horizontal overflow even
-     after the row-level reflow above. */
+  .stickyWorkingHeader {
+    position: static;
+  }
+
   .columnHeader select,
   .columnHeader button,
   .unboundPicker select,

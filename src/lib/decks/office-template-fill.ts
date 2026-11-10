@@ -3,6 +3,8 @@ import { parseOfficeParagraphs, applyOfficeSections } from "@/lib/office-edit";
 import { buildOperationRefusedAdjustment, buildSlideCountAdjustment, type FitReport } from "@/lib/decks/fit-report";
 import { inventorySlides } from "@/lib/powerpoint-template-library/inventory";
 import JSZip from "jszip";
+import { DOMParser } from "@xmldom/xmldom";
+import { createZipBudget, readOfficeMember } from "@/lib/zip-caps";
 
 /**
  * The pure middle of an owner-uploaded-template fill, extracted from
@@ -140,6 +142,21 @@ export async function groupOfficeTemplateParagraphsBySlide(
   const zip = await JSZip.loadAsync(buffer);
   const members = Object.keys(zip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/i.test(name)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   if (members.length !== inventory.length || inventory.some((slide) => !members.includes(slide.id))) throw new Error("This template contains unsupported or unreferenced slides. Use a standard PowerPoint template.");
+  // office-edit reads and writes literal a: tags. A valid alternate prefix,
+  // default namespace, or rebound a: must not silently escape the fill plan.
+  const drawing = "http://schemas.openxmlformats.org/drawingml/2006/main";
+  const budget = createZipBudget();
+  for (const member of members) {
+    const xml = (await readOfficeMember(zip.file(member)!, member, budget)).toString("utf8");
+    const document = new DOMParser({ onError: () => { throw new Error("Invalid PowerPoint slide XML."); } }).parseFromString(xml, "application/xml");
+    const nodes = document.getElementsByTagName("*");
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes.item(i)!;
+      if ((node.namespaceURI === drawing && node.prefix !== "a") || (node.prefix === "a" && node.namespaceURI !== drawing)) {
+        throw new Error("This template uses an unsupported DrawingML namespace prefix. Re-save it in PowerPoint before filling.");
+      }
+    }
+  }
   const paragraphs = await parseOfficeParagraphs(kind, buffer);
   const bySlide = new Map<number, OfficeParagraph[]>();
   for (const p of paragraphs) {

@@ -265,6 +265,21 @@ describe("office-template-fill: groupOfficeTemplateParagraphsBySlide", () => {
 });
 
 describe("office-template-fill: planSlideTemplateFill (wave T2, docs/a43-scope.md section 11.4)", () => {
+  it("refuses alternate or rebound DrawingML prefixes rather than leaving source text behind", async () => {
+    const original = await buildPptxFixture([pptxParagraph("Regular")]);
+    for (const change of [
+      (xml: string) => xml.replace('xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"', 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:d="http://schemas.openxmlformats.org/drawingml/2006/main"').replace("</p:txBody>", "<d:p><d:r><d:t>HIDDEN ORIGINAL</d:t></d:r></d:p></p:txBody>"),
+      (xml: string) => xml.replace('xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"', 'xmlns:a="urn:not-drawing"'),
+      (xml: string) => xml.replace('xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"', 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns="http://schemas.openxmlformats.org/drawingml/2006/main"').replace("</p:txBody>", "<p><r><t>HIDDEN ORIGINAL</t></r></p></p:txBody>"),
+    ]) {
+      const zip = await JSZip.loadAsync(original);
+      const xml = await zip.file("ppt/slides/slide1.xml")!.async("string");
+      zip.file("ppt/slides/slide1.xml", change(xml));
+      const buffer = Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+      await expect(groupOfficeTemplateParagraphsBySlide("pptx", buffer)).rejects.toThrow("unsupported DrawingML namespace prefix");
+    }
+    await expect(groupOfficeTemplateParagraphsBySlide("pptx", original)).resolves.toHaveLength(1);
+  });
   it("refuses missing bullet capacity", async () => {
     const groups = await groupOfficeTemplateParagraphsBySlide("pptx", await buildPptxFixture([pptxParagraph("Title") + pptxParagraph("Body")]));
     for (const [bullets, message] of [[["one", "two"], "1 editable bullet slots but needs 2"]] as const) {

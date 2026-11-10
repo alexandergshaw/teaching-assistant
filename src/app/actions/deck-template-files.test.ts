@@ -314,6 +314,14 @@ describe("per-user scoping (S-AUTH-1/2)", () => {
     expect(xml).toContain("Intro");
   });
 
+  it("refuses an owner template with additional alternate-prefix source text", async () => {
+    const xml = slideXml("Regular").replace('xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"', 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:d="http://schemas.openxmlformats.org/drawingml/2006/main"').replace("</p:txBody>", "<d:p><d:r><d:t>HIDDEN ORIGINAL</d:t></d:r></d:p></p:txBody>");
+    h.state.rows = [storedRow(ID_A, USER_A, await realPptxBase64({ "ppt/slides/slide1.xml": xml }))];
+    const result = await fillDeckTemplateFileAction(ID_A, { presentationTitle: "Lesson", slides: [{ title: "New", bullets: [] }] });
+    expect(result).toHaveProperty("error", expect.stringContaining("unsupported DrawingML namespace prefix"));
+    expect(result).not.toHaveProperty("base64");
+  });
+
   it("refuses unmatched editable bullet text without an explicit reviewed choice", async () => {
     h.state.rows = [storedRow(ID_A, USER_A, await realPptxBase64())];
     const result = await fillDeckTemplateFileAction(ID_A, { presentationTitle: "Lesson", slides: [{ title: "New title", bullets: ["One bullet"] }] });

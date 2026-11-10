@@ -30,6 +30,7 @@ describe("reproducible authorized template package", () => {
     const original = await originalFixture();
     const snapshot = await buildDeckSnapshot(templateInput, original);
     const files = Object.fromEntries(snapshot.files.map(file => [file.path, file.bytes]));
+    expect(JSON.parse(files["package.json"].toString()).dependencies["@xmldom/xmldom"]).toBe("0.9.10");
     expect(files["template/original.pptx"]).toEqual(original);
     expect(JSON.parse(files["deck.json"].toString())).toEqual(templateInput.deck);
     expect(files["context.json"].toString()).not.toContain("private context");
@@ -60,4 +61,20 @@ describe("reproducible authorized template package", () => {
     await expect(buildDeckSnapshot({ ...templateInput, deck: { ...templateInput.deck, slides: [{ title: "Title", bullets: ["one", "two"] }] } }, original)).rejects.toThrow("TEMPLATE_FIT");
     await expect(buildDeckSnapshot(templateInput, Buffer.from("not pptx"))).rejects.toThrow();
   });
+  it("refuses alternate DrawingML prefixes in the standalone renderer", async () => {
+    const original = await originalFixture();
+    const snapshot = await buildDeckSnapshot(templateInput, original);
+    const zip = await JSZip.loadAsync(original);
+    const xml = await zip.file("ppt/slides/slide1.xml")!.async("string");
+    zip.file("ppt/slides/slide1.xml", xml.replace('xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"', 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:d="http://schemas.openxmlformats.org/drawingml/2006/main"').replace("</p:txBody>", "<d:p><d:r><d:t>Unreviewed text</d:t></d:r></d:p></p:txBody>"));
+    const directory = mkdtempSync(join(process.cwd(), ".snapshot-template-test-"));
+    try {
+      for (const file of snapshot.files) { mkdirSync(dirname(join(directory, file.path)), { recursive: true }); writeFileSync(join(directory, file.path), file.bytes); }
+      writeFileSync(join(directory, "template/original.pptx"), await zip.generateAsync({ type: "nodebuffer" }));
+      let failure = "";
+      try { execFileSync(process.execPath, ["--preserve-symlinks", "--preserve-symlinks-main", "render.mjs"], { cwd: directory, timeout: 20_000, stdio: "pipe" }); }
+      catch (error) { failure = String((error as { stderr?: Buffer }).stderr ?? ""); }
+      expect(failure).toContain("unsupported DrawingML namespace prefix");
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  }, 30_000);
 });

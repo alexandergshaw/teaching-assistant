@@ -52,7 +52,7 @@ describe("actual role controller -> Panel setup/transport callbacks -> continuou
     const run = callback("handlePartialHandoff", { createPartialHandoffHandler, sharedIntakeLatch: latch, dropSessionEpoch: epoch, user: { id: "owner" }, zipReview: { capture: () => 0, owns: () => true }, setPartialOmissions: vi.fn(), setPartialRecords: vi.fn(), handleSubmitFiles: submitted });
     const group = { label: "archive-name", members: [{ path: "work.txt" }] }, omitted = [{ label: "omitted", reason: "member size", members: [{ path: "video.mp4" }] }];
     expect(await run(new File(["source"], "source.zip"), new File(["subset"], "subset.zip"), [group], omitted, { "archive-name": "Student" })).toBeNull();
-    expect(submitted).toHaveBeenCalledWith([expect.any(File)], undefined, { "work.txt": "Student" });
+    expect(submitted).toHaveBeenCalledWith([expect.any(File)], undefined, { "work.txt": "Student" }, undefined, undefined);
     expect([...records.values()][0]).toContain("video.mp4");
     expect(await run(new File(["source"], "source.zip"), new File(["subset"], "subset.zip"), [group], omitted, { "archive-name": "Student" })).toMatch(/overlap/i);
     expect(submitted).toHaveBeenCalledTimes(1); expect(lock).toHaveBeenCalledTimes(2);

@@ -1,8 +1,8 @@
 import { parseSubmissionFileName } from "./utils";
 
-/** Only root-level numeric export paths are eligible. */
+/** Only numeric export paths and their nested descendants are eligible. */
 export function isReviewedBrightspacePaths(paths: readonly string[]): boolean {
-  return paths.length > 0 && paths.every((path) => /^\d+-\d+ - [^/]+$/.test(path));
+  return paths.length > 0 && paths.every((path) => /^\d+-\d+ - [^/]+(?:\/[^/]+)*$/.test(path));
 }
 
 export function brightspaceTimestamp(path: string): string | null {

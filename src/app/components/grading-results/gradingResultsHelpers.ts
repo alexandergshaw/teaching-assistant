@@ -504,6 +504,10 @@ export function buildCsvContent(run: GradingRun, edits: Record<string, RowEdit>)
   header.push("Resubmit Notice");
   header.push("Submitted Files");
   header.push("Submitted Extensions");
+  const hasOmissions = run.results.some((result) => result.evidenceOmissions?.length);
+  if (hasOmissions) header.push("Excluded files (partial evidence)");
+  const hasStaticOnly = run.results.some((result) => result.staticOnly);
+  if (hasStaticOnly) header.push("Code execution");
 
   const rows = [header.map((cell) => escapeCsvCell(cell)).join(",")];
 
@@ -522,6 +526,8 @@ export function buildCsvContent(run: GradingRun, edits: Record<string, RowEdit>)
     row.push(edit?.resubmitNotice ?? result.resubmitNotice);
     row.push(result.submittedFiles.map((file) => file.name).join("; "));
     row.push(Array.from(new Set(result.submittedFiles.map((file) => file.extension))).join("; "));
+    if (hasOmissions) row.push(result.evidenceOmissions?.join("; ") ?? "");
+    if (hasStaticOnly) row.push(result.staticOnly ? "Not executed; static review only" : "");
     rows.push(row.map((cell) => escapeCsvCell(cell)).join(","));
   }
 

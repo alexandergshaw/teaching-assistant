@@ -78,6 +78,8 @@ export function stripGradeResultForDraft(result: GradeResult): GradeResult {
     // including grading-drafts.ts's draft persistence, which had no
     // compensating re-attachment of its own - should see the same fact a
     // restored run does.
+    evidenceOmissions: result.evidenceOmissions,
+    staticOnly: result.staticOnly,
     submissionTruncated: result.submissionTruncated,
     linkFetch: result.linkFetch,
     evidenceProvenanceUnknown: result.evidenceProvenanceUnknown ?? false,

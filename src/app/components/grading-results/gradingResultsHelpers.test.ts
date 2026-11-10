@@ -393,6 +393,11 @@ describe("recomputeTotal", () => {
   // change was reverted after confirming the failure.
 });
 
+it("exports the exact omitted files for partially reviewed evidence", () => {
+  const run = { results: [{ student: "Synthetic", rubricAreas: [], totalScore: "", strengths: "", improvements: "", resubmitNotice: "", submittedFiles: [], evidenceOmissions: ["project/Debug/output.obj"] }], rubricAreaNames: [] } as unknown as GradingRun;
+  const csv = buildCsvContent(run, {}); expect(csv).toContain("Excluded files (partial evidence)"); expect(csv).toContain("project/Debug/output.obj");
+});
+
 describe("buildCsvContent", () => {
   // FROZEN LITERAL, updated deliberately for this feature (not weakened):
   // A5 item 20 (docs/grading-results-feedback-boxes-acceptance-criteria.md)

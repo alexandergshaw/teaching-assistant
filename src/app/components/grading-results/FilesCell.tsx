@@ -11,6 +11,7 @@
 // DIALOG_SITES/ADOPTING_PATHS counts. This component previews and downloads
 // one file at a time via callbacks the parent owns; it opens no modal of its
 // own.
+import Alert from "@mui/material/Alert";
 import IconButton from "@mui/material/IconButton";
 import Button from "@mui/material/Button";
 import type { PreviewFile } from "../FilePreviewModal";
@@ -32,10 +33,12 @@ export interface FilesCellProps {
  * "Browse all files" button. */
 export function FilesCell({ result, filesRetained, onOpenPreview, onDownloadFile, onBrowseAll }: FilesCellProps) {
   if (result.submittedFiles.length === 0) {
-    return <>{filesColumnEmptyLabel(filesRetained)}</>;
+    return <>{result.staticOnly ? <Alert severity="info">Code was not executed; static review only.</Alert> : null}{result.evidenceOmissions?.length ? <Alert severity="warning">Partial evidence: excluded files: {result.evidenceOmissions.join(", ")}</Alert> : null}{filesColumnEmptyLabel(filesRetained)}</>;
   }
   return (
     <>
+      {result.staticOnly ? <Alert severity="info">Code was not executed; static review only.</Alert> : null}
+      {result.evidenceOmissions?.length ? <Alert severity="warning">Partial evidence: excluded files: {result.evidenceOmissions.join(", ")}</Alert> : null}
       <ul className={styles.matrixFileList}>
         {result.submittedFiles.map((file) => (
           <li key={`${result.student}-file-name-${file.name}`} className={styles.matrixFileItem}>

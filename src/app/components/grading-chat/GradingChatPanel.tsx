@@ -537,19 +537,19 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
   // driver. If the ingest call rejects or throws, the temp object is removed
   // best-effort (R10); the server's own delete and the orphan sweep remain the
   // real guarantees.
-  const submitStoragedZip = async (file: File, current: () => boolean, reviewedZipMapping?: Readonly<Record<string, string>>, fallbackBody = false): Promise<SubmitOutcome> => {
+  const submitStoragedZip = async (file: File, current: () => boolean, reviewedZipMapping?: Readonly<Record<string, string>>, fallbackBody = false, evidenceOmissions?: readonly string[], staticOnly?: true): Promise<SubmitOutcome> => {
     if (!user) return { kind: "refused", reason: "You must be signed in to upload a zip." };
     if (current()) setZipPhase("uploading");
     try {
       const uploaded = await uploadGradingZip(supabase.storage, user.id, file);
       if (!uploaded.ok) {
         safeIntake(() => recordIntakeGate({ stage: "upload", file, transport: "storage", rawReason: uploaded.message }));
-        return zipUploadFallback(uploaded.message, fallbackBody, current, () => driver.submit({ kind: "file", file, reviewedZipMapping }));
+        return zipUploadFallback(uploaded.message, fallbackBody, current, () => driver.submit({ kind: "file", file, reviewedZipMapping, evidenceOmissions, staticOnly }));
       }
       if (current()) setZipPhase("preparing");
       try {
         if (!current()) { await deleteGradingZipBestEffort(supabase.storage, uploaded.storagePath); return { kind: "refused", reason: "File intake was canceled." }; }
-        const outcome = await driver.submit({ kind: "storaged-zip", storagePath: uploaded.storagePath, name: file.name, reviewedZipMapping });
+        const outcome = await driver.submit({ kind: "storaged-zip", storagePath: uploaded.storagePath, name: file.name, reviewedZipMapping, evidenceOmissions, staticOnly });
         if (outcome.kind === "refused") await deleteGradingZipBestEffort(supabase.storage, uploaded.storagePath);
         return outcome;
       } catch (err) {
@@ -577,7 +577,7 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
       if (current()) setZipPhase(null);
     }
   };
-  const handleConfirmedFiles = async (files: File[], label: string | undefined, current: () => boolean, reviewedZipMapping?: Readonly<Record<string, string>>): Promise<SubmitOutcome[]> => {
+  const handleConfirmedFiles = async (files: File[], label: string | undefined, current: () => boolean, reviewedZipMapping?: Readonly<Record<string, string>>, evidenceOmissions?: readonly string[], staticOnly?: true): Promise<SubmitOutcome[]> => {
     const account = user?.id, accountToken = zipReview.capture(), safeCurrent = () => current() && zipReview.owns(account, accountToken);
     if (!(await zipReview.check(files, safeCurrent)) || !safeCurrent()) return files.map(() => ({ kind: "refused", reason: "ZIP review was deferred or the session changed. Nothing was submitted." }));
     // A label names ONE student's ONE submission: forwarded only for a
@@ -620,7 +620,7 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
         return { kind: "refused", reason: preflight.message };
       }
       if (!safeCurrent()) return { kind: "refused", reason: "File intake was canceled." };
-      const submit = () => transport.kind === "storage" ? (isZip ? submitStoragedZip(file, safeCurrent, reviewedZipMapping, chosen.kind === "body") : submitStoragedSingleFile(file, fileLabel, safeCurrent)) : driver.submit({ kind: "file", file, label: fileLabel, reviewedZipMapping });
+      const submit = () => transport.kind === "storage" ? (isZip ? submitStoragedZip(file, safeCurrent, reviewedZipMapping, chosen.kind === "body", evidenceOmissions, staticOnly) : submitStoragedSingleFile(file, fileLabel, safeCurrent)) : driver.submit({ kind: "file", file, label: fileLabel, reviewedZipMapping, evidenceOmissions, staticOnly });
       try { const outcome = await submit(); if (isZip && zipReview.owns(account, accountToken) && outcome.kind !== "refused") zipReview.remember([file]); return outcome; }
       catch (error) { if (isZip && zipReview.owns(account, accountToken)) zipReview.remember([file]); throw error; }
     });
@@ -631,15 +631,15 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
     if (safeCurrent()) setSubmitError(reasons.length > 0 ? reasons.join(" ") : null);
     return outcomes;
   };
-  const handleSubmitFiles = (files: File[], label?: string, reviewedZipMapping?: Readonly<Record<string, string>>) => {
+  const handleSubmitFiles = (files: File[], label?: string, reviewedZipMapping?: Readonly<Record<string, string>>, evidenceOmissions?: readonly string[], staticOnly?: true) => {
     const blocked = directIntake.current.isPending() || preparing || driver.headerState === "resolving";
     const oversized = !blocked ? oversizedReviewCandidate(files) : null; if (oversized) { setReviewFile({ file: oversized, id: ++reviewSequence.current }); return Promise.resolve([{ kind: "refused" as const, reason: "Opened oversized ZIP review. Nothing was submitted." }]); }
     return directIntake.current.run({ files, label, blocked, preparing: (value) => { setDirectPreparing(value); setPreparing(value); }, error: setSubmitError,
       setup: { instructions, rubric, harshness, feedbackWordTarget: coerceFeedbackWordTarget(feedbackLengthText), applyNamingDeduction, applyLengthDeduction,
         lengthDeductionThresholdWords: applyLengthDeduction ? parseLengthDeductionThreshold(lengthThresholdText) ?? NaN : undefined },
-      start: (setup, current) => ensureSession(undefined, setup, current), submit: (batch, batchLabel, current) => handleConfirmedFiles(batch, batchLabel, current, reviewedZipMapping) });
+      start: (setup, current) => ensureSession(undefined, setup, current), submit: (batch, batchLabel, current) => handleConfirmedFiles(batch, batchLabel, current, reviewedZipMapping, evidenceOmissions, staticOnly) });
   };
-  const handlePartialHandoff = (...args: Parameters<ReturnType<typeof createPartialHandoffHandler>>) => createPartialHandoffHandler({ getEpoch: () => dropSessionEpoch.current, account: user?.id, capture: zipReview.capture, owns: zipReview.owns, latch: sharedIntakeLatch, onRecords: setPartialRecords, onOmissions: (groups) => setPartialOmissions((previous) => [...previous, ...groups]), submit: (zip, mapping) => handleSubmitFiles([zip], undefined, mapping) })(...args);
+  const handlePartialHandoff = (...args: Parameters<ReturnType<typeof createPartialHandoffHandler>>) => createPartialHandoffHandler({ getEpoch: () => dropSessionEpoch.current, account: user?.id, capture: zipReview.capture, owns: zipReview.owns, latch: sharedIntakeLatch, onRecords: setPartialRecords, onOmissions: (groups) => setPartialOmissions((previous) => [...previous, ...groups]), submit: (zip, mapping, omissions, staticOnly) => handleSubmitFiles([zip], undefined, mapping, omissions, staticOnly) })(...args);
   // RECORDING ONE-VS-MANY: resolve the held multi-submission recording.
   const reportSplitOutcome = (outcome: SubmitOutcome) => setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
   const handleConfirmSplit = () => reportSplitOutcome(driver.confirmRecordingSplit());

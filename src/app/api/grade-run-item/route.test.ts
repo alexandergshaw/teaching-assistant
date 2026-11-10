@@ -220,6 +220,27 @@ beforeEach(() => {
 });
 
 describe("POST /api/grade-run-item (behavioral, mocked seam)", () => {
+  it("passes partial evidence to the model and rejects malformed omission records", async () => {
+    mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
+    mockRaceWithTimeout.mockImplementationOnce(async (work) => ({ kind: "settled", value: await work } as never));
+    const response = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, evidenceOmissions: ["project/Debug/output.obj"] } }) as never);
+    expect(response.status).toBe(200);
+    expect((await response.json()).result.evidenceOmissions).toEqual(["project/Debug/output.obj"]);
+    expect(mockGradeEntries.mock.calls[0][0][0].evidenceOmissions).toEqual(["project/Debug/output.obj"]);
+    expect(mockGradeEntries.mock.calls[0][1]).toContain("Evidence is incomplete");
+    vi.clearAllMocks();
+    const bad = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, evidenceOmissions: [42] } }) as never);
+    expect(bad.status).toBe(400); expect(mockGradeEntries).not.toHaveBeenCalled();
+  });
+
+  it("preserves partial evidence on an ungraded route result", async () => {
+    mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice", ungraded: { kind: "grading-failed", sourceIndex: 0, student: "Alice", message: "Synthetic failure" } }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
+    mockRaceWithTimeout.mockImplementationOnce(async (work) => ({ kind: "settled", value: await work } as never));
+    const response = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, evidenceOmissions: ["project/Debug/output.obj"] } }) as never);
+    expect(response.status).toBe(200); const row = (await response.json()).result;
+    expect(row.ungraded.kind).toBe("grading-failed"); expect(row.evidenceOmissions).toEqual(["project/Debug/output.obj"]);
+  });
+
   it("passes explicit discussion axes to the grading engine", async () => {
     const discussionAxes = { initialPostContent: "=== INITIAL POST ===\nInitial work", replyContent: "A reply", replyCount: 1 };
     mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);

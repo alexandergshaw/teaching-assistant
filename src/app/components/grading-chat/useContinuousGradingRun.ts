@@ -1,4 +1,5 @@
 "use client";
+import { bindPartialEvidence } from "./partialEvidence";
 
 // GRADING-CHAT wave 1 (docs/grading-chat-waves.md section 3, N3). The
 // continuous, dispatch-on-arrival driver behind the chat surface (AC-L/AC-5/
@@ -362,7 +363,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
           // Restore the FULL submittedFiles (the POST carried the stripped copy)
           // so the Files-UI download of non-visual files survives.
           const full = retainedBodiesRef.current.get(request.sourceIndex) ?? request;
-          const completed = { ...result, submittedFiles: full.entry.submittedFiles };
+          const completed = { ...result, submittedFiles: full.entry.submittedFiles, ...(full.entry.evidenceOmissions?.length ? { evidenceOmissions: full.entry.evidenceOmissions } : {}), ...(full.entry.staticOnly ? { staticOnly: true as const } : {}) };
           if (trigger === "regrade") {
             const revision = regradeStartRef.current.get(request.sourceIndex);
             const admitted = regradeBodiesRef.current.get(request.sourceIndex);
@@ -396,7 +397,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
             recordVideoSettled({ startedAtMs: itemStartedAtMs, settledAtMs: chatSeamNowMs(), failure: videoFailure });
           }
           if (trigger === "regrade") setRegradeFailures((previous) => new Set(previous).add(request.entry.student));
-          else recordArrival({ sourceIndex: request.sourceIndex, result: classifyItemFailure(request.sourceIndex, request.entry, err) });
+          else recordArrival({ sourceIndex: request.sourceIndex, result: { ...classifyItemFailure(request.sourceIndex, request.entry, err), ...(request.entry.evidenceOmissions?.length ? { evidenceOmissions: request.entry.evidenceOmissions } : {}), ...(request.entry.staticOnly ? { staticOnly: true as const } : {}) } });
         })
         .finally(() => {
           if (dispatchSessionId !== sessionIdRef.current) return;
@@ -753,6 +754,8 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       });
     }
 
+    const boundEntries = bindPartialEvidence(entries, input.kind === "file" || input.kind === "storaged-zip" ? input.evidenceOmissions : undefined, input.kind === "file" || input.kind === "storaged-zip" ? input.staticOnly : undefined);
+    if (!boundEntries) return { kind: "refused", reason: "Partial evidence record is invalid. Nothing was graded." }; else entries = boundEntries;
     // RES-GC-8: clip to what the session ceiling still allows; refuse only
     // the remainder, never the whole event.
     const available = maxEntries - dispatchedCountRef.current;

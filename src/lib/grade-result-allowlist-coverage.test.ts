@@ -75,6 +75,8 @@ const ALL_GRADE_RESULT_FIELDS = [
   "gradedRef",
   "linkFetch",
   "evidenceProvenanceUnknown",
+  "evidenceOmissions",
+  "staticOnly",
   "submissionTruncated",
   "determination",
   "ungraded",
@@ -160,6 +162,8 @@ function gradedSentinel(): GradedResult {
     gradedRef: "SENTINEL_gradedRef",
     linkFetch: "failed",
     evidenceProvenanceUnknown: true,
+    evidenceOmissions: ["SENTINEL_excluded.obj"],
+    staticOnly: true,
     submissionTruncated: true,
     determination: "no-submission",
   };
@@ -198,6 +202,8 @@ function ungradedSentinel(): UngradedResult {
     gradedRef: "SENTINEL_gradedRef",
     linkFetch: "failed",
     evidenceProvenanceUnknown: true,
+    evidenceOmissions: ["SENTINEL_excluded.obj"],
+    staticOnly: true,
     submissionTruncated: true,
     determination: "no-submission",
     ungraded: {

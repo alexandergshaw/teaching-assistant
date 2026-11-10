@@ -239,7 +239,11 @@ function parseGradeResult(raw: unknown): GradeResult | null {
   }
   const ungraded = coerceUngradedOutcome(raw.ungraded);
 
+  if (raw.staticOnly !== undefined && raw.staticOnly !== true) return null;
+  if (raw.evidenceOmissions !== undefined && (!Array.isArray(raw.evidenceOmissions) || raw.evidenceOmissions.length < 1 || raw.evidenceOmissions.length > 1000 || raw.evidenceOmissions.some((path: unknown) => typeof path !== "string" || !path || path.length > 4096))) return null;
   const shared = {
+    ...(raw.staticOnly === true ? { staticOnly: true as const } : {}),
+    ...(raw.evidenceOmissions !== undefined ? { evidenceOmissions: raw.evidenceOmissions as string[] } : {}),
     student: raw.student,
     overallComment: raw.overallComment,
     strengths,

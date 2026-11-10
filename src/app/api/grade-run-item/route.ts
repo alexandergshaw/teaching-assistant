@@ -144,6 +144,13 @@ function isSubmittedFileInfo(value: unknown): value is SubmittedFileInfo {
  * trusted. Returns null on ANY malformed field - the caller responds 400,
  * never lets a malformed body reach gradeEntries.
  */
+function partialEvidenceInstructions(instructions: string, entry: StudentSubmissionEntry): string {
+  const notes: string[] = [];
+  if (entry.staticOnly) notes.push("Code was not executed. Runtime behavior is unverified; do not claim that the program was run or that its output was observed.");
+  if (entry.evidenceOmissions?.length) notes.push("Recognized build artifacts were excluded. Evidence is incomplete; do not infer their contents or penalize the student for their absence.");
+  return notes.length ? `${instructions}\n\n${notes.join(" ")}` : instructions;
+}
+
 function parseRequestBody(body: GradeRunItemRequestBody): {
   sourceIndex: number;
   entry: StudentSubmissionEntry;
@@ -180,6 +187,8 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
   ) {
     return null;
   }
+  if (rawEntry.staticOnly !== undefined && rawEntry.staticOnly !== true) return null;
+  if (rawEntry.evidenceOmissions !== undefined && (!Array.isArray(rawEntry.evidenceOmissions) || rawEntry.evidenceOmissions.length < 1 || rawEntry.evidenceOmissions.length > 1000 || rawEntry.evidenceOmissions.some((path: unknown) => typeof path !== "string" || !path || path.length > 4096) || JSON.stringify(rawEntry.evidenceOmissions).length > 100000)) return null;
   if (!Array.isArray(rawEntry.submittedFiles) || !rawEntry.submittedFiles.every(isSubmittedFileInfo)) return null;
 
   if (rawEntry.repositoryInventories !== undefined && !isSubmissionFileInventories(rawEntry.repositoryInventories)) return null;
@@ -203,6 +212,8 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
   const entry: StudentSubmissionEntry = {
     ...(axes !== undefined ? { discussionAxes: axes as NonNullable<StudentSubmissionEntry["discussionAxes"]> } : {}),
     ...(rawEntry.repositoryInventories !== undefined ? { repositoryInventories: rawEntry.repositoryInventories as StudentSubmissionEntry["repositoryInventories"] } : {}),
+    ...(rawEntry.staticOnly === true ? { staticOnly: true as const } : {}),
+    ...(rawEntry.evidenceOmissions !== undefined ? { evidenceOmissions: rawEntry.evidenceOmissions as string[] } : {}),
     student: rawEntry.student,
     content: rawEntry.content,
     mergedFileCount: rawEntry.mergedFileCount,
@@ -411,14 +422,14 @@ export async function POST(req: NextRequest) {
         );
         if (unavailableVideo) return { unavailableVideo: { name: unavailableVideo.name } };
         if (videoMode) {
-          const options = { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, suppressLengthDeduction, lengthDeductionThresholdWords, callSink, ...(videoGradeWindowSec ? { videoGradeWindowSec } : {}) };
+          const options = { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, suppressLengthDeduction, lengthDeductionThresholdWords, callSink, ...(entry.staticOnly ? { autoRunCode: false } : {}), ...(videoGradeWindowSec ? { videoGradeWindowSec } : {}) };
           const videoOutcome = await withEntryVideos(
             buildVideoSeamDeps(),
             { userId: videoOwnerId, uploadDeadlineMs: startedAtMs + VIDEO_PREPARE_BUDGET_MS, signal: videoAbort.signal },
             resolved,
             (extraAttachments) => {
               gradeStartedAtMs = Date.now();
-              return gradeEntries([resolved], assignmentInstructions, rubric, provider, pointsPossible, { ...options, extraAttachments });
+              return gradeEntries([resolved], partialEvidenceInstructions(assignmentInstructions, resolved), rubric, provider, pointsPossible, { ...options, extraAttachments });
             },
             (run) => Boolean(videoGradeWindowSec) || run.results[0]?.ungraded?.kind === "grading-failed"
           );
@@ -426,7 +437,7 @@ export async function POST(req: NextRequest) {
           return { graded: videoOutcome.value, linkFetch: resolved.linkFetch };
         }
         gradeStartedAtMs = Date.now();
-        const graded = await gradeEntries([resolved], assignmentInstructions, rubric, provider, pointsPossible, { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, suppressLengthDeduction, lengthDeductionThresholdWords, callSink, ...(videoGradeWindowSec ? { videoGradeWindowSec } : {}) });
+        const graded = await gradeEntries([resolved], partialEvidenceInstructions(assignmentInstructions, resolved), rubric, provider, pointsPossible, { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, suppressLengthDeduction, lengthDeductionThresholdWords, callSink, ...(entry.staticOnly ? { autoRunCode: false } : {}), ...(videoGradeWindowSec ? { videoGradeWindowSec } : {}) });
         return { graded, linkFetch: resolved.linkFetch };
       })(),
       waitMs
@@ -471,7 +482,7 @@ export async function POST(req: NextRequest) {
     }
     if (!outcome.value.graded) return NextResponse.json({ error: "an unexpected error" }, { status: 502 });
     const result = outcome.value.graded.results[0];
-    return NextResponse.json({ sourceIndex, result: { ...result, linkFetch: outcome.value.linkFetch }, ...diagnosticFor() });
+    return NextResponse.json({ sourceIndex, result: { ...result, linkFetch: outcome.value.linkFetch, ...(entry.evidenceOmissions?.length ? { evidenceOmissions: entry.evidenceOmissions } : {}), ...(entry.staticOnly ? { staticOnly: true } : {}) }, ...diagnosticFor() });
   } catch (err) {
     return NextResponse.json({ error: describeError(err), ...diagnosticFor("route error") }, { status: 502 });
   }

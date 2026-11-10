@@ -41,6 +41,47 @@ function harness(onOne = vi.fn(async () => ({ kind: "accepted", entryCount: 1 })
 const work = (name: string) => new File(["work"], name);
 
 describe("SubmissionDrop actual handlers", () => {
+  it("grades an explicitly reviewed generic paste in one action", async () => {
+    const h = harness(); let tree = h.render(); h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    const value = "Student: Ada Example\nAn essay with https://example.org and a quote.\nStudent: Riley Example\nconst answer = 42;";
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value } }); tree = h.render();
+    h.button(tree, "I reviewed all names and submissions; grade").props.onClick(); await flush();
+    expect(h.onText).toHaveBeenCalledTimes(2);
+    expect(h.onText).toHaveBeenNthCalledWith(1, "Ada Example", "Student: Ada Example\nAn essay with https://example.org and a quote.");
+    expect(h.onText).toHaveBeenNthCalledWith(2, "Riley Example", "Student: Riley Example\nconst answer = 42;");
+  });
+  it("does not grade duplicate or unassigned names via the reviewed-all action", async () => {
+    for (const value of ["Student: Ada Example\nFirst\nStudent: Ada Example\nSecond", "Unassigned preamble\nStudent: Ada Example\nAnswer"]) {
+      slots.length = 0;
+      const h = harness(); let tree = h.render(); h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+      nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value } }); tree = h.render();
+      h.button(tree, "I reviewed all names and submissions; grade").props.onClick(); await flush(); expect(h.onText).not.toHaveBeenCalled();
+    }
+  });
+  it("fences rapid repeated reviewed-all clicks", async () => {
+    let finish!: (value: SubmitOutcome) => void;
+    const onText = vi.fn().mockImplementationOnce(() => new Promise<SubmitOutcome>((resolve) => { finish = resolve; })).mockResolvedValue({ kind: "accepted", entryCount: 1 });
+    const h = harness(undefined, undefined, onText); let tree = h.render(); h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "Student: Ada\nA\nStudent: Bob\nB" } }); tree = h.render();
+    const click = h.button(tree, "I reviewed all names and submissions; grade").props.onClick; click(); click(); expect(onText).toHaveBeenCalledTimes(1);
+    finish({ kind: "accepted", entryCount: 1 }); await flush(); expect(onText.mock.calls.map((call) => call[0])).toEqual(["Ada", "Bob"]);
+  });
+  it("retries refused work without repeating accepted work via reviewed-all", async () => {
+    const onText = vi.fn().mockResolvedValueOnce({ kind: "accepted", entryCount: 1 }).mockResolvedValueOnce({ kind: "refused", reason: "not ready" }).mockResolvedValueOnce({ kind: "accepted", entryCount: 1 });
+    const h = harness(undefined, undefined, onText); let tree = h.render(); h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "Student: Ada\nA\nStudent: Bob\nB" } }); tree = h.render();
+    h.button(tree, "I reviewed all names and submissions; grade").props.onClick(); await flush(); tree = h.render();
+    expect(onText.mock.calls.map((call) => call[0])).toEqual(["Ada", "Bob"]); expect(text(tree)).toContain("not ready");
+    h.button(tree, "I reviewed all names and submissions; grade").props.onClick(); await flush(); expect(onText.mock.calls.map((call) => call[0])).toEqual(["Ada", "Bob", "Bob"]);
+  });
+  it("holds an uncertain reviewed-all result without dispatching the next student", async () => {
+    const onText = vi.fn().mockResolvedValue({ kind: "partial", dispatchedCount: 1, refusedCount: 1, reason: "unknown" });
+    const h = harness(undefined, undefined, onText); let tree = h.render(); h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "Student: Ada\nA\nStudent: Bob\nB" } }); tree = h.render();
+    h.button(tree, "I reviewed all names and submissions; grade").props.onClick(); await flush(); tree = h.render();
+    expect(onText).toHaveBeenCalledTimes(1); expect(h.button(tree, "I reviewed all names and submissions; grade").props.disabled).toBe(true);
+    h.button(tree, "I reviewed all names and submissions; grade").props.onClick(); await flush(); expect(onText).toHaveBeenCalledTimes(1);
+  });
   it("clears discussion attestations after editing source and when starting a new paste", () => {
     const h = harness(undefined, undefined, undefined, undefined, false, vi.fn()); let tree = h.render();
     h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();

@@ -17,6 +17,7 @@ import { getRepoGraderIdentity, type RepoGraderIdentity } from "@/lib/repo-grade
 import type { PreparedRepoGradeReadme } from "@/lib/repo-grades-dashboard/preparation-runtime";
 import { repoDigestToEmbeddedEntry } from "@/lib/repo-grade-entry";
 import { makePinnedArchiveReader } from "@/lib/github-grade-archive";
+import { missingSqlCommentRequiresReview } from "@/lib/grade/sql-comment-review";
 
 // The not-merged note (null for every other status) that withBranchNote folds
 // into a REAL grade's comment (AC4: the grade is kept, never zeroed).
@@ -26,7 +27,7 @@ function branchNoteFor(check: BranchMergeCheck): string | null {
 
 export type RepoGradePartialReason =
   | "tree-truncated" | "file-fetch-failed" | "digest-truncated" | "grading-input-truncated"
-  | "unsupported-submission" | "grading-source-rate-limited";
+  | "unsupported-submission" | "grading-source-rate-limited" | "comment-evidence-unverified";
 
 export type RepoGradeResponse =
   | {
@@ -237,6 +238,13 @@ export async function evaluateRepoGrade(
     });
     const zeroRun: GradingRun = { results: [zero], rubricAreaNames: [], fullCreditChecklist: [], speedGraderUrl: null };
     return { run: zeroRun, rubric, fullName: digest.fullName, digestTruncated, readmePath, readmeMissing, branchMergeCheck: noSubCheck };
+  }
+
+  if (sourceCommit && !digestTruncated && digest.inventory?.enumerationComplete
+    && missingSqlCommentRequiresReview(effectiveInstructions, gradableFiles)) {
+    execution?.markKnownFailure();
+    return { error: "This assignment requires a written SQL comment, but no SQL comment was found in the submitted files. Review the submission before grading.",
+      partial: true, sourceCommit, reason: "comment-evidence-unverified" };
   }
 
   // The graded ref had gradable content. Still check the repo's OTHER

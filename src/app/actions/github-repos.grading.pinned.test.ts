@@ -56,6 +56,8 @@ function fakeGitHub(options: { truncated?: boolean; failReadme?: boolean; files?
         return new Response("Write a loop", { status: options.failReadme ? 503 : 200 });
       case `${root}/contents/lab/main.py?ref=${commit}`:
         return new Response(options.solutionText ?? "print('old')");
+      case `${root}/contents/lab/security.sql?ref=${commit}`:
+        return new Response(options.solutionText ?? "CREATE POLICY own_row ON employees;");
       default:
         throw new Error(`Unexpected GitHub URL ${url}`);
     }
@@ -152,6 +154,14 @@ describe("gradeRepoAction pinned source", () => {
     const { fetcher } = fakeGitHub({ files: [readme, solution, unsupported, generated] });
     expect(await gradePinned()).toMatchObject({ partial: true, reason: "unsupported-submission", sourceCommit: commit });
     expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(generateRubric).not.toHaveBeenCalled();
+    expect(gradeEntries).not.toHaveBeenCalled();
+  });
+
+  it("holds the observed missing SQL explanation before any model call", async () => {
+    fakeGitHub({ files: [{ ...solution, path: "lab/security.sql", size: 35 }] });
+    const result = await gradeRepoAction("org/student", "In a comment of at least 5 sentences, explain row-level security.", "Security: 10 points", "gemini", "main", "lab", false, false, true, { sourceCommit: commit });
+    expect(result).toMatchObject({ partial: true, reason: "comment-evidence-unverified", sourceCommit: commit });
     expect(generateRubric).not.toHaveBeenCalled();
     expect(gradeEntries).not.toHaveBeenCalled();
   });

@@ -131,6 +131,11 @@ export function unorderedNoSubmissionContext(
   provenNoSubmission: boolean, staleNoSubmission: boolean,
 ): "score" | "attempt" | null {
   if (!saved || provenNoSubmission || staleNoSubmission || !blocks?.some((item) => item.noSubmission)) return null;
+  if (!saved.scored && saved.latest.status === "no-submission" && saved.latest.sourceRef
+    && /^[0-9a-f]{40}$/i.test(saved.latest.commit ?? "")
+    && blocks.filter((item) => item.noSubmission).every((item) =>
+      item.sourceRef === saved.latest.sourceRef
+      && item.sourceSha?.toLowerCase() === saved.latest.commit?.toLowerCase())) return null;
   return saved.scored ? "score" : "attempt";
 }
 /** A fresh scan can disprove that an older empty result describes the current branch. */

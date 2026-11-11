@@ -1,3 +1,5 @@
+import { restoreStaticTextEvidence } from "@/lib/grade/static-project-evidence";
+import { MAX_STATIC_PROJECT_CONTENT_CHARS } from "@/lib/grade/static-project-limits";
 import { pastedSubmissionUrl } from "@/lib/grade/pasted-submission-url";
 import { isLengthDeductionThresholdWords } from "@/lib/grade/length-deduction-policy";
 import { isSubmissionFileInventories } from "@/lib/grade/submission-file-inventory";
@@ -125,6 +127,7 @@ function isSubmittedFileInfo(value: unknown): value is SubmittedFileInfo {
   if (typeof value.name !== "string" || typeof value.extension !== "string") return false;
   if (typeof value.previewContent !== "string" || typeof value.previewTruncated !== "boolean") return false;
   if (value.rawBase64 !== undefined && typeof value.rawBase64 !== "string") return false;
+  if (value.staticTextMarker !== undefined && typeof value.staticTextMarker !== "string") return false;
   if (value.mimeType !== undefined && typeof value.mimeType !== "string") return false;
   if (value.documentVisuals !== undefined && !isDocumentVisuals(value.documentVisuals)) return false;
   if ((value.extension === "docx" || value.extension === "pptx") && value.documentVisuals?.status === "unavailable") return false;
@@ -178,7 +181,7 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
   if (typeof rawEntry.student !== "string" || rawEntry.student.length === 0 || rawEntry.student.length > MAX_STUDENT_CHARS) {
     return null;
   }
-  if (typeof rawEntry.content !== "string" || rawEntry.content.length > MAX_CONTENT_CHARS) return null;
+  if (typeof rawEntry.content !== "string" || rawEntry.content.length > (rawEntry.staticOnly === true ? MAX_STATIC_PROJECT_CONTENT_CHARS : MAX_CONTENT_CHARS)) return null;
   if (typeof rawEntry.mergedFileCount !== "number") return null;
   if (
     rawEntry.submissionUrl !== undefined &&
@@ -230,6 +233,7 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
   };
 
   if (estimateNeededWireBytes(entry) > ITEM_REQUEST_BYTE_BUDGET) return null;
+  const restored = restoreStaticTextEvidence(entry); if (!restored) return null;
   if ((entry.discussionAxes || entry.submittedFiles.some(f => f.documentVisuals)) && new TextEncoder().encode(JSON.stringify(body)).byteLength > ITEM_REQUEST_BYTE_BUDGET) return null;
 
   if (typeof body.assignmentInstructions !== "string" || body.assignmentInstructions.length > MAX_INSTRUCTIONS_CHARS) {
@@ -248,7 +252,7 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
 
   return {
     sourceIndex: body.sourceIndex,
-    entry,
+    entry: restored,
     assignmentInstructions: body.assignmentInstructions,
     rubric: body.rubric,
     provider: normalizeProvider(typeof body.provider === "string" ? body.provider : undefined),

@@ -456,3 +456,14 @@ describe("gradeEntries evidence provenance", () => {
     expect(failed.results[0].linkFetch).toBe("failed");
   });
 });
+
+it("sends all bounded static project text and holds larger inputs before a model call", async () => {
+  const text = "prefix " + "x".repeat(40) + " END_SENTINEL";
+  mockCallLlm.mockResolvedValueOnce({ ok: true, text: OK_RESPONSE_TEXT });
+  const run = await gradeEntries([entry({ content: text, staticOnly: true })], "Grade.", "Rubric.", "gemini", null, { autoRunCode: false });
+  expect(run.results[0].submissionTruncated).toBe(false);
+  expect(JSON.stringify(mockCallLlm.mock.calls[0][0])).toContain("END_SENTINEL");
+  mockCallLlm.mockClear();
+  const held = await gradeEntries([entry({ content: "x".repeat(3_000_001), staticOnly: true })], "Grade.", "Rubric.", "gemini", null, { autoRunCode: false });
+  expect(held.results[0].ungraded).toBeTruthy(); expect(mockCallLlm).not.toHaveBeenCalled();
+});

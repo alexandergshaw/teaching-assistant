@@ -89,7 +89,7 @@ export interface UseContinuousGradingRunParams {
   readonly dispatchItem?: (request: GradeRunItemRequestBody, sink?: ItemDiagnosticSink) => Promise<GradeResult>;
   /** Injected storaged-zip ingest (BULK-ZIP BW2). Defaults to the real
    * never-throw NDJSON client for POST /api/grade-submission-zip. */
-  readonly ingestZip?: (storagePath: string, provider: string, onEntry: (entry: StudentSubmissionEntry) => void, reviewedZipMapping?: Readonly<Record<string, string>>) => Promise<IngestOutcome>;
+  readonly ingestZip?: (storagePath: string, provider: string, onEntry: (entry: StudentSubmissionEntry) => void, reviewedZipMapping?: Readonly<Record<string, string>>, staticOnly?: true) => Promise<IngestOutcome>;
   /** Injected loose-video prepare (VIDEO-GRADING W4). Defaults to the real
    * never-throw POST /api/grade-submission-video. */
   readonly prepareVideo?: PrepareVideoFn;
@@ -195,7 +195,7 @@ export interface UseContinuousGradingRunResult {
 export function useContinuousGradingRun(params: UseContinuousGradingRunParams): UseContinuousGradingRunResult {
   const { provider, maxEntries = DEFAULT_MAX_ENTRIES, commentSplit } = params;
   const dispatchItem = params.dispatchItem ?? postGradeRunItem;
-  const ingestZip = params.ingestZip ?? ((path, provider, onEntry, mapping) => ingestStoragedZip(path, provider, onEntry, undefined, mapping));
+  const ingestZip = params.ingestZip ?? ((path, provider, onEntry, mapping, staticOnly) => ingestStoragedZip(path, provider, onEntry, undefined, mapping, staticOnly));
   const prepareVideo = params.prepareVideo ?? postPrepareVideo;
   const classifyRecording = params.classifyRecording ?? postClassifyRecording;
   const prepareSingleFile = params.prepareSingleFile ?? postPrepareSingleFile;
@@ -538,7 +538,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       let ingest: IngestOutcome;
       const classifyStartedAtMs = chatSeamNowMs();
       try {
-        ingest = await ingestZip(input.storagePath, provider, (entry) => collected.push(entry), input.reviewedZipMapping);
+        ingest = await ingestZip(input.storagePath, provider, (entry) => collected.push(entry), input.reviewedZipMapping, input.staticOnly);
       } catch {
         // ingestStoragedZip never throws; this guards an injected replacement.
         ingest = { kind: "refused", reason: "The zip could not be prepared." };
@@ -707,6 +707,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         formData.set("kind", "file");
         formData.set("file", input.file);
         if (input.reviewedZipMapping) formData.set("reviewedZipMapping", JSON.stringify(input.reviewedZipMapping));
+        if (input.staticOnly) formData.set("staticOnly", "true");
         // A typed label reaches the server's `labelled` flag, which suppresses
         // name inference (grading-chat-intake.ts reads formData.get("label")).
         formData.set("label", input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS) ?? "");

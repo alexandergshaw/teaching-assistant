@@ -159,6 +159,7 @@ export interface SubmittedFileInfo {
   previewContent: string;
   previewTruncated: boolean;
   rawBase64?: string;
+  staticTextMarker?: string;
   mimeType?: string;
   videoRef?: VideoRef;
   documentVisuals?: import("./document-visual-schema").DocumentVisuals;

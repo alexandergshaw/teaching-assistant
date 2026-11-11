@@ -1,3 +1,4 @@
+import { isStaticProjectText } from "@/lib/grade/static-project-text";
 /**
  * A39 wave 4c (docs/a39-waves.md 8.4.3, step S3): the PURE plan leaf behind
  * the incremental grading pool. Everything here is synchronous and
@@ -124,34 +125,40 @@ export function graderReadsFileBytes(mimeType: string | undefined): boolean {
  * rawBase64 and skips a truncated candidate that has none.
  */
 function fileNeedsRawBytes(file: SubmittedFileInfo): boolean {
-  // Prepared Office pictures replace the container; UI text preview truncation
-  // does not make a DOCX/PPTX a runnable code file.
   if (file.documentVisuals && (file.extension === "docx" || file.extension === "pptx")) return false;
   return graderReadsFileBytes(file.mimeType) || file.previewTruncated;
 }
 
-export function estimateNeededWireBytes(entry: StudentSubmissionEntry): number {
-  if (entry.submittedFiles.some(f => f.documentVisuals)) return new TextEncoder().encode(JSON.stringify(stripUnneededRawBase64(entry))).byteLength;
-  let total = entry.content.length + (entry.repositoryInventories ? new TextEncoder().encode(JSON.stringify(entry.repositoryInventories)).byteLength : 0);
-  if (entry.discussionAxes) total += new TextEncoder().encode(JSON.stringify(entry.discussionAxes)).byteLength;
-  for (const file of entry.submittedFiles) {
-    if (file.rawBase64 && fileNeedsRawBytes(file)) total += file.rawBase64.length;
-  }
-  return total;
+/** Compact static text evidence without dropping its original bytes. */
+export function stripUnneededRawBase64(entry: StudentSubmissionEntry): StudentSubmissionEntry {
+  let content = entry.content, sequence = 0;
+  const submittedFiles = entry.submittedFiles.map((file) => {
+    if (entry.staticOnly && isStaticProjectText(file.extension) && file.rawBase64 && file.rawBase64.length <= 4_000_000) {
+      try {
+        const binary = atob(file.rawBase64), bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+        const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        const first = text ? content.indexOf(text) : -1;
+        if (first >= 0 && content.indexOf(text, first + 1) < 0) {
+          let marker = "";
+          do { marker = `[[STATIC_TEXT_${sequence++}]]`; } while (content.includes(marker));
+          content = content.slice(0, first) + marker + content.slice(first + text.length);
+          return { ...file, staticTextMarker: marker };
+        }
+      } catch { /* The server will refuse unverifiable text evidence. */ }
+      return file;
+    }
+    if (!file.rawBase64 || fileNeedsRawBytes(file)) return file;
+    const { rawBase64: _dropped, ...rest } = file; void _dropped; return rest;
+  });
+  return { ...entry, content, submittedFiles };
 }
 
-/** A copy of `entry` with rawBase64 removed from every file the grader does
- * not need bytes for; visual files keep their bytes. Never mutates `entry`. */
-export function stripUnneededRawBase64(entry: StudentSubmissionEntry): StudentSubmissionEntry {
-  return {
-    ...entry,
-    submittedFiles: entry.submittedFiles.map((file) => {
-      if (!file.rawBase64 || fileNeedsRawBytes(file)) return file;
-      const { rawBase64: _dropped, ...rest } = file;
-      void _dropped;
-      return rest;
-    }),
-  };
+export function estimateNeededWireBytes(entry: StudentSubmissionEntry): number {
+  if (entry.staticOnly || entry.submittedFiles.some((file) => file.documentVisuals)) return new TextEncoder().encode(JSON.stringify(stripUnneededRawBase64(entry))).byteLength;
+  let total = entry.content.length + (entry.repositoryInventories ? new TextEncoder().encode(JSON.stringify(entry.repositoryInventories)).byteLength : 0);
+  if (entry.discussionAxes) total += new TextEncoder().encode(JSON.stringify(entry.discussionAxes)).byteLength;
+  for (const file of entry.submittedFiles) if (file.rawBase64 && fileNeedsRawBytes(file)) total += file.rawBase64.length;
+  return total;
 }
 
 /**

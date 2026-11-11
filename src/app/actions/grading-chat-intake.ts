@@ -155,6 +155,8 @@ export async function prepareChatSubmissionAction(formData: FormData): Promise<I
     try { reviewedMapping = typeof rawMapping === "string" && rawMapping.length <= 1_000_000 ? parseReviewedZipMapping(JSON.parse(rawMapping)) ?? undefined : undefined; } catch { /* Refuse malformed mapping below. */ }
     if (!reviewedMapping || kind !== "file") return { kind: "refused", reason: "The reviewed file mapping is invalid. Nothing was queued.", refusalClass: "read-failed" };
   }
+  const staticOnly = formData.get("staticOnly") === "true";
+  if (formData.get("staticOnly") !== null && (!staticOnly || !reviewedMapping)) return { kind: "refused", reason: "Invalid static review request. Nothing was queued.", refusalClass: "read-failed" };
   return resolveOnePart(kind, {
     provider: normalizeProvider(formData.get("provider") as string | null),
     content: (formData.get("content") as string | null) ?? "",
@@ -165,6 +167,7 @@ export async function prepareChatSubmissionAction(formData: FormData): Promise<I
     labelled: (((formData.get("label") as string | null) ?? "").trim().length > 0),
     deferArchiveLinks: true,
     reviewedMapping,
+    staticOnly,
   });
 }
 
@@ -184,6 +187,7 @@ interface PartData {
   /** Composite merges cannot preserve an unresolved per-part URL. */
   readonly deferArchiveLinks?: boolean;
   readonly reviewedMapping?: Readonly<Record<string, string>>;
+  readonly staticOnly?: boolean;
 }
 
 /** Module-private per-kind resolution shared by prepareChatSubmissionAction
@@ -257,7 +261,7 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
       } else {
         return assertNeverUploadKind(uploadKind);
       }
-      return batchOutcome(entries, null, classification);
+      return batchOutcome(data.staticOnly ? entries.map((entry) => ({ ...entry, staticOnly: true as const })) : entries, null, classification);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not read this file.";
       return { kind: "refused", reason: message, refusalClass: "read-failed" };

@@ -134,6 +134,8 @@ export async function POST(req: NextRequest) {
   const body = (typeof rawBody === "object" && rawBody !== null ? rawBody : {}) as Record<string, unknown>;
   const storagePath = typeof body.storagePath === "string" ? body.storagePath : "";
   const provider = normalizeProvider(typeof body.provider === "string" ? body.provider : null);
+  const staticOnly = body.staticOnly === true;
+  if (body.staticOnly !== undefined && (!staticOnly || body.reviewedZipMapping === undefined)) return NextResponse.json({ error: "Invalid static review request. Nothing was queued." }, { status: 400 });
   const reviewedMapping = body.reviewedZipMapping === undefined ? undefined : parseReviewedZipMapping(body.reviewedZipMapping);
   if (body.reviewedZipMapping !== undefined && !reviewedMapping) return NextResponse.json({ error: "The reviewed file mapping is invalid. Nothing was queued." }, { status: 400 });
 
@@ -277,7 +279,7 @@ export async function POST(req: NextRequest) {
     const more = failedSupportedFiles.length > 3 ? ` and ${failedSupportedFiles.length - 3} more` : "";
     return ndjsonResponse([encodeIngestLine({ type: "done", error: `Some files in the archive could not be read: ${shown}${more}. Fix the archive and try again.` })]);
   }
-  const lines = buildIngestLines(entries, failedSupportedFiles, undefined, classification, videoOutcomes);
+  const lines = buildIngestLines(staticOnly ? entries.map((entry) => ({ ...entry, staticOnly: true as const })) : entries, failedSupportedFiles, undefined, classification, videoOutcomes);
   const emittedRefs = new Set(lines.flatMap((line) => line.type === "entry"
     ? line.entry.submittedFiles.flatMap((file) => file.videoRef ? [file.videoRef.storagePath] : [])
     : []));

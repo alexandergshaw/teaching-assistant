@@ -388,3 +388,17 @@ describe("POST /api/grade-submission-zip", () => {
     expect(removeFilesMock).toHaveBeenCalledWith("course-files", [GOOD_PATH]);
   });
 });
+
+it("carries static review through stored ZIP extraction and preserves the original CSV in the stream", async () => {
+  const text = "id,value\n" + "x".repeat(2_040_000), rawBase64 = Buffer.from(text).toString("base64");
+  const entry = { student: "Synthetic", content: text, mergedFileCount: 1, submittedFiles: [{ name: "data.csv", extension: "csv", mimeType: "text/csv", previewContent: "id,value", previewTruncated: true, rawBase64 }] };
+  ingestZipEntriesMock.mockResolvedValue({ entries: [entry], attemptedSupportedFiles: 1, failedSupportedFiles: [] });
+  const mapping = { "ada_1_2_work.txt": "Synthetic" };
+  const ordinary = await readLines(await POST(jsonRequest({ storagePath: GOOD_PATH, reviewedZipMapping: mapping })));
+  expect(ordinary[0].type).toBe("skip");
+  const reviewed = await readLines(await POST(jsonRequest({ storagePath: GOOD_PATH, reviewedZipMapping: mapping, staticOnly: true })));
+  expect(reviewed[0].type).toBe("entry");
+  const returned = reviewed[0].entry as typeof entry & { staticOnly: boolean };
+  expect(returned.staticOnly).toBe(true); expect(returned.content).toBe(text); expect(returned.submittedFiles[0].rawBase64).toBe(rawBase64);
+  expect((await POST(jsonRequest({ storagePath: GOOD_PATH, staticOnly: true }))).status).toBe(400);
+});

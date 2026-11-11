@@ -24,3 +24,32 @@ it.each([rubric.replace("\n25\n", "\nmissing\n"), rubric.replace("Criteria\n", "
   const response = await POST({ headers: new Headers({ "content-type": "application/json" }), json: async () => request } as NextRequest);
   expect(response.status).not.toBe(200); expect(llm).not.toHaveBeenCalled();
 });
+
+it("passes bounded static project content to the model without truncation", async () => {
+  llm.mockResolvedValue({ ok: true, text: JSON.stringify({ overallComment: "Reviewed", rubricResults: names.map((area, i) => ({ area, score: `${weights[i]}/${weights[i]}` })) }) });
+  const content = "BEGIN " + "x".repeat(2_060_000) + " END_OF_FULL_DATA";
+  const request = { sourceIndex: 0, entry: { student: "Synthetic", content, mergedFileCount: 0, submittedFiles: [], staticOnly: true }, assignmentInstructions: "Review this synthetic work.", rubric, provider: "gemini", pointsPossible: 100 };
+  const response = await POST({ headers: new Headers({ "content-type": "application/json" }), json: async () => request } as NextRequest);
+  const body = await response.json(); expect(response.status).toBe(200); expect(body.result.ungraded).toBeFalsy(); expect(body.result.submissionTruncated).toBeFalsy();
+  expect(JSON.stringify(llm.mock.lastCall?.[0])).toContain("END_OF_FULL_DATA");
+});
+
+it("restores a large static CSV before the model call and refuses corrupt CSV evidence", async () => {
+  const { stripUnneededRawBase64 } = await import("@/app/components/grading/incrementalRunPlan");
+  const text = "id,value\n" + "x".repeat(2_040_000) + " END_OF_CSV", file = { name: "dataset.csv", extension: "csv", previewContent: "id,value", previewTruncated: true, mimeType: "text/csv", rawBase64: Buffer.from(text).toString("base64") };
+  const entry = stripUnneededRawBase64({ student: "Synthetic", content: `header\n${text}\nfooter`, mergedFileCount: 1, submittedFiles: [file], staticOnly: true });
+  const request = { sourceIndex: 0, entry, assignmentInstructions: "Review synthetic work.", rubric, provider: "gemini", pointsPossible: 100 };
+  llm.mockClear(); llm.mockResolvedValue({ ok: true, text: JSON.stringify({ overallComment: "Reviewed", rubricResults: names.map((area, i) => ({ area, score: `${weights[i]}/${weights[i]}` })) }) });
+  const send = (body: unknown) => POST({ headers: new Headers({ "content-type": "application/json" }), json: async () => body } as NextRequest);
+  const response = await send(request); expect(response.status).toBe(200); expect(JSON.stringify(llm.mock.lastCall?.[0])).toContain("END_OF_CSV");
+  llm.mockClear(); const bad = { ...request, entry: { ...entry, submittedFiles: [{ ...entry.submittedFiles[0], rawBase64: "/w==" }] } };
+  expect((await send(bad)).status).toBe(400); expect(llm).not.toHaveBeenCalled();
+});
+
+it("refuses invalid UTF-8 C++ before calling the model", async () => {
+  const { stripUnneededRawBase64 } = await import("@/app/components/grading/incrementalRunPlan");
+  const entry = stripUnneededRawBase64({ student: "Synthetic", content: "replacement", mergedFileCount: 1, staticOnly: true, submittedFiles: [{ name: "main.cpp", extension: "cpp", previewContent: "replacement", previewTruncated: false, rawBase64: "/w==" }] });
+  const request = { sourceIndex: 0, entry, assignmentInstructions: "Review.", rubric, provider: "gemini", pointsPossible: 100 };
+  llm.mockClear(); const response = await POST({ headers: new Headers({ "content-type": "application/json" }), json: async () => request } as NextRequest);
+  expect(response.status).toBe(400); expect(llm).not.toHaveBeenCalled();
+});

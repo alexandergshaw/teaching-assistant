@@ -200,14 +200,15 @@ export async function ingestStoragedZip(
   provider: string,
   onEntry: (entry: StudentSubmissionEntry) => void,
   fetchImpl: IngestFetch = (url, init) => fetch(url, init),
-  reviewedZipMapping?: Readonly<Record<string, string>>
+  reviewedZipMapping?: Readonly<Record<string, string>>,
+  staticOnly?: true
 ): Promise<IngestOutcome> {
   let entryCount = 0;
   try {
     const response = await fetchImpl(INGEST_ROUTE, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ storagePath, provider, ...(reviewedZipMapping ? { reviewedZipMapping } : {}) }),
+      body: JSON.stringify({ storagePath, provider, ...(reviewedZipMapping ? { reviewedZipMapping } : {}), ...(staticOnly ? { staticOnly } : {}) }),
     });
     if (!response.ok) return { kind: "refused", reason: await refusalFromResponse(response) };
     if (!response.body) return { kind: "refused", reason: "The zip could not be prepared (empty response)." };

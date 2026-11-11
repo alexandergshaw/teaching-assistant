@@ -244,3 +244,10 @@ describe("classification carrier (ZIP-CLASS-VS-SINGLE)", () => {
     if (outcome.kind === "complete") expect(outcome.ledger.classification).toBeUndefined();
   });
 });
+
+it("forwards the reviewed static-project flag to the storage route", async () => {
+  let body = "";
+  const fetcher: IngestFetch = async (_url, init) => { body = String(init.body); return okFetch(buildIngestLines([], []))(_url, init); };
+  await ingestStoragedZip("u/grading-uploads/a.zip", "gemini", () => {}, fetcher, { "a.zip/main.cpp": "Synthetic" }, true);
+  expect(JSON.parse(body)).toMatchObject({ staticOnly: true, reviewedZipMapping: { "a.zip/main.cpp": "Synthetic" } });
+});

@@ -466,3 +466,17 @@ describe("prepareCompositeSubmissionAction", () => {
     expect((await prepareCompositeSubmissionAction(fd)).kind).toBe("refused");
   });
 });
+
+it("keeps full static CSV evidence through reviewed ZIP body intake", async () => {
+  const text = "id,value\n" + "x".repeat(2_040_000), rawBase64 = Buffer.from(text).toString("base64");
+  const file = new File(["zip"], "submissions.zip", { type: "application/zip" });
+  const entry = { student: "Synthetic", content: text, mergedFileCount: 1, submittedFiles: [{ name: "data.csv", extension: "csv", mimeType: "text/csv", previewContent: "id,value", previewTruncated: true, rawBase64 }] };
+  mockIngestZipEntries.mockResolvedValue(ingested([entry]));
+  const mapping = JSON.stringify({ "ada_1_2_work.txt": "Synthetic" });
+  const ordinary = await prepareChatSubmissionAction(fileFormData(file, { reviewedZipMapping: mapping }));
+  expect(ordinary.kind).toBe("refused");
+  const reviewed = await prepareChatSubmissionAction(fileFormData(file, { reviewedZipMapping: mapping, staticOnly: "true" }));
+  expect(reviewed.kind).toBe("entries");
+  if (reviewed.kind === "entries") { expect(reviewed.entries[0].staticOnly).toBe(true); expect(reviewed.entries[0].content).toBe(text); expect(reviewed.entries[0].submittedFiles[0].rawBase64).toBe(rawBase64); }
+  const invalid = await prepareChatSubmissionAction(fileFormData(file, { staticOnly: "true" })); expect(invalid.kind).toBe("refused");
+});

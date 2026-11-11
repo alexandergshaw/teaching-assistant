@@ -19,10 +19,24 @@ describe("SQL comment review preflight", () => {
     expect(check("/* One. Two. Three. Four. Five.")).toBe(true);
     expect(check("# One. Two. Three. Four. Five.\nSELECT 1;")).toBe(true);
   });
-  it("recognizes a spelled-out count, and does not infer unstated or mixed-file requirements", () => {
+  it("recognizes a spelled-out count and does not infer unstated requirements", () => {
     expect(review("In a comment of at least five sentences, explain row-level security.", [{ path: "security.sql", content: "SELECT 1;" }])).toBe(true);
     expect(review(instructions, [])).toBe(false);
     expect(review(instructions, [{ path: "answer.txt", content: "Explanation" }])).toBe(false);
     expect(review("Explain row-level security.", [{ path: "security.sql", content: "SELECT 1;" }])).toBe(false);
+  });
+  it("checks SQL explanations even when other submission files are present", () => {
+    const sql = { path: "security.sql", content: "SELECT 1;" };
+    const notes = { path: "notes.txt", content: "One. Two. Three. Four. Five." };
+    expect(review(instructions, [sql, notes])).toBe(true);
+    expect(review(instructions, [{ ...sql, content: "-- One. Two. Three. Four. Five." }, notes])).toBe(true);
+    expect(review("In a SQL comment of at least 5 sentences, explain row-level security.", [{ ...sql, content: "-- One. Two. Three. Four. Five." }, notes])).toBe(false);
+  });
+  it("does not combine unrelated comment blocks or separate files", () => {
+    expect(check("/* One. Two. Three. */ SELECT 1; /* Four. Five. */")).toBe(true);
+    expect(review(instructions, [{ path: "a.sql", content: "-- One. Two. Three." }, { path: "b.sql", content: "-- Four. Five." }])).toBe(true);
+    expect(check("-- One. Two. Three.\n\n-- Four. Five.")).toBe(true);
+    expect(check("/*! One. Two. Three. Four. Five. */ SELECT 1;")).toBe(true);
+    expect(check("/*+ One. Two. Three. Four. Five. */ SELECT 1;")).toBe(true);
   });
 });

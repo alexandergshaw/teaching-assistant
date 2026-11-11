@@ -243,7 +243,7 @@ export async function evaluateRepoGrade(
   if (sourceCommit && !digestTruncated && digest.inventory?.enumerationComplete
     && missingSqlCommentRequiresReview(effectiveInstructions, gradableFiles)) {
     execution?.markKnownFailure();
-    return { error: "The required SQL comment explanation could not be verified in the submitted files. Review the submission before grading.",
+    return { error: "A required comment explanation could not be verified in the submitted files. Review the assignment and submission before grading.",
       partial: true, sourceCommit, reason: "comment-evidence-unverified" };
   }
 
@@ -340,3 +340,4 @@ export async function evaluateRepoGrade(
   }
   return { run, rubric: effectiveRubric, fullName: digest.fullName, ...provenance, digestTruncated, readmePath, readmeMissing, branchMergeCheck: mergedCheck };
 }
+

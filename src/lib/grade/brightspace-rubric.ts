@@ -1,5 +1,21 @@
 import type { RubricCriterion } from "./types";
 import { normalizeAreaName } from "./prompts";
+import type { RubricAreaResult } from "./types";
+
+/** Reject unlisted ratings, incomplete criteria and altered scales; never round. */
+export function validateBrightspaceRatings(areas: readonly RubricAreaResult[], criteria: readonly RubricCriterion[]): boolean {
+  if (areas.length !== criteria.length) return false;
+  const seen = new Set<string>();
+  for (const area of areas) {
+    const key = normalizeAreaName(area.area), criterion = criteria.find((item) => normalizeAreaName(item.name) === key);
+    const match = area.score.trim().match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
+    if (!criterion || seen.has(key) || criterion.points === null || !match) return false;
+    const earned = Number(match[1]), possible = Number(match[2]);
+    if (possible !== criterion.points || ![0, 0.7 * possible, possible].some((allowed) => Math.abs(earned - allowed) < 1e-9)) return false;
+    seen.add(key);
+  }
+  return true;
+}
 
 /** Parse the flattened three-rating Brightspace rubric only when the complete table is recognizable. */
 export function parseBrightspaceRubric(text: string): { kind: "other" } | { kind: "invalid" } | { kind: "parsed"; criteria: RubricCriterion[] } {

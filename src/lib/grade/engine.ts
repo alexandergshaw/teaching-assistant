@@ -32,6 +32,7 @@ import { collectInlineVisualEvidence } from "./inline-visuals";
 import { truncateSubmission, sleep, buildCodeExecutionNote } from "./utils";
 import { parseRubricResponse, hasParseableRubricJson, extractStrengthsField, pointsWereDeducted, deriveTotalScore, scaleResultToPoints, formatFeedback, normalizeGeminiError } from "./parsing";
 import { buildSystemPrompt, extractRubricCriteria, extractRubricCriteriaForEvidence } from "./rubric";
+import { parseBrightspaceRubric, validateBrightspaceRatings } from "./brightspace-rubric";
 import { buildSubmittedFileNamesBlock, composeReplyExclusionDisclosure, SUBMISSION_FRAMING_HEADER } from "./prompts";
 // A39 wave 4b (docs/a39-waves.md 8.4.2): the canonical-column reconciliation
 // that used to be inline here is now a PURE projection (reconcile.ts),
@@ -249,12 +250,14 @@ async function gradeSubmission(
   callSink?: GradeCallSink,
   executionOptions?: GradingRunOptions,
   repositoryInventories?: SubmissionFileInventory[],
-  lengthExemption?: { criteria: RubricCriterion[]; exempt: RubricCriterion } | null
+  lengthExemption?: { criteria: RubricCriterion[]; exempt: RubricCriterion } | null,
+  brightspaceCriteria?: RubricCriterion[]
 ): Promise<GradedResult> {
   const axis = await scoreAxis(systemPrompt, studentName, content, provider, inlineFiles, codeRun, submittedFiles, commentSplit, videoGradeWindowSec, callSink, executionOptions, repositoryInventories);
   const areas = lengthExemption ? addLengthExemption(axis.rubricAreas, lengthExemption.criteria, lengthExemption.exempt) : axis.rubricAreas;
   if (!areas) throw new GradeCallError("The model did not return all substantive rubric scores on their stated scales. Review or retry; no grade was produced.", "model unparseable");
-  const derivedTotal = deriveTotalScore(lengthExemption ? "" : axis.modelTotalScore, areas);
+  if (brightspaceCriteria && !validateBrightspaceRatings(areas, brightspaceCriteria)) throw new GradeCallError("The model returned a score outside the rubric's allowed ratings or an incomplete criterion. Review or retry; no grade was produced.", "model unparseable");
+  const derivedTotal = deriveTotalScore(lengthExemption || brightspaceCriteria ? "" : axis.modelTotalScore, areas);
   return finalizeGrade(studentName, areas, derivedTotal, axis.strengths, axis.improvements, pointsPossible);
 }
 
@@ -472,6 +475,7 @@ async function gradeStudentEntries(
   const audit = evidenceOnly ? extractRubricCriteriaForEvidence(rubric) : null;
   if (evidenceOnly && (!audit?.ok || !options.evidenceContext || provider !== "gemini" || studentSubmissions.some((entry) => entry.discussionAxes || entry.content.length > maxCharsPerSubmission || entry.submittedFiles.some((file) => file.videoRef)))) throw new Error("Unsupported or incomplete evidence grading input.");
   const criteria = audit?.ok ? audit.criteria : extractRubricCriteria(rubric);
+  const brightspace = parseBrightspaceRubric(rubric);
   const scoringInstructions = options.suppressLengthDeduction ? withoutSupportedInstructionLength(assignmentInstructions) : assignmentInstructions;
   const lengthExemption = options.suppressLengthDeduction && !evidenceOnly && studentSubmissions.every((entry) => !entry.discussionAxes?.initialPostAbsentConfirmed) ? extractLengthOnlyExemption(rubric, criteria) : null;
   const scoringRubric = lengthExemption?.rubric ?? (options.suppressLengthDeduction ? withoutSupportedRubricLength(rubric) : rubric);
@@ -564,6 +568,7 @@ async function gradeStudentEntries(
         : await runSubmittedCode(submittedFiles));
 
     try {
+      if (initialTrunc && brightspace.kind === "parsed") throw new GradeCallError("This rubric cannot be safely scored as separate discussion axes. Review manually; no grade was produced.", "model unparseable");
       const result = initialTrunc
         ? await gradeDiscussionAxes({
             student,
@@ -601,7 +606,8 @@ async function gradeStudentEntries(
             callSink,
             options,
             repositoryInventories,
-            lengthExemption
+            lengthExemption,
+            brightspace.kind === "parsed" ? brightspace.criteria : undefined
           );
       const disclosedStrengths = scoringInstructions !== assignmentInstructions || scoringRubric !== rubric ? [result.strengths, "Length requirements were not used for scoring."].filter(Boolean).join("\n\n") : result.strengths;
       const disclosedComment = composeOverallComment(disclosedStrengths, result.improvements, result.resubmitNotice);

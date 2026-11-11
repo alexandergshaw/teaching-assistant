@@ -630,6 +630,7 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
   };
   const handleSubmitFiles = (files: File[], label?: string, reviewedZipMapping?: Readonly<Record<string, string>>, evidenceOmissions?: readonly string[], staticOnly?: true, explicitReviewed = false, mode?: "single" | "multiple", perStudentEvidence?: PerStudentEvidence, expectedOwnerSession?: ExpectedOwnerSession): Promise<DirectFileOutcome[]> => {
     const blocked = directIntake.current.isPending() || preparing || driver.headerState === "resolving";
+    if (!blocked && mode === "single" && files.some((file) => oversizedReviewCandidate([file]))) return Promise.resolve(files.map(() => ({ kind: "refused" as const, reason: "This single-student archive exceeds the current grading limit. Nothing was submitted." })));
     if (!blocked && files.length > 1 && files.some((file) => oversizedReviewCandidate([file]))) {
       if (files.some((file) => !/\.zip$/i.test(file.name))) return Promise.resolve(files.map(() => ({ kind: "refused" as const, reason: "Select oversized ZIPs separately from other files so each submission stays together." })));
       const epoch = dropSessionEpoch.current;

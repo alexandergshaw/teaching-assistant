@@ -12,6 +12,33 @@ create unique index repo_grade_refresh_revision_unique
   on public.repo_grade_target_requests (user_id, course_id, lower(repo), folder, refresh_ref, refresh_sha)
   where refresh_sha is not null and state in ('queued', 'paused', 'running', 'complete');
 
+create function public.repo_grade_refresh_eligible(
+  p_user_id uuid, p_course_id uuid, p_folder text, p_repo text, p_ref text, p_sha text
+) returns boolean language sql security invoker set search_path = '' as $$
+  select exists (select 1 from public.repo_grade_attempts a where a.user_id = p_user_id
+      and a.course_id = p_course_id and lower(a.repo) = lower(p_repo) and a.folder = p_folder
+      and a.source_ref = p_ref and a.source_sha <> p_sha and a.status = 'no-submission'
+      and a.generation = (select max(newer.generation) from public.repo_grade_attempts newer
+        where newer.user_id = p_user_id and newer.course_id = p_course_id
+          and lower(newer.repo) = lower(p_repo) and newer.folder = p_folder)
+      and not exists (select 1 from public.repo_grade_automatic_targets later
+        join public.repo_grade_automatic_runs lr on lr.id = later.run_id
+        where lr.user_id = p_user_id and later.course_id = p_course_id and lower(later.repo) = lower(p_repo)
+          and later.folder = p_folder and later.source_sha <> p_sha and lr.created_at > a.claimed_at))
+    or (not exists (select 1 from public.repo_grade_attempts a where a.user_id = p_user_id
+        and a.course_id = p_course_id and lower(a.repo) = lower(p_repo) and a.folder = p_folder)
+      and exists (select 1 from public.repo_grade_automatic_targets t
+        join public.repo_grade_automatic_runs r on r.id = t.run_id
+        where r.user_id = p_user_id and t.course_id = p_course_id and lower(t.repo) = lower(p_repo)
+          and t.folder = p_folder and t.source_ref = p_ref and t.source_sha <> p_sha and t.state = 'no-submission'
+          and not exists (select 1 from public.repo_grade_automatic_targets later
+            join public.repo_grade_automatic_runs lr on lr.id = later.run_id
+            where lr.user_id = p_user_id and later.course_id = p_course_id
+              and lower(later.repo) = lower(p_repo) and later.folder = p_folder and later.source_sha <> p_sha and later.id > t.id)));
+$$;
+revoke all on function public.repo_grade_refresh_eligible(uuid, uuid, text, text, text, text) from public, anon, authenticated, service_role;
+grant execute on function public.repo_grade_refresh_eligible(uuid, uuid, text, text, text, text) to service_role;
+
 create function public.repo_grade_refresh_enqueue(
   p_user_id uuid, p_course_id uuid, p_folder text, p_repo text, p_ref text, p_sha text, p_explicit boolean
 ) returns text language plpgsql security invoker set search_path = '' as $$
@@ -23,31 +50,10 @@ begin
     or p_explicit is null or (not p_explicit and not exists (select 1 from public.repo_grade_automatic_settings s where s.user_id = p_user_id and s.enabled))
     then return 'invalid'; end if;
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('repo-grade-target-enqueue:' || p_user_id::text, 0));
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('repo-grade:' || p_user_id::text, 0));
   -- Only the latest receipt for this cell can authorize refresh. Later
   -- success, failures, unresolved attempts, and other refs all prevent it.
-  if not exists (select 1 from public.repo_grade_attempts a where a.user_id = p_user_id
-      and a.course_id = p_course_id and lower(a.repo) = lower(p_repo) and a.folder = p_folder
-      and a.source_ref = p_ref and a.source_sha <> p_sha and a.status = 'no-submission'
-      and a.generation = (select max(newer.generation) from public.repo_grade_attempts newer
-        where newer.user_id = p_user_id and newer.course_id = p_course_id
-          and lower(newer.repo) = lower(p_repo) and newer.folder = p_folder)
-      and not exists (select 1 from public.repo_grade_automatic_targets later
-        join public.repo_grade_automatic_runs lr on lr.id = later.run_id
-        where lr.user_id = p_user_id and later.course_id = p_course_id and lower(later.repo) = lower(p_repo)
-          and later.folder = p_folder and lr.created_at > a.claimed_at))
-    and not (
-      -- A discovery-only empty target has no receipt. Admit it only when no
-      -- receipt exists at all and no later target could supersede it.
-      not exists (select 1 from public.repo_grade_attempts a where a.user_id = p_user_id
-        and a.course_id = p_course_id and lower(a.repo) = lower(p_repo) and a.folder = p_folder)
-      and exists (select 1 from public.repo_grade_automatic_targets t
-        join public.repo_grade_automatic_runs r on r.id = t.run_id
-        where r.user_id = p_user_id and t.course_id = p_course_id and lower(t.repo) = lower(p_repo)
-          and t.folder = p_folder and t.source_ref = p_ref and t.source_sha <> p_sha and t.state = 'no-submission'
-          and not exists (select 1 from public.repo_grade_automatic_targets later
-            join public.repo_grade_automatic_runs lr on lr.id = later.run_id
-            where lr.user_id = p_user_id and later.course_id = p_course_id
-              and lower(later.repo) = lower(p_repo) and later.folder = p_folder and later.id > t.id)))
+  if not public.repo_grade_refresh_eligible(p_user_id, p_course_id, p_folder, p_repo, p_ref, p_sha)
     then return 'invalid'; end if;
   if (select count(*) from public.repo_grade_target_requests where user_id = p_user_id and state in ('queued', 'paused', 'running')) >= 1000
     then return 'invalid'; end if;
@@ -86,6 +92,8 @@ begin
       and r.lease_until > clock_timestamp() and r.phase = 'grading' and not r.targeted_paused for update;
   if not found then return jsonb_build_object('status', 'forbidden'); end if;
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('repo-grade:' || p_user_id::text, 0));
+  if not public.repo_grade_refresh_eligible(p_user_id, p_course_id, p_folder, p_repo, p_source_ref, p_source_sha)
+    then return jsonb_build_object('status', 'configuration-changed'); end if;
   if not exists (select 1 from public.repo_grade_target_requests q
     where q.run_id = p_run_id and q.user_id = p_user_id and q.course_id = p_course_id
       and q.state = 'running' and lower(q.repo) = lower(p_repo) and q.folder = p_folder

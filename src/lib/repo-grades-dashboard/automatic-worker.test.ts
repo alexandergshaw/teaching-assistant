@@ -40,6 +40,12 @@ describe("durable repository grading discovery", () => {
     mocks.evaluate.mockClear();
     await expect(worker({ ...work, sha: "b".repeat(40) }, "lease")).resolves.toEqual({ state: "blocked", reason: "changed-source-mismatch" });
     expect(mocks.evaluate).not.toHaveBeenCalled();
+    for (const prior of ["recoverable-partial", "recoverable-text"] as const) {
+      mocks.history.mockImplementation(async (_owner, _course, targets: RepoGradeStartupTarget[]) =>
+        new Map(targets.map((target) => [repoGradeStartupKey(target), prior])));
+      await expect(worker(work, "lease")).resolves.toEqual({ state: "partial", reason: "prior-attempt" });
+      expect(mocks.evaluate).not.toHaveBeenCalled();
+    }
   });
 
   it("queues a prepared partial and uses the fenced recovery claim only for that state", async () => {

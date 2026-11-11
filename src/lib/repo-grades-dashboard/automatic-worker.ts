@@ -122,6 +122,11 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
     const history = await readRepoGradeStartupHistory(accountId, courseId, [target]);
     const prior = history?.get(repoGradeStartupKey(target));
     if (!prior) return { state: "blocked", reason: "history-unavailable" };
+    // A refresh may only use the automatic claim. Recovery is a separate
+    // capability and must not be combined with the refresh lease fence.
+    if (refresh && (prior === "recoverable-partial" || prior === "recoverable-text")) {
+      return { state: "partial", reason: "prior-attempt" };
+    }
     if (!targeted && prior === "recoverable-text" && !(snapshot && plan.discovery.status === "scanned"
       && plan.discovery.repos.some((row) => row.status === "ready" && row.repo === work.repo
         && row.sourceRef === work.ref && row.sourceCommit === work.sha && row.textRecoveryFolders?.includes(work.folder)))) {

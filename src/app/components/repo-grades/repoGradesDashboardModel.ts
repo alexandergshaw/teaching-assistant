@@ -126,14 +126,13 @@ export function newerVerifiedNoSubmission(
   });
 }
 
-export function hasUnorderedNoSubmissionAndScore(
+export function unorderedNoSubmissionContext(
   saved: RepoGradeSavedResult | undefined, blocks: readonly AutomaticRepoGradeBlock[] | undefined,
   provenNoSubmission: boolean, staleNoSubmission: boolean,
-): boolean {
-  return !!saved?.scored && !provenNoSubmission && !staleNoSubmission
-    && !!blocks?.some((item) => item.noSubmission);
+): "score" | "attempt" | null {
+  if (!saved || provenNoSubmission || staleNoSubmission || !blocks?.some((item) => item.noSubmission)) return null;
+  return saved.scored ? "score" : "attempt";
 }
-
 /** A fresh scan can disprove that an older empty result describes the current branch. */
 export function noSubmissionMatchesScan(
   sourceRef: string | undefined, sourceCommit: string | undefined, browser: RepoGradesDashboardRow | undefined,

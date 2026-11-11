@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { OrgRepoTreesResult } from "@/lib/repo-grade-tree-scan";
 import { defaultRepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
 import {
-  hasUnorderedNoSubmissionAndScore, addRepoGradeSavedPage, buildRepoGradeMatrix, buildRepoGradesDashboard, mergeIncompleteRepoGradeResults, newerVerifiedNoSubmission, noSubmissionMatchesScan, savedResultIsEarlierThanObservedPin, updateRepoGradesCourseEdits, visibleRepoGradebookRows,
+  unorderedNoSubmissionContext, addRepoGradeSavedPage, buildRepoGradeMatrix, buildRepoGradesDashboard, mergeIncompleteRepoGradeResults, newerVerifiedNoSubmission, noSubmissionMatchesScan, savedResultIsEarlierThanObservedPin, updateRepoGradesCourseEdits, visibleRepoGradebookRows,
   type RepoGradeSavedAttempt, type RepoGradeSavedResult,
 } from "./repoGradesDashboardModel";
 import { ALL_FOLDERS } from "./repoGradesFolderSelection";
@@ -36,15 +36,20 @@ function attempt(generation: number, repo: string, folder: string, score: number
 }
 
 describe("class repository results", () => {
-  it("mentions ordering against a grade only when a score exists", () => {
+  it("identifies whether an unordered no-submission check relates to a score or an attempt", () => {
     const empty = { ...attempt(1, "org/a", "lab", null), status: "no-submission" as const };
     const score = attempt(2, "org/a", "lab", 90);
     const evidence = [{ repo: "org/a", folder: "lab", sourceRef: "main", explanation: "", noSubmission: true as const }];
-    expect(hasUnorderedNoSubmissionAndScore({ latest: empty, scored: null }, evidence, false, false)).toBe(false);
-    expect(hasUnorderedNoSubmissionAndScore({ latest: empty, scored: score }, evidence, false, false)).toBe(true);
-    expect(hasUnorderedNoSubmissionAndScore({ latest: empty, scored: score }, evidence, true, false)).toBe(false);
-    expect(hasUnorderedNoSubmissionAndScore({ latest: empty, scored: score }, evidence, false, true)).toBe(false);
-    expect(hasUnorderedNoSubmissionAndScore({ latest: empty, scored: score }, [], false, false)).toBe(false);
+    expect(unorderedNoSubmissionContext({ latest: empty, scored: null }, evidence, false, false)).toBe("attempt");
+    expect(unorderedNoSubmissionContext({ latest: empty, scored: score }, evidence, false, false)).toBe("score");
+    const zero = attempt(3, "org/a", "lab", 0);
+    expect(unorderedNoSubmissionContext({ latest: empty, scored: zero }, evidence, false, false)).toBe("score");
+    for (const status of ["failed", "unknown"] as const) {
+      expect(unorderedNoSubmissionContext({ latest: { ...empty, status }, scored: null }, evidence, false, false)).toBe("attempt");
+    }
+    expect(unorderedNoSubmissionContext({ latest: empty, scored: score }, evidence, true, false)).toBeNull();
+    expect(unorderedNoSubmissionContext({ latest: empty, scored: score }, evidence, false, true)).toBeNull();
+    expect(unorderedNoSubmissionContext({ latest: empty, scored: score }, [], false, false)).toBeNull();
   });
   it("does not treat an old empty check as current after the scanned branch changes", () => {
     const oldCommit = "a".repeat(40), newCommit = "b".repeat(40);

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { Accordion, AccordionDetails, AccordionSummary } from "@mui/material";
 import type { RecoverableGroup } from "@/lib/grade/large-zip-subset";
 import { listPartialHandoffs, type PartialHandoffRecord } from "./partialHandoffLedger";
 
@@ -10,9 +11,25 @@ export function usePartialHandoffRecords(account: string | undefined) {
 }
 
 export function PartialHandoffNotice({ omissions, records }: { omissions: readonly RecoverableGroup[]; records: readonly PartialHandoffRecord[] }) {
+  const omittedCount = records.reduce((count, record) => count + record.omitted.length, 0);
+  const statuses = (["pending", "accepted", "refused", "unknown"] as const)
+    .map((status) => ({ status, count: records.filter((record) => record.status === status).length }))
+    .filter(({ count }) => count > 0).map(({ status, count }) => `${count} ${status}`).join(", ");
   return <>
     {records.length === 50 && <p role="status">Only the first 50 saved partial intake records are displayed. Earlier records still block overlapping submissions.</p>}
-    {records.map((record) => <p key={`${record.sourceDigest}:${record.subsetDigest}`} role="status">Prior partial archive ({record.status}; source {record.sourceDigest.slice(0, 12)}): omitted {record.omitted.map((group) => `${group.student} (${group.reason}): ${group.files.join(", ")}`).join("; ") || "none"}. Check earlier results before retrying.</p>)}
-    {omissions.length > 0 && <p role="status">Partial archive, not queued: {omissions.map((group) => `${group.label} (${group.reason ?? "not selected"}): ${group.members.map((member) => member.path).join(", ")}`).join("; ")}</p>}
+    {records.length > 0 && <Accordion disableGutters elevation={0}>
+      <AccordionSummary expandIcon={<span aria-hidden="true">+</span>}>
+        <span role="status">{`${records.length} prior partial archive ${records.length === 1 ? "record" : "records"} (${statuses}); ${omittedCount} omitted group ${omittedCount === 1 ? "entry" : "entries"} across records. Check earlier results before retrying.`}</span>
+      </AccordionSummary>
+      <AccordionDetails>
+        {records.map((record) => <p key={`${record.sourceDigest}:${record.subsetDigest}`}>Prior partial archive ({record.status}; source {record.sourceDigest.slice(0, 12)}): omitted {record.omitted.map((group) => `${group.student} (${group.reason}): ${group.files.join(", ")}`).join("; ") || "none"}.</p>)}
+      </AccordionDetails>
+    </Accordion>}
+    {omissions.length > 0 && <Accordion disableGutters elevation={0}>
+      <AccordionSummary expandIcon={<span aria-hidden="true">+</span>}>
+        <span role="status">{`Partial archive: ${omissions.length} ${omissions.length === 1 ? "group" : "groups"} not queued`}</span>
+      </AccordionSummary>
+      <AccordionDetails>{omissions.map((group, index) => <p key={`${group.sourceIdentifier}:${index}`}>{`${group.label} (${group.reason ?? "not selected"}): ${group.members.map((member) => member.path).join(", ")}`}</p>)}</AccordionDetails>
+    </Accordion>}
   </>;
 }

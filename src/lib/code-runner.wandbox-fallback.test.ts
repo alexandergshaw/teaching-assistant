@@ -19,6 +19,43 @@ describe("code-runner", () => {
   describe("runSubmittedCode - Wandbox fallback and edge cases", () => {
     const python = [{ name: "main.py", extension: "py", previewContent: "print(1)" }];
 
+    it("uses Wandbox directly when the Piston catalog explicitly rejects access", async () => {
+      const fetcher = vi.fn(async (url: Parameters<typeof fetch>[0]) => {
+        if (String(url).endsWith("/runtimes")) return new Response(null, { status: 401 });
+        if (String(url).endsWith("/list.json")) return Response.json([]);
+        if (String(url).endsWith("/compile.json")) return Response.json({ status: "0", program_output: "1\n" });
+        throw new Error("unexpected execution");
+      });
+      global.fetch = fetcher;
+      const authorize = vi.fn(async () => {});
+      await expect(runSubmittedCode(python, undefined, authorize)).resolves.toMatchObject({ ran: true, stdout: "1\n" });
+      expect(fetcher.mock.calls.map(([url]) => new URL(String(url)).pathname.split("/").at(-1))).toEqual(["runtimes", "list.json", "compile.json"]);
+      expect(authorize).toHaveBeenCalledTimes(1);
+    });
+
+    it("limits a stalled Wandbox catalog so compilation retains time in the shared budget", async () => {
+      const fetcher = vi.fn(async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        if (String(url).endsWith("/runtimes")) return new Response(null, { status: 401 });
+        if (String(url).endsWith("/list.json")) return new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true }));
+        if (String(url).endsWith("/compile.json")) return Response.json({ status: "0", program_output: "1\n" });
+        throw new Error("unexpected request");
+      });
+      global.fetch = fetcher;
+      await expect(runSubmittedCode(python)).resolves.toMatchObject({ ran: true, stdout: "1\n" });
+      expect(fetcher.mock.calls.map(([url]) => new URL(String(url)).pathname.split("/").at(-1))).toEqual(["runtimes", "list.json", "compile.json"]);
+    });
+
+    it("limits a stalled Piston catalog and still attempts the configured runtime", async () => {
+      const fetcher = vi.fn(async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        if (String(url).endsWith("/runtimes")) return new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true }));
+        if (String(url).endsWith("/execute")) return Response.json({ run: { code: 0, stdout: "1\n", stderr: "", signal: null } });
+        throw new Error("unexpected request");
+      });
+      global.fetch = fetcher;
+      await expect(runSubmittedCode(python)).resolves.toMatchObject({ ran: true, stdout: "1\n" });
+      expect(fetcher.mock.calls.map(([url]) => new URL(String(url)).pathname.split("/").at(-1))).toEqual(["runtimes", "execute"]);
+    });
+
     it.each([
       ["Piston", { compile: { code: 0 } }],
       ["Piston", { run: { code: null, signal: "" } }],

@@ -142,6 +142,12 @@ let runtimesCache: Array<{ language: string; version: string; aliases?: string[]
 let wandboxCompilersCache: Array<{ name: string; language: string; version?: string }> | null =
   null;
 
+// Discovery is advisory: preserve the execution budget when a catalog stalls.
+const CATALOG_TIMEOUT_MS = 2_000;
+class PistonCatalogRefused extends Error {
+  constructor(readonly status: number) { super(`Piston catalog rejected the request (${status}).`); }
+}
+
 /**
  * Compare two semantic versions by splitting on dots and comparing numeric
  * segments. Returns -1 if a < b, 0 if a === b, 1 if a > b.
@@ -184,11 +190,9 @@ async function resolveVersion(language: string, signal: AbortSignal): Promise<st
       if (PISTON_KEY) {
         headers.Authorization = PISTON_KEY;
       }
-      const res = await fetch(`${PISTON_URL}/runtimes`, { headers, signal });
+      const res = await fetch(`${PISTON_URL}/runtimes`, { headers, signal: AbortSignal.any([signal, AbortSignal.timeout(CATALOG_TIMEOUT_MS)]) });
       if (!res.ok) {
-        if (res.status === 401) {
-          throw new Error("Piston rejected the request (401 unauthorized). Set PISTON_API_KEY (for the public emkc.org API) or point PISTON_API_URL at a self-hosted Piston instance.");
-        }
+        if ([401, 403, 429].includes(res.status)) throw new PistonCatalogRefused(res.status);
         throw new Error(`Runtimes lookup returned ${res.status}`);
       }
       runtimesCache = (await res.json()) as Array<{
@@ -196,7 +200,8 @@ async function resolveVersion(language: string, signal: AbortSignal): Promise<st
         version: string;
         aliases?: string[];
       }>;
-    } catch {
+    } catch (error) {
+      if (error instanceof PistonCatalogRefused) throw error;
       // Fall through to FALLBACK_VERSIONS
       const fallback = FALLBACK_VERSIONS[language];
       if (!fallback) {
@@ -248,7 +253,7 @@ async function resolveWandboxCompiler(language: string, signal: AbortSignal): Pr
   }
   if (!wandboxCompilersCache) {
     try {
-      const res = await fetch(`${WANDBOX_URL}/list.json`, { signal });
+      const res = await fetch(`${WANDBOX_URL}/list.json`, { signal: AbortSignal.any([signal, AbortSignal.timeout(CATALOG_TIMEOUT_MS)]) });
       if (res.ok) {
         wandboxCompilersCache = (await res.json()) as Array<{
           name: string;
@@ -418,6 +423,24 @@ function pistonOutcomeIsTerminal(result: PistonResponse): boolean {
     || nonblankSignal(compile?.signal);
 }
 
+async function runWandboxAfterRefusal(language: string, files: CodeRunSelectionFile[], signal: AbortSignal, status: number, beforeDispatch?: BeforeSandboxDispatch): Promise<CodeRunResult> {
+  const pistonMessage = status === 429
+    ? "Piston rate-limited the request (429)."
+    : `Piston rejected the request (${status}): the public emkc.org API is whitelist-only. Set PISTON_API_KEY if whitelisted, or point PISTON_API_URL at a self-hosted Piston instance.`;
+  let dispatched = false;
+  try {
+    return await runViaWandbox(language, files, signal, beforeDispatch, () => { dispatched = true; });
+  } catch (error) {
+    if (beforeDispatch) {
+      if (!dispatched) throw new SandboxExecutionRefusedError();
+      throw error;
+    }
+    const timedOut = isTimeoutError(error);
+    const message = timedOut ? `timed out after ${CODE_RUN_TIMEOUT_MS / 1000}s` : error instanceof Error ? error.message : String(error);
+    return { language, files: files.map((file) => file.name), ran: false, exitCode: null, stdout: "", stderr: "", error: `${pistonMessage} Wandbox fallback also failed: ${message}`, timedOut };
+  }
+}
+
 /**
  * Resolve a runtime version and execute `runFiles` (already the runner's
  * exact file list, per code-run-selection.ts) via Piston, falling back to
@@ -434,6 +457,7 @@ async function executeRunFiles(
   try {
     version = await resolveVersion(dominantLanguage, signal);
   } catch (err) {
+    if (err instanceof PistonCatalogRefused) return runWandboxAfterRefusal(dominantLanguage, runFiles, signal, err.status, beforeDispatch);
     const message = err instanceof Error ? err.message : String(err);
     return {
       language: dominantLanguage,
@@ -479,43 +503,7 @@ async function executeRunFiles(
       // Auth (the public API is whitelist-only since 2026-02-15) and
       // rate-limit failures get a second chance on the keyless Wandbox API.
       if (SANDBOX_REFUSAL_STATUSES.has(res.status)) {
-        const pistonMessage =
-          res.status === 429
-            ? "Piston rate-limited the request (429)."
-            : `Piston rejected the request (${res.status}): the public emkc.org API is whitelist-only. Set PISTON_API_KEY if whitelisted, or point PISTON_API_URL at a self-hosted Piston instance.`;
-        let wandboxDispatched = false;
-        try {
-          return await runViaWandbox(dominantLanguage, runFiles, signal, beforeDispatch, () => {
-            wandboxDispatched = true;
-          });
-        } catch (fallbackErr) {
-          if (beforeDispatch) {
-            // Piston refused. Failed fallback preparation cannot have executed anything.
-            if (!wandboxDispatched) throw new SandboxExecutionRefusedError();
-            throw fallbackErr;
-          }
-          // Reported directly here, not re-thrown to the outer catch below -
-          // re-throwing would wrap this in a fresh plain Error, and the
-          // outer catch's own isTimeoutError check would then always read
-          // false even when THIS is exactly what timed out (the shared
-          // `signal` budget covers this fallback call too).
-          const fallbackTimedOut = isTimeoutError(fallbackErr);
-          const fallbackMessage = fallbackTimedOut
-            ? `timed out after ${CODE_RUN_TIMEOUT_MS / 1000}s`
-            : fallbackErr instanceof Error
-              ? fallbackErr.message
-              : String(fallbackErr);
-          return {
-            language: dominantLanguage,
-            files: runFiles.map((f) => f.name),
-            ran: false,
-            exitCode: null,
-            stdout: "",
-            stderr: "",
-            error: `${pistonMessage} Wandbox fallback also failed: ${fallbackMessage}`,
-            timedOut: fallbackTimedOut,
-          };
-        }
+        return runWandboxAfterRefusal(dominantLanguage, runFiles, signal, res.status, beforeDispatch);
       }
       throw new Error(`Piston returned ${res.status}`);
     }

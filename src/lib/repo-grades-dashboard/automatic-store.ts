@@ -81,9 +81,9 @@ export async function enqueueCellsAutomaticRepoGrade(accountId: string, courseId
   return rpc("repo_grade_target_request_enqueue_cells", { p_user_id: accountId, p_course_id: courseId, p_pairs: pairs });
 }
 
-export async function enqueueChangedRepoGrade(accountId: string, courseId: string, target: Selector) {
+export async function enqueueChangedRepoGrade(accountId: string, courseId: string, target: Selector, explicit: boolean) {
   return rpc("repo_grade_refresh_enqueue", { p_user_id: accountId, p_course_id: courseId,
-    p_repo: target.repo, p_folder: target.folder, p_ref: target.ref, p_sha: target.sha });
+    p_repo: target.repo, p_folder: target.folder, p_ref: target.ref, p_sha: target.sha, p_explicit: explicit });
 }
 
 /** A null result means this is an ordinary run, never a failed lookup. */

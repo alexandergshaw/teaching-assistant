@@ -55,7 +55,7 @@ describe("owner automatic grading controls", () => {
     expect(await enqueueChangedRepoGradeAction("owner", "course", { ...target, sha: "bad" })).toEqual({ status: "unavailable" });
     expect(mocks.changed).not.toHaveBeenCalled();
     expect(await enqueueChangedRepoGradeAction("owner", "course", target)).toEqual({ status: "started" });
-    expect(mocks.changed).toHaveBeenCalledWith("owner", "course", target);
+    expect(mocks.changed).toHaveBeenCalledWith("owner", "course", target, false);
   });
 
   it("starts only owner-authorized well-formed selected course targets", async () => {

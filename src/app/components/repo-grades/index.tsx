@@ -397,8 +397,9 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
     buildRepoGradesDashboard(cellEdits, scan, targetBranch),
     cellEdits, saved.results, columnsWithMapping, assignments, roster, effectiveStudentRepos, automaticBlocks.targets,
   );
-  const changedSubmissionsNotice = useRepoChangedSubmissions(ownerId, selectedCourseId, scan, targetBranch,
-    saved.results, automaticBlocks.targets, !!targetedGrading && !scanLoading && !saved.pending && !saved.incomplete);
+  const changedSubmissions = useRepoChangedSubmissions(ownerId, selectedCourseId, scan, targetBranch,
+    saved.results, !!targetedGrading && !scanLoading && !saved.pending && !saved.incomplete,
+    targetedGrading?.status?.status === "loaded" && targetedGrading.status.enabled);
   const selectionFiltered = selectionFilterSummary({
     folderScopedCount: displayedRows.length,
     selectedShownCount: displayedRows.filter(({ repo }) => selected.has(repo)).length,
@@ -659,7 +660,9 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
       />
       <RepoGradesLoadingStatus label={coursesLoading ? "Loading classes…"
         : course && scanLoading ? `Scanning ${course.githubOrg?.trim()} on GitHub for ${course.name}…` : null} />
-      {changedSubmissionsNotice && <Alert severity="info" role="status">{changedSubmissionsNotice}</Alert>}
+      {changedSubmissions.count > 0 && <Button size="small" disabled={changedSubmissions.pending}
+        onClick={() => void changedSubmissions.enqueue()}>Grade changed submissions ({changedSubmissions.count})</Button>}
+      {changedSubmissions.notice && <Alert severity="info" role="status">{changedSubmissions.notice}</Alert>}
       {scan?.repos.some((repo) => repo.partial) && <Alert severity="warning" role="status">
         Some repositories contain submodules or unsupported entries that were not scanned. Listed folders may be incomplete.
       </Alert>}

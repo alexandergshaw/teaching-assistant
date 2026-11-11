@@ -16,9 +16,9 @@ import { validateGithubOwnerRepo } from "@/lib/github-ref-name";
 const unavailable = { status: "unavailable" } as const;
 
 /** Queue a newly scanned revision only when the server's durable history has an earlier empty check. */
-export async function enqueueChangedRepoGradeAction(expectedAccountId: unknown, courseId: unknown, input: unknown) {
+export async function enqueueChangedRepoGradeAction(expectedAccountId: unknown, courseId: unknown, input: unknown, explicit = false) {
   const accountId = resolveAccount(expectedAccountId, await requireAppOwner().catch(() => null));
-  if (!accountId || !isAutomaticRepoGradeId(courseId) || !input || typeof input !== "object") return unavailable;
+  if (!accountId || !isAutomaticRepoGradeId(courseId) || !input || typeof input !== "object" || typeof explicit !== "boolean") return unavailable;
   const target = input as Record<string, unknown>;
   if (!isRepoGradeProfileFolder(target.folder) || typeof target.repo !== "string" || target.repo.length > 200
     || typeof target.ref !== "string" || !target.ref.trim() || target.ref.length > 255
@@ -27,7 +27,7 @@ export async function enqueueChangedRepoGradeAction(expectedAccountId: unknown, 
   if (!owner || !name || extra !== undefined || !validateGithubOwnerRepo(owner, name)) return unavailable;
   try {
     const result = await enqueueChangedRepoGrade(accountId, courseId,
-      { repo: target.repo, folder: target.folder, ref: target.ref, sha: target.sha });
+      { repo: target.repo, folder: target.folder, ref: target.ref, sha: target.sha }, explicit);
     return { status: result === "queued" ? "started" : result === "already-queued" ? "already-queued" : "unavailable" } as const;
   } catch { return unavailable; }
 }

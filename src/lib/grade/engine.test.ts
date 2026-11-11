@@ -473,3 +473,10 @@ it("sends all bounded static project text and holds larger inputs before a model
   expect(providerBudget.results[0].feedback).toContain("single-pass grading input budget");
   expect(mockCallLlm).not.toHaveBeenCalled();
 });
+
+it("holds static project evidence with discussion axes before any model call", async () => {
+  const run = await gradeEntries([entry({ content: "short", staticOnly: true, discussionAxes: { initialPostContent: "x".repeat(21), replyContent: "reply", replyCount: 1 } })], "Grade.", "Rubric.", "gemini", null, { autoRunCode: false });
+  expect(run.results[0].ungraded).toBeTruthy();
+  expect(run.results[0].feedback).toContain("cannot be graded as separate discussion sections");
+  expect(mockCallLlm).not.toHaveBeenCalled();
+});

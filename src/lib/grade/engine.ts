@@ -513,6 +513,10 @@ async function gradeStudentEntries(
     }
     const { student, content, mergedFileCount, submittedFiles, userId, codeRun: precomputedCodeRun, gradedRepo, gradedRef, repositoryInventories } = limitedEntries[i];
     const axes = limitedEntries[i].discussionAxes;
+    if (limitedEntries[i].staticOnly === true && axes) {
+      results.push(buildUngradedRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}Static project evidence cannot be graded as separate discussion sections. No grade was produced.` }));
+      continue;
+    }
     if (options.suppressLengthDeduction && (scoringInstructions === null || scoringRubric === null || (axes && axes.replyCount === 0 && lengthExemption?.exempt.axis === "reply"))) {
       results.push(buildUngradedRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}This rubric contains a length rule that cannot be separated safely. Revise the rubric or review grading manually; no grade was produced.` }));
       continue;

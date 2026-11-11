@@ -2,7 +2,7 @@ import { useSupabase } from "@/context/SupabaseProvider";
 import { Alert, Box, Button, Chip, Stack, Typography } from "@mui/material";
 import { isOwnerDecision } from "@/lib/access";
 import type { FeedbackBoxesEdit } from "../grading-results/gradingResultsHelpers";
-import { newerVerifiedNoSubmission, noSubmissionMatchesScan, savedResultIsEarlierThanObservedPin, type RepoGradeMatrix, type RepoGradeSavedAttempt, type RepoGradeSavedResult } from "./repoGradesDashboardModel";
+import { hasUnorderedNoSubmissionAndScore, newerVerifiedNoSubmission, noSubmissionMatchesScan, savedResultIsEarlierThanObservedPin, type RepoGradeMatrix, type RepoGradeSavedAttempt, type RepoGradeSavedResult } from "./repoGradesDashboardModel";
 import { FeedbackDisclosure, RepoResultCopy, RepoResultFeedback } from "./RepoDashboardFeedback";
 import RepoGradeProfileSettings from "./RepoGradeProfileSettings";
 import RepoGradeRubricScores from "./RepoGradeRubricScores";
@@ -68,7 +68,7 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
     && !noSubmissionMatchesScan(rawNoSubmission.sourceRef, rawNoSubmission.sourceSha, cell?.browser);
   const staleNoSubmission = cell?.automaticBlocks?.some((item) => item.noSubmissionStale);
   const earlierScore = savedResultIsEarlierThanObservedPin(cell?.saved, cell?.automaticBlocks);
-  const ambiguousNoSubmission = !!cell?.saved && !provenNoSubmission && !staleNoSubmission && cell.automaticBlocks?.some((item) => item.noSubmission);
+  const ambiguousNoSubmission = hasUnorderedNoSubmissionAndScore(cell?.saved, cell?.automaticBlocks, provenNoSubmission, !!staleNoSubmission);
   const scored = provenNoSubmission ? null : cell?.saved?.scored;
   const sections = scored?.feedback_sections;
   const feedback = scored && {

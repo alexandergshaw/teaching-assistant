@@ -126,6 +126,14 @@ export function newerVerifiedNoSubmission(
   });
 }
 
+export function hasUnorderedNoSubmissionAndScore(
+  saved: RepoGradeSavedResult | undefined, blocks: readonly AutomaticRepoGradeBlock[] | undefined,
+  provenNoSubmission: boolean, staleNoSubmission: boolean,
+): boolean {
+  return !!saved?.scored && !provenNoSubmission && !staleNoSubmission
+    && !!blocks?.some((item) => item.noSubmission);
+}
+
 /** A fresh scan can disprove that an older empty result describes the current branch. */
 export function noSubmissionMatchesScan(
   sourceRef: string | undefined, sourceCommit: string | undefined, browser: RepoGradesDashboardRow | undefined,

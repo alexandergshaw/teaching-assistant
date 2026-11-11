@@ -458,12 +458,18 @@ describe("gradeEntries evidence provenance", () => {
 });
 
 it("sends all bounded static project text and holds larger inputs before a model call", async () => {
-  const text = "prefix " + "x".repeat(40) + " END_SENTINEL";
+  const text = "END_SENTINEL";
   mockCallLlm.mockResolvedValueOnce({ ok: true, text: OK_RESPONSE_TEXT });
   const run = await gradeEntries([entry({ content: text, staticOnly: true })], "Grade.", "Rubric.", "gemini", null, { autoRunCode: false });
   expect(run.results[0].submissionTruncated).toBe(false);
   expect(JSON.stringify(mockCallLlm.mock.calls[0][0])).toContain("END_SENTINEL");
   mockCallLlm.mockClear();
+  const atBudget = await gradeEntries([entry({ content: "x".repeat(21), staticOnly: true })], "Grade.", "Rubric.", "gemini", null, { autoRunCode: false });
+  expect(atBudget.results[0].ungraded).toBeTruthy(); expect(mockCallLlm).not.toHaveBeenCalled();
   const held = await gradeEntries([entry({ content: "x".repeat(3_000_001), staticOnly: true })], "Grade.", "Rubric.", "gemini", null, { autoRunCode: false });
   expect(held.results[0].ungraded).toBeTruthy(); expect(mockCallLlm).not.toHaveBeenCalled();
+  const providerBudget = await gradeEntries([entry({ content: "x".repeat(2_100_000), staticOnly: true })], "Grade.", "Rubric.", "gemini", null, { autoRunCode: false });
+  expect(providerBudget.results[0].ungraded).toBeTruthy();
+  expect(providerBudget.results[0].feedback).toContain("single-pass grading input budget");
+  expect(mockCallLlm).not.toHaveBeenCalled();
 });

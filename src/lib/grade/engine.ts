@@ -517,8 +517,8 @@ async function gradeStudentEntries(
       results.push(buildUngradedRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}This rubric contains a length rule that cannot be separated safely. Revise the rubric or review grading manually; no grade was produced.` }));
       continue;
     }
-    if (limitedEntries[i].staticOnly === true && (content.length > MAX_STATIC_PROJECT_CONTENT_CHARS || (axes && content.length > maxCharsPerSubmission))) {
-      results.push(buildUngradedRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}This static project exceeds the complete-evidence limit. No grade was produced.` }));
+    if (limitedEntries[i].staticOnly === true && (content.length > MAX_STATIC_PROJECT_CONTENT_CHARS || content.length > maxCharsPerSubmission)) {
+      results.push(buildUngradedRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}This static project exceeds the current single-pass grading input budget. No grade was produced. Multi-part project grading is not yet available; review it manually.` }));
       continue;
     }
     const { text: truncatedContent, truncated: contentTruncated } = truncateSubmission(

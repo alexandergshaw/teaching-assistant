@@ -147,7 +147,7 @@ function isSubmittedFileInfo(value: unknown): value is SubmittedFileInfo {
 function partialEvidenceInstructions(instructions: string, entry: StudentSubmissionEntry): string {
   const notes: string[] = [];
   if (entry.staticOnly) notes.push("Code was not executed. Runtime behavior is unverified; do not claim that the program was run or that its output was observed.");
-  if (entry.evidenceOmissions?.length) notes.push("Recognized build artifacts were excluded. Evidence is incomplete; do not infer their contents or penalize the student for their absence.");
+  if (entry.evidenceOmissions?.length) notes.push("Files were excluded from the submitted evidence. Evidence is incomplete; do not infer their contents or penalize the student for their absence.");
   return notes.length ? `${instructions}\n\n${notes.join(" ")}` : instructions;
 }
 

@@ -1,5 +1,5 @@
 "use client";
-import { bindPartialEvidence } from "./partialEvidence";
+import { bindPartialEvidence, skippedEvidenceIntake } from "./partialEvidence";
 
 // GRADING-CHAT wave 1 (docs/grading-chat-waves.md section 3, N3). The
 // continuous, dispatch-on-arrival driver behind the chat surface (AC-L/AC-5/
@@ -49,7 +49,7 @@ import { mergeIngestLedgers } from "./ingestLedger";
 import { countPendingVideos, pendingDisplay } from "./pendingVideoCount";
 import type { ChatGradingSetup } from "./chatVersionedSetup";
 import { bindVersionedResultRows, projectVersionedResults, type VersionedArrival, type VersionedResultRow } from "./versionedResultProjection";
-import { noBatchAdmittedNotice, partialBatchNotice } from "./partialBatchNotice";
+import { partialBatchNotice } from "./partialBatchNotice";
 import { postClassifyRecording, postPrepareVideo, videoFailureOf, type ClassifyRecordingFn, type PrepareVideoFn } from "./videoClient";
 import { postPrepareSingleFile, type PrepareSingleFileFn } from "./singleFileClient";
 import { recordVideoSettled, recordZipVideoOutcomes } from "./videoDiagnostic";
@@ -754,15 +754,14 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       });
     }
 
+    const skippedIntake = skippedEvidenceIntake(entries, ingestSkipped, storageLedger);
+    if (skippedIntake) { setIngestLedger((prev) => mergeIngestLedgers(prev, skippedIntake.ledger)); return { kind: "refused", reason: skippedIntake.reason }; }
+
     const boundEntries = bindPartialEvidence(entries, input.kind === "file" || input.kind === "storaged-zip" ? input.evidenceOmissions : undefined, input.kind === "file" || input.kind === "storaged-zip" ? input.staticOnly : undefined);
     if (!boundEntries) return { kind: "refused", reason: "Partial evidence record is invalid. Nothing was graded." }; else entries = boundEntries;
     // RES-GC-8: clip to what the session ceiling still allows; refuse only
     // the remainder, never the whole event.
     const available = maxEntries - dispatchedCountRef.current;
-    if (!entries.length && ingestSkipped.length) {
-      setIngestLedger((prev) => mergeIngestLedgers(prev, { ...(storageLedger ?? { failedSupportedFiles: [] }), studentsFound: ingestSkipped.length, studentsEmitted: 0, skipped: ingestSkipped }));
-      return { kind: "refused", reason: noBatchAdmittedNotice(ingestSkipped) };
-    }
     if (available <= 0) {
       const notQueued = entries.map((entry, index) => ({ student: `${entry.student || "Unnamed submission"} (eligible item ${index + 1})`, reason: "session limit reached" }));
       if (entries.length || storageLedger || ingestSkipped.length) setIngestLedger((prev) => mergeIngestLedgers(prev, { ...(storageLedger ?? { failedSupportedFiles: [] }), studentsFound: entries.length + ingestSkipped.length, studentsEmitted: 0, skipped: [...ingestSkipped, ...notQueued] }));

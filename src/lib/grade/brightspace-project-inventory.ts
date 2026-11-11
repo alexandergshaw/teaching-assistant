@@ -7,7 +7,7 @@ const MAX_PROJECT_FILES = 1000;
 const artifactExtensions = new Set(["obj", "pdb", "ilk", "idb", "ipch", "tlog", "vsidx", "suo", "wsuo", "lastbuildstate"]);
 const sourceExtensions = new Set(["c", "cc", "cpp", "cxx", "h", "hpp", "txt", "md", "markdown", "csv", "tsv", "json", "xml", "vcxproj", "sln", "slnx", "filters", "props", "targets", "docx", "doc", "pdf", "ppt", "pptx", "xls", "xlsx", "odt", "odp", "ods", "rtf", "ipynb", "py", "js", "jsx", "ts", "tsx", "java", "cs", "css", "html", "htm", "yml", "yaml", "sql", "png", "jpg", "jpeg", "webp", "heic", "heif"]);
 
-export type ProjectFileDisposition = "retain" | "candidate-build-artifact" | "needs-review";
+export type ProjectFileDisposition = "retain" | "candidate-build-artifact" | "course-fixture" | "needs-review";
 export interface ProjectInventoryFile { readonly path: string; readonly declaredBytes: number; readonly disposition: ProjectFileDisposition }
 export type ProjectInventory = { readonly ok: true; readonly files: readonly ProjectInventoryFile[] } | { readonly ok: false; readonly reason: string };
 
@@ -32,11 +32,22 @@ async function inspectProjectBlob(blob: Blob): Promise<ProjectInventory> {
   const nested = await inspectLargeZipDirectory(blob);
   if (!nested.ok) return { ok: false, reason: `nested archive could not be inventoried: ${nested.reason}` };
   if (nested.members.length > MAX_PROJECT_FILES) return { ok: false, reason: "nested project has too many files" };
-  return { ok: true, files: nested.members.map((member) => {
+  const files: ProjectInventoryFile[] = [];
+  for (const member of nested.members) {
     const extension = member.path.split(".").pop()?.toLowerCase() ?? "";
-    const disposition: ProjectFileDisposition = member.nestedArchive ? "needs-review" : sourceExtensions.has(extension) ? "retain" : artifactExtensions.has(extension) ? "candidate-build-artifact" : "needs-review";
-    return { path: member.path, declaredBytes: member.declaredBytes, disposition };
-  }) };
+    let disposition: ProjectFileDisposition = member.nestedArchive ? "needs-review" : sourceExtensions.has(extension) ? "retain" : artifactExtensions.has(extension) ? "candidate-build-artifact" : "needs-review";
+    // Only the exact published course dataset may be represented by provenance.
+    if (extension === "csv" && member.declaredBytes === 2_039_946 && crypto.subtle) {
+      const parts: Uint8Array[] = [];
+      const read = await streamLargeZipMember(blob, member, { async write(chunk) { parts.push(chunk.slice()); }, async commit() {}, async abort() { parts.length = 0; } });
+      if (!read.ok) return { ok: false, reason: "course dataset could not be verified" };
+      const digest = await crypto.subtle.digest("SHA-256", await new Blob(parts as BlobPart[]).arrayBuffer());
+      const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+      if (hash === "8a4203bb40c1f023676f79060da104ff316509faf2db226db3915ee5a096e90d") disposition = "course-fixture";
+    }
+    files.push({ path: member.path, declaredBytes: member.declaredBytes, disposition });
+  }
+  return { ok: true, files };
 }
 
 /** Rebuild one reviewed project while retaining every source file. Exclusions must match the entire displayed non-source inventory. */
@@ -44,7 +55,7 @@ export async function buildReviewedBrightspaceProject(source: Blob, outer: Large
   const project = await readProject(source, outer); if (!project.ok) return project;
   const inventory = await inspectProjectBlob(project.blob); if (!inventory.ok) return inventory;
   if (inventory.files.some((file) => file.disposition === "needs-review")) return { ok: false, reason: "project contains unclassified files that cannot be safely excluded" };
-  const excluded = new Set(excludedPaths), expected = inventory.files.filter((file) => file.disposition === "candidate-build-artifact");
+  const excluded = new Set(excludedPaths), expected = inventory.files.filter((file) => file.disposition === "candidate-build-artifact" || file.disposition === "course-fixture");
   if (excluded.size !== excludedPaths.length || excluded.size !== expected.length || expected.some((file) => !excluded.has(file.path))) return { ok: false, reason: "project exclusions must be explicitly reviewed" };
   const retained = inventory.files.filter((file) => file.disposition === "retain");
   if (!retained.some((file) => /\.(?:c|cc|cpp|cxx|h|hpp|py|js|ts)$/i.test(file.path))) return { ok: false, reason: "no supported source code was found in this project" };

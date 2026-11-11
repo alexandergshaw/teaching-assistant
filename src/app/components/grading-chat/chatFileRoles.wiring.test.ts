@@ -335,3 +335,17 @@ describe("actual role controller -> Panel setup/transport callbacks -> continuou
     const check=vi.fn(async()=>false),submit=vi.fn(async(input:unknown)=>{void input;return {kind:"accepted",entryCount:1,sourceIndices:[4]}});const consume=callback("handleConfirmedFiles",{driver:{submit,pendingVideoCount:()=>0},zipReview:{check,capture:()=>0,owns:()=>true,remember:vi.fn()},submitFilesSequentially,submitLooseVideo:vi.fn(async()=>null),user:{id:"owner"},supabase:{storage:{}},VIDEO_GRADING_ENABLED:false,isZipFileName:(n:string)=>n.endsWith(".zip"),chooseZipTransport:()=>({kind:"body"}),chooseSingleFileTransport:()=>({kind:"body"}),preflightUploadFile:()=>({ok:true}),safeIntake:(fn:()=>void)=>fn(),recordIntakeGate:vi.fn(),submitStoragedZip:vi.fn(),submitStoragedSingleFile:vi.fn(),setSubmitError:vi.fn()});
     const result=await consume([new File(["zip"],"reviewed.zip")],undefined,()=>true,{"work.txt":"Student"},undefined,undefined,true);expect(check).not.toHaveBeenCalled();expect(result[0]).toMatchObject({kind:"accepted",sourceIndices:[4]});expect(submit.mock.calls[0][0]).toMatchObject({captureSourceIndices:true});
   });
+
+it("records a proven nested intake refusal separately from an uncertain handoff", async () => {
+  const records = new Map<string, string>(); const storage = { get length() { return records.size; }, key: (i: number) => [...records.keys()][i] ?? null, getItem: (key: string) => records.get(key) ?? null, setItem: (key: string, value: string) => { records.set(key, value); } };
+  vi.stubGlobal("navigator", { locks: { request: async (_key: string, _options: unknown, work: (lock: object) => Promise<unknown>) => work({}) } }); vi.stubGlobal("crypto", webcrypto); vi.stubGlobal("localStorage", storage);
+  try {
+    const onRefused = vi.fn(), submitted = vi.fn(async () => [{ kind: "refused", reason: "Submission is too large. Nothing was graded." }]);
+    const run = callback("handlePartialHandoff", { createPartialHandoffHandler, sharedIntakeLatch: { busy: false, generation: 0 }, dropSessionEpoch: { current: 0 }, user: { id: "owner" }, zipReview: { capture: () => 0, owns: () => true }, setPartialOmissions: vi.fn(), setPartialRecords: vi.fn(), handleSubmitFiles: submitted });
+    const group = { label: "100-200", members: [{ path: "100-200 - Project-Student-Nov 5, 2026 400 PM.zip" }] };
+    const project = { mappedPaths: ["100-200 - Project-Student-Nov 5, 2026 400 PM.zip/src/main.cpp"], excludedPaths: ["100-200 - Project-Student-Nov 5, 2026 400 PM.zip/Debug/main.obj"] };
+    expect(await run(new File(["source"], "source.zip"), new File(["subset"], "subset.zip"), [group], [], { "100-200": "Student" }, { current: () => true, onProgress: vi.fn(), onRefused }, project)).toContain("too large");
+    expect(onRefused).toHaveBeenCalledOnce(); expect([...records.values()].map((v) => JSON.parse(v).status)).toEqual(["refused"]);
+    expect(submitted).toHaveBeenCalledOnce();
+  } finally { vi.unstubAllGlobals(); }
+});

@@ -44,28 +44,28 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
   const eligible = groups.filter((group) => !blocked(group));
   const grade = async () => {
     if (!file || !selected.length || busy || uncertain || submitting.current || selected.some((label) => !eligible.some((group) => group.label === label))) return;
-    submitting.current = true; onSelectionStart?.(); const token = generation.current; let dispatched = 0; setBusy(true); setError(""); setCompleted(0);
+    submitting.current = true; onSelectionStart?.(); const token = generation.current; let dispatched = 0, refusedBeforeDispatch = false; setBusy(true); setError(""); setCompleted(0);
     try {
       await submitBoundedGroups<{ archive: Blob; selected: readonly RecoverableGroup[]; omitted: readonly RecoverableGroup[]; project?: { mappedPaths: readonly string[]; excludedPaths: readonly string[] } }>(selected, async (labels) => {
         const nested = labels.map((label) => groups.find((group) => group.label === label)!).find((group) => projectReady(group, projectFiles));
         if (nested && labels.length > 1) return { ok: false, reason: "batch exceeds grading limits" };
         if (nested) {
-          const exclusions = Object.fromEntries(nested.members.filter((member) => member.nestedArchive).map((member) => [member.path, projectFiles[member.path].filter((item) => item.disposition === "candidate-build-artifact").map((item) => item.path)]));
+          const exclusions = Object.fromEntries(nested.members.filter((member) => member.nestedArchive).map((member) => [member.path, projectFiles[member.path].filter((item) => (item.disposition === "candidate-build-artifact" || item.disposition === "course-fixture")).map((item) => item.path)]));
           const project = await buildBrightspaceGroup(file, nested, exclusions); if (token !== generation.current) throw new Error("Archive review was closed.");
           return project.ok ? { ok: true, value: { archive: project.archive, selected: [nested], omitted: groups.filter((group) => group.label !== nested.label), project: { mappedPaths: project.mappedPaths, excludedPaths: project.excludedPaths } } } : project;
         }
         const result = await buildRecoverableZip(file, labels, true); if (token !== generation.current) throw new Error("Archive review was closed.");
         return result.ok ? { ok: true, value: { ...result, project: undefined } } : result;
       }, async (result, count) => {
-        setUncertain(true);
-        const refusal = await onSubmit(file, new File([result.archive], "reviewed-partial-submissions.zip", { type: "application/zip" }), result.selected, result.omitted, names, { current: () => token === generation.current, onAdmitted, onProgress: (value) => { if (token === generation.current) { hashing.current = !!value; setProgress(value); } } }, result.project);
+        refusedBeforeDispatch = false; setUncertain(true);
+        const refusal = await onSubmit(file, new File([result.archive], "reviewed-partial-submissions.zip", { type: "application/zip" }), result.selected, result.omitted, names, { current: () => token === generation.current, onAdmitted, onRefused: () => { refusedBeforeDispatch = true; }, onProgress: (value) => { if (token === generation.current) { hashing.current = !!value; setProgress(value); } } }, result.project);
         if (token !== generation.current) throw new Error("The session changed; check results before retrying.");
-        if (refusal) { if ((hashing.current || (refusal === "The intake record could not be saved. Nothing was submitted." || refusal === "Another submission from this archive is in progress. Nothing was submitted.")) && dispatched === 0) setUncertain(false); throw new Error(refusal); }
+        if (refusal) { if ((refusedBeforeDispatch || hashing.current || (refusal === "The intake record could not be saved. Nothing was submitted." || refusal === "Another submission from this archive is in progress. Nothing was submitted."))) setUncertain(false); throw new Error(refusal); }
         dispatched += count; setCompleted(dispatched); setUncertain(false);
       });
       if (token === generation.current) close();
     }
-    catch (failure) { if (token === generation.current) { if (dispatched > 0) setUncertain(true); setError(`${failure instanceof Error ? failure.message : "The handoff could not be confirmed."}${dispatched ? ` ${dispatched} groups were already submitted; check results before retrying.` : ""}`); } }
+    catch (failure) { if (token === generation.current) { setError(`${failure instanceof Error ? failure.message : "The handoff could not be confirmed."}${dispatched ? ` ${dispatched} groups were already submitted; check results before retrying.` : ""}`); } }
     finally { submitting.current = false; if (token === generation.current) { hashing.current = false; setProgress(null); setBusy(false); } }
   };
   return <>
@@ -73,14 +73,14 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
     <Dialog open={open} onClose={() => { if (!busy) close(); }} fullWidth maxWidth="md" aria-labelledby="large-zip-title">
       <DialogTitle id="large-zip-title">Review oversized ZIP</DialogTitle>
       <DialogContent><Stack spacing={2}>
-        <Alert severity="info">Names come from the LMS export and filenames. Files with the same LMS group ID are graded together, including files with different submission times. Nested projects are analyzed without executing code. Recognized build artifacts are excluded and recorded as incomplete evidence. Groups with unresolved identities or unsupported files are held; omitted groups are recorded before submission.</Alert>
+        <Alert severity="info">Names come from the LMS export and filenames. Files with the same LMS group ID are graded together, including files with different submission times. Nested projects are analyzed without executing code. Recognized build artifacts and exact matches to a published course dataset are excluded and recorded as incomplete evidence. Groups with unresolved identities or unsupported files are held; omitted groups are recorded before submission.</Alert>
         <Button component="label" variant="outlined" disabled={busy}>Choose ZIP<input hidden type="file" accept=".zip,application/zip" onChange={(event) => void choose(event.target.files?.[0])} /></Button>
         {file && <Typography>{file.name}</Typography>}
         {busy && <Typography role="status">{progress ? `Checking ${progress.phase === "source" ? "original archive" : "selected files"}: ${progress.written} of ${progress.total} bytes` : `Preparing submissions${completed ? `; ${completed} groups submitted` : ""}...`}</Typography>}
         {progress && <LinearProgress variant={progress.total ? "determinate" : "indeterminate"} value={progress.total ? progress.written / progress.total * 100 : undefined} aria-label="Archive verification progress" />}
         {error && <Alert severity="error">{error}</Alert>}{uncertain && <Alert severity="warning">Submission may have started. Check results before retrying.</Alert>}
         {!!groups.length && <FormControlLabel control={<Checkbox disabled={busy || !eligible.length} checked={eligible.length > 0 && selected.length === eligible.length} indeterminate={selected.length > 0 && selected.length < eligible.length} onChange={(_, checked) => setSelected(checked ? eligible.map((group) => group.label) : [])} />} label={`Select all eligible (${eligible.length})`} />}
-        <Stack spacing={0} sx={{ maxHeight: 320, overflowY: "auto" }}>{groups.map((group) => <Stack key={group.label} spacing={0.5}><FormControlLabel control={<Checkbox checked={selected.includes(group.label)} disabled={busy || !!blocked(group)} onChange={(_, checked) => setSelected((previous) => checked ? [...previous, group.label] : previous.filter((label) => label !== group.label))} />} label={`${names[group.label] ?? group.label}${blocked(group) ? ` — held: ${blocked(group)}` : ""}`} /><Tooltip title={group.members.map((member) => member.path).join(", ")}><Typography variant="body2" tabIndex={0}>{group.members.length} {group.members.length === 1 ? "file" : "files"}{projectReady(group, projectFiles) ? `; ${group.members.flatMap((member) => projectFiles[member.path] ?? []).filter((item) => item.disposition === "candidate-build-artifact").length} build artifacts excluded` : ""}</Typography></Tooltip></Stack>)}</Stack>
+        <Stack spacing={0} sx={{ maxHeight: 320, overflowY: "auto" }}>{groups.map((group) => <Stack key={group.label} spacing={0.5}><FormControlLabel control={<Checkbox checked={selected.includes(group.label)} disabled={busy || !!blocked(group)} onChange={(_, checked) => setSelected((previous) => checked ? [...previous, group.label] : previous.filter((label) => label !== group.label))} />} label={`${names[group.label] ?? group.label}${blocked(group) ? ` — held: ${blocked(group)}` : ""}`} /><Tooltip title={group.members.map((member) => member.path).join(", ")}><Typography variant="body2" tabIndex={0}>{group.members.length} {group.members.length === 1 ? "file" : "files"}{projectReady(group, projectFiles) ? `; ${group.members.flatMap((member) => projectFiles[member.path] ?? []).filter((item) => item.disposition === "candidate-build-artifact" || item.disposition === "course-fixture").length} build artifacts or verified course datasets excluded` : ""}</Typography></Tooltip></Stack>)}</Stack>
       </Stack></DialogContent>
       <DialogActions><Button disabled={busy && !progress} onClick={() => { if (busy && !hashing.current) return; if (hashing.current) setUncertain(false); close(); }}>{progress ? "Cancel verification" : "Close"}</Button><Button variant="contained" disabled={busy || uncertain || !selected.length} onClick={() => void grade()}>Grade selected ({selected.length})</Button></DialogActions>
     </Dialog>

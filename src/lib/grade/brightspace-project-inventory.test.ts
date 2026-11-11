@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import JSZip from "jszip";
 import { inspectLargeZipDirectory } from "./recoverable-zip-directory";
 import { buildReviewedBrightspaceProject, inspectBrightspaceProject } from "./brightspace-project-inventory";
@@ -29,4 +29,20 @@ it("retains diverse substantive project formats and refuses to classify an opaqu
   expect(inventory.files.filter((file) => file.disposition === "retain").map((file) => file.path)).toEqual(expect.arrayContaining(["src/main.java", "src/main.cs", "notes.ipynb", "diagram.png", "data.xlsx"]));
   for (const path of ["mystery.dat", "shot.gif", "shot.bmp"]) expect(inventory.files.find((file) => file.path === path)?.disposition).toBe("needs-review");
   expect((await buildReviewedBrightspaceProject(source, directory.members[0], ["mystery.dat", "shot.gif", "shot.bmp"])).ok).toBe(false);
+});
+
+
+it("excludes only an exact verified course dataset while retaining changed data", async () => {
+  const project = new JSZip(); project.file("src/main.cpp", "int main() {} "); project.file("data.csv", new Uint8Array(2_039_946));
+  const outer = new JSZip(); outer.file("100-200 - project.zip", await project.generateAsync({ type: "uint8array" }));
+  const source = new Blob([new Uint8Array(await outer.generateAsync({ type: "uint8array" })).buffer]); const directory = await inspectLargeZipDirectory(source);
+  expect(directory.ok).toBe(true); if (!directory.ok) return;
+  const exact = "8a4203bb40c1f023676f79060da104ff316509faf2db226db3915ee5a096e90d";
+  const digest = vi.spyOn(crypto.subtle, "digest").mockResolvedValueOnce(Uint8Array.from(exact.match(/../g)!, (byte) => parseInt(byte, 16)).buffer).mockResolvedValueOnce(new Uint8Array(32).buffer);
+  try {
+    const matched = await inspectBrightspaceProject(source, directory.members[0]);
+    const changed = await inspectBrightspaceProject(source, directory.members[0]);
+    expect(matched.ok && matched.files.find((file) => file.path === "data.csv")?.disposition).toBe("course-fixture");
+    expect(changed.ok && changed.files.find((file) => file.path === "data.csv")?.disposition).toBe("retain");
+  } finally { digest.mockRestore(); }
 });

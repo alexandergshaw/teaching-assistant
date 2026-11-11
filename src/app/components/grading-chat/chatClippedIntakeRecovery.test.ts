@@ -15,7 +15,7 @@ vi.mock("@/app/actions/grading-chat-intake", () => ({
 }));
 vi.mock("@/lib/grade/constants", async () => ({ ...(await vi.importActual<typeof import("@/lib/grade/constants")>("@/lib/grade/constants")), VIDEO_GRADING_ENABLED: false }));
 vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn().mockResolvedValue({ id: "user-1", email: "owner@example.com" }) }));
-vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ storage: { from: () => ({ list: vi.fn().mockResolvedValue({ data: [{ name: "a.zip", metadata: { size: 1024 } }], error: null }) }) } }) }));
+vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ storage: { from: () => ({ list: vi.fn().mockResolvedValue({ data: [{ name: "a.zip", metadata: { size: 1024 } }], error: null }), download: () => ({ asStream: async () => ({ data: new Blob([new Uint8Array(1024)]).stream(), error: null }) }) }) } }) }));
 vi.mock("@/lib/supabase/storage", () => ({ downloadFile: vi.fn().mockResolvedValue({ data: new Blob([new Uint8Array(1024)]), error: null }), removeFiles: vi.fn().mockResolvedValue({ error: null }) }));
 vi.mock("@/lib/grade/extraction", () => ({ ingestZipEntries: vi.fn().mockResolvedValue({ entries: [{ student: "Ada", content: "x".repeat(4_000_000), mergedFileCount: 1, submittedFiles: [] }, { student: "Lin", content: "x".repeat(4_000_000), mergedFileCount: 1, submittedFiles: [] }], attemptedSupportedFiles: 2, failedSupportedFiles: [] }) }));
 import { useContinuousGradingRun } from "./useContinuousGradingRun";
@@ -43,9 +43,9 @@ describe("clipped intake recovery", () => {
     const invoke = useContinuousGradingRun;
     const driver = () => { hook.begin(); return invoke({ provider: "gemini", dispatchItem: dispatch, ingestZip: ingest }); };
     await driver().beginSession({ assignmentInstructions: "Instructions", rubric: "Rubric" });
-    const outcome = await driver().submit({ kind: "storaged-zip", storagePath: "user-1/grading-uploads/a.zip", name: "class.zip" });
+    const outcome = await driver().submit({ kind: "storaged-zip", storagePath: "user-1/grading-uploads/a.zip", name: "class.zip", staticOnly: true, evidenceOmissions: ["100-200 - Project-Student-Nov 5, 2026 400 PM.zip/Debug/main.obj"] });
     expect(outcome.kind).toBe("refused");
-    if (outcome.kind === "refused") { expect(outcome.reason).toContain("No submissions were queued"); expect(outcome.reason).toContain("Ada"); expect(outcome.reason).toContain("retry the batch"); }
+    if (outcome.kind === "refused") { expect(outcome.reason).toContain("No submissions were queued"); expect(outcome.reason).not.toContain("Partial evidence record is invalid"); expect(outcome.reason).toContain("Ada"); expect(outcome.reason).toContain("retry the batch"); }
     expect(dispatch).not.toHaveBeenCalled();
     expect(driver().ingestLedger).toMatchObject({ studentsFound: 2, studentsEmitted: 0, skipped: [{ student: "Ada (item 1)" }, { student: "Lin (item 2)" }] });
   });

@@ -35,7 +35,7 @@
 // never calls it itself. Same "render what a pure function decided, resolve
 // nothing here" posture as the rest of this file.
 import { useId, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { Checkbox, Collapse, Link, ListItemText, MenuItem, Select, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel } from "@mui/material";
+import { Autocomplete, Checkbox, Collapse, Link, ListItemText, MenuItem, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel, TextField, createFilterOptions } from "@mui/material";
 import { collectRubricOrder, rubricSlotHeight } from "./rubricAlignment";
 import { RepoGradeResultDetails } from "./RepoGradesDashboard";
 import RepoGradeActionsMenu from "./RepoGradeActionsMenu";
@@ -403,18 +403,22 @@ function ColumnHeaderControls({
       </span>
       {busy && <span className={styles.postReason} role="status">Posting to Canvas…</span>}
       <Collapse in={folderOptionsOpen} timeout={0} sx={{ width: "100%" }}>
-        <Select native size="small" fullWidth
-          inputProps={{ "aria-label": `Canvas assignment for the ${column.folder} column` }}
-          value={column.assignmentId ?? ""}
-          onChange={(e) => onAssignmentChange(column.folder, e.target.value || null)}
-        >
-          <option value="">Choose an assignment…</option>
-          {assignments.map((assignment) => (
-            <option key={assignment.id} value={assignment.id}>
-              {assignment.name}
-            </option>
-          ))}
-        </Select>
+        <Autocomplete size="small" fullWidth options={assignments}
+          value={assignments.find((assignment) => assignment.id === column.assignmentId)
+            ?? (column.assignmentId ? { id: column.assignmentId, name: `Assignment ${column.assignmentId} unavailable`, pointsPossible: null } : null)}
+          getOptionKey={(assignment) => assignment.id}
+          getOptionLabel={(assignment) => assignment.name}
+          isOptionEqualToValue={(option, value) => option.id === value.id}
+          filterOptions={createFilterOptions({ stringify: (assignment: CanvasAssignmentBrief) => `${assignment.name} ${assignment.id}` })}
+          onChange={(_, value) => onAssignmentChange(column.folder, value?.id ?? null)}
+          noOptionsText="No matching assignments"
+          renderOption={(props, assignment) => {
+            const { key, ...optionProps } = props;
+            return <li key={key} {...optionProps}>{assignment.name} (ID: {assignment.id})</li>;
+          }}
+          renderInput={(params) => <TextField {...params} placeholder="Search assignments"
+            slotProps={{ ...params.slotProps, htmlInput: { ...params.slotProps.htmlInput, "aria-label": `Canvas assignment for the ${column.folder} column` } }} />}
+        />
       </Collapse>
     </div>
   );

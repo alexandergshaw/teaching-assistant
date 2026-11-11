@@ -22,7 +22,8 @@
 // into.
 
 import { requireUser, requireAppOwner } from "@/lib/supabase/auth";
-import { listOrgRepos, getRepoTree } from "@/lib/github";
+import { listOrgRepos, getRepoTreeWithMeta } from "@/lib/github";
+import { resolveRepoSourceCommit } from "@/lib/github.repos";
 import { listAssignments, type CanvasAssignmentBrief } from "@/lib/canvas";
 import { reportCanvasFailure, type CanvasFailureDetail } from "@/lib/canvas-failure-report";
 import { scanOrgRepoTrees, type OrgRepoTreesResult } from "@/lib/repo-grade-tree-scan";
@@ -80,10 +81,12 @@ export async function loadOrgRepoTreesAction(
     if (!org.trim()) return { error: "Provide a GitHub organization." };
     return await scanOrgRepoTrees(org.trim(), prefix?.trim() || undefined, repoLimit, {
       listRepos: (o, p) => listOrgRepos(o, p),
-      fetchTreePaths: async (fullName) => {
+      fetchTreePaths: async (fullName, branch) => {
         const [owner, repo] = fullName.split("/");
-        const tree = await getRepoTree(owner, repo);
-        return tree.map((entry) => entry.path);
+        const sourceCommit = await resolveRepoSourceCommit(owner, repo, branch);
+        const tree = await getRepoTreeWithMeta(owner, repo, sourceCommit);
+        if (tree.truncated || tree.unenumerated || tree.excluded?.length) throw new Error("Repository tree is incomplete; refresh to retry.");
+        return { paths: tree.entries.map((entry) => entry.path), sourceCommit };
       },
     });
   } catch (err) {

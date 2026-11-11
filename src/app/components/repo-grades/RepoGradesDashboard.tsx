@@ -2,7 +2,7 @@ import { useSupabase } from "@/context/SupabaseProvider";
 import { Alert, Box, Button, Chip, Stack, Typography } from "@mui/material";
 import { isOwnerDecision } from "@/lib/access";
 import type { FeedbackBoxesEdit } from "../grading-results/gradingResultsHelpers";
-import { newerVerifiedNoSubmission, savedResultIsEarlierThanObservedPin, type RepoGradeMatrix, type RepoGradeSavedAttempt, type RepoGradeSavedResult } from "./repoGradesDashboardModel";
+import { newerVerifiedNoSubmission, noSubmissionMatchesScan, savedResultIsEarlierThanObservedPin, type RepoGradeMatrix, type RepoGradeSavedAttempt, type RepoGradeSavedResult } from "./repoGradesDashboardModel";
 import { FeedbackDisclosure, RepoResultCopy, RepoResultFeedback } from "./RepoDashboardFeedback";
 import RepoGradeProfileSettings from "./RepoGradeProfileSettings";
 import RepoGradeRubricScores from "./RepoGradeRubricScores";
@@ -59,7 +59,13 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
   criterionOrder?: readonly string[];
 }) {
   const cell = repo.cells.get(folder);
-  const provenNoSubmission = newerVerifiedNoSubmission(cell?.saved, cell?.automaticBlocks);
+  const rawNoSubmission = cell?.automaticBlocks?.find((item) => item.noSubmission && !item.noSubmissionStale);
+  const provenNoSubmission = newerVerifiedNoSubmission(cell?.saved, cell?.automaticBlocks)
+    && noSubmissionMatchesScan(rawNoSubmission?.sourceRef, rawNoSubmission?.sourceSha, cell?.browser);
+  const historicalEmpty = cell?.saved?.latest.status === "no-submission"
+    && !noSubmissionMatchesScan(cell.saved.latest.sourceRef, cell.saved.latest.commit, cell.browser);
+  const historicalAutomaticEmpty = !!rawNoSubmission && !provenNoSubmission
+    && !noSubmissionMatchesScan(rawNoSubmission.sourceRef, rawNoSubmission.sourceSha, cell?.browser);
   const staleNoSubmission = cell?.automaticBlocks?.some((item) => item.noSubmissionStale);
   const earlierScore = savedResultIsEarlierThanObservedPin(cell?.saved, cell?.automaticBlocks);
   const ambiguousNoSubmission = !!cell?.saved && !provenNoSubmission && !staleNoSubmission && cell.automaticBlocks?.some((item) => item.noSubmission);
@@ -72,7 +78,7 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
   return <>
     <div className={styles.matrixScoreHead} data-rubric-head>
       <Box data-rubric-head-content className={styles.matrixScoreContent}>
-        {cell?.saved && !provenNoSubmission && <SavedMatrixResult result={cell.saved} repo={repo.name} folder={folder} feedback={feedback} showSource={false} part="score" earlierPin={earlierScore} />}
+        {cell?.saved && !provenNoSubmission && <SavedMatrixResult result={cell.saved} repo={repo.name} folder={folder} feedback={feedback} showSource={false} part="score" earlierPin={earlierScore || historicalEmpty} />}
         {provenNoSubmission && <RepoGradeStatusChip status="no-submission" />}
         {!cell?.saved && scanStatus && scanStatus !== "ungraded" && <RepoGradeStatusChip status={scanStatus} />}
       </Box>
@@ -81,6 +87,9 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
       placeholderOnly={provenNoSubmission || (!scored && cell?.saved?.latest.status === "no-submission")}
       label={`Saved rubric scores: ${repo.name} / ${folder || "Repository root"}`} />
     {cell?.saved && !provenNoSubmission && <SavedMatrixResult result={cell.saved} repo={repo.name} folder={folder} feedback={feedback} showSource={false} part="details" />}
+    {(historicalEmpty || historicalAutomaticEmpty) && <Typography component="p" variant="caption" color="text.secondary">
+      An earlier check found no submission; the current branch revision has not been checked for this assignment.
+    </Typography>}
     {ambiguousNoSubmission && <Typography component="p" variant="caption" color="text.secondary">
       A repository check found no submission; its order relative to the saved grade could not be verified.
     </Typography>}
@@ -120,7 +129,7 @@ function SavedMatrixResult({ result, repo, folder, feedback, showSource, part, e
   const sections = scored?.feedback_sections;
   return (
     <>
-      {part === "score" && <>{earlierPin ? <Chip size="small" label="Earlier or unconfirmed grade" />
+      {part === "score" && <>{earlierPin ? <Chip size="small" label={latest.status === "no-submission" ? "Earlier no-submission check" : "Earlier or unconfirmed grade"} />
         : <RepoGradeStatusChip status={latest.status === "claimed" ? "running" : latest.status}
           source={scored && scored.generation !== latest.generation ? "Latest saved" : showSource ? "Saved" : undefined} />}
       {scored && (

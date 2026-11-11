@@ -24,6 +24,8 @@ export interface RepoGradesDashboardRow {
   score: string | null;
   result: string;
   discovery: RepoGradesDashboardDiscovery;
+  scanRef?: string;
+  scanCommit?: string;
 }
 
 export interface RepoGradesCourseEdits {
@@ -84,7 +86,8 @@ export function buildRepoGradesDashboard(
       else if (scannedRepo) discovery = "Folder not seen in scan";
       else if (scan) discovery = "Repository not seen in scan";
 
-      rows.push({ repo, folder, score, result, discovery });
+      rows.push({ repo, folder, score, result, discovery,
+        ...(scannedRepo?.sourceCommit ? { scanRef: scannedRepo.defaultBranch, scanCommit: scannedRepo.sourceCommit } : {}) });
     }
   }
   return rows;
@@ -119,6 +122,14 @@ export function newerVerifiedNoSubmission(
     const settled = Date.parse(attempt.settledAt);
     return Number.isFinite(settled) && settled < runAt;
   });
+}
+
+/** A fresh scan can disprove that an older empty result describes the current branch. */
+export function noSubmissionMatchesScan(
+  sourceRef: string | undefined, sourceCommit: string | undefined, browser: RepoGradesDashboardRow | undefined,
+): boolean {
+  return !!sourceRef && !!sourceCommit && !!browser?.scanRef && !!browser.scanCommit
+    && sourceRef === browser.scanRef && sourceCommit.toLowerCase() === browser.scanCommit.toLowerCase();
 }
 
 /** A saved score from a different pin is historical while a newer observed
@@ -311,7 +322,9 @@ export function visibleRepoGradebookRows(
   const scoreForSort = (repo: MatrixRepository | undefined) => {
     if (!repo || sortFolder === undefined) return null;
     const cell = repo.cells.get(sortFolder);
-    return newerVerifiedNoSubmission(cell?.saved, cell?.automaticBlocks)
+    const empty = cell?.automaticBlocks?.find((item) => item.noSubmission && !item.noSubmissionStale);
+    return (newerVerifiedNoSubmission(cell?.saved, cell?.automaticBlocks)
+      && noSubmissionMatchesScan(empty?.sourceRef, empty?.sourceSha, cell?.browser))
       || savedResultIsEarlierThanObservedPin(cell?.saved, cell?.automaticBlocks) ? null : cell?.saved?.scored?.score ?? null;
   };
   const compareScores = (left: MatrixRepository | undefined, right: MatrixRepository | undefined) => {

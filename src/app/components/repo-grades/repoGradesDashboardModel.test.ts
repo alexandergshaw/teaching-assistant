@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { OrgRepoTreesResult } from "@/lib/repo-grade-tree-scan";
 import { defaultRepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
 import {
-  addRepoGradeSavedPage, buildRepoGradeMatrix, buildRepoGradesDashboard, mergeIncompleteRepoGradeResults, newerVerifiedNoSubmission, savedResultIsEarlierThanObservedPin, updateRepoGradesCourseEdits, visibleRepoGradebookRows,
+  addRepoGradeSavedPage, buildRepoGradeMatrix, buildRepoGradesDashboard, mergeIncompleteRepoGradeResults, newerVerifiedNoSubmission, noSubmissionMatchesScan, savedResultIsEarlierThanObservedPin, updateRepoGradesCourseEdits, visibleRepoGradebookRows,
   type RepoGradeSavedAttempt, type RepoGradeSavedResult,
 } from "./repoGradesDashboardModel";
 import { ALL_FOLDERS } from "./repoGradesFolderSelection";
@@ -36,6 +36,18 @@ function attempt(generation: number, repo: string, folder: string, score: number
 }
 
 describe("class repository results", () => {
+  it("does not treat an old empty check as current after the scanned branch changes", () => {
+    const oldCommit = "a".repeat(40), newCommit = "b".repeat(40);
+    const scanned = { ...scan({ "org/student": ["assignments/module_11"] }), repos: [{
+      repo: "org/student", folders: ["assignments/module_11"], error: null,
+      defaultBranch: "main", htmlUrl: "", sourceCommit: newCommit,
+    }] };
+    const row = buildRepoGradesDashboard({}, scanned)[0];
+    expect(noSubmissionMatchesScan("main", oldCommit, row)).toBe(false);
+    expect(noSubmissionMatchesScan("main", newCommit, row)).toBe(true);
+    expect(noSubmissionMatchesScan("other", newCommit, row)).toBe(false);
+    expect(noSubmissionMatchesScan("main", newCommit, undefined)).toBe(false);
+  });
   it("replaces an older saved score only with a safely ordered verified empty new commit", () => {
     const savedAttempt = { ...attempt(1, "org/a", "lab", 90), settledAt: "2026-11-06T13:00:00.000Z" };
     const saved = { latest: savedAttempt, scored: savedAttempt };

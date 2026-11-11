@@ -103,6 +103,15 @@ function fakeRepo(fullName: string, defaultBranch = "main") {
 }
 
 describe("scanOrgRepoTrees", () => {
+  it("retains the commit corresponding to the scanned default branch", async () => {
+    const fetchTreePaths = vi.fn(async () => ({ paths: ["assignments/module_11/module11.py"], sourceCommit: "b".repeat(40) }));
+    const result = await scanOrgRepoTrees("org", undefined, undefined, {
+      listRepos: async () => [{ fullName: "org/student", htmlUrl: "https://github.com/org/student", defaultBranch: "main" }],
+      fetchTreePaths,
+    });
+    expect(fetchTreePaths).toHaveBeenCalledWith("org/student", "main");
+    expect(result).toMatchObject({ repos: [{ repo: "org/student", sourceCommit: "b".repeat(40), folders: ["assignments", "assignments/module_11"] }] });
+  });
   it("returns one row per scanned repo, each with its assignment folders", async () => {
     const fetchers: OrgRepoTreeFetchers = {
       listRepos: async () => [fakeRepo("org/alice-repo"), fakeRepo("org/bob-repo")],

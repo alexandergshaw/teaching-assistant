@@ -137,6 +137,8 @@ export interface RepoFolderRow {
    * required fallback (see repoGradeTreeLink.ts's header comment for the
    * link this field feeds). */
   defaultBranch: string;
+  /** Immutable default-branch commit captured with this scan, when available. */
+  sourceCommit?: string;
   /** This repo's assignment folders (AC3 items 13-14), or null when this
    * repo's tree fetch failed - never both. */
   folders: string[] | null;
@@ -165,7 +167,7 @@ export interface OrgRepoTreesResult {
  * full RepoTreeEntry. */
 export interface OrgRepoTreeFetchers {
   listRepos: (org: string, prefix?: string) => Promise<Pick<GithubRepo, "fullName" | "htmlUrl" | "defaultBranch">[]>;
-  fetchTreePaths: (fullName: string) => Promise<string[]>;
+  fetchTreePaths: (fullName: string, branch: string) => Promise<string[] | { paths: string[]; sourceCommit: string }>;
 }
 
 export interface ScanOrgRepoTreesOptions {
@@ -233,11 +235,13 @@ export async function scanOrgRepoTrees(
 
   const rows = await mapWithConcurrency(scanned, concurrency, async (repo): Promise<RepoFolderRow> => {
     try {
-      const paths = await fetchers.fetchTreePaths(repo.fullName);
+      const tree = await fetchers.fetchTreePaths(repo.fullName, repo.defaultBranch);
+      const paths = Array.isArray(tree) ? tree : tree.paths;
       return {
         repo: repo.fullName,
         htmlUrl: repo.htmlUrl,
         defaultBranch: repo.defaultBranch,
+        ...(!Array.isArray(tree) ? { sourceCommit: tree.sourceCommit } : {}),
         folders: assignmentFolderPathsFromTree(paths, ignore),
         error: null,
       };

@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { minimumBatchPlan, minimumNonMonotoneBatchPlan, omittedGroups, preflightSingles, remainingGroups, submitBoundedGroups } from "./partialGroupBatch";
+import { annotateOmittedGroups, minimumBatchPlan, minimumNonMonotoneBatchPlan, omittedGroups, preflightSingles, remainingGroups, submitBoundedGroups } from "./partialGroupBatch";
+import type { RecoverableGroup } from "@/lib/grade/large-zip-subset";
+
+it("retains distinct hold reasons across automatic batches", () => {
+  const groups = ["submitted", "pending", "ambiguous", "review"].map((label) => ({ label, sourceIdentifier: label, members: [] })) as RecoverableGroup[];
+  const omitted = omittedGroups(groups, ["pending"], ["submitted"]);
+  expect(annotateOmittedGroups(omitted, (group) => group.label === "ambiguous" ? "student identity is ambiguous" : undefined, true).map((group) => [group.label, group.reason])).toEqual([["ambiguous", "student identity is ambiguous"], ["review", "held for review"]]);
+});
 
 describe("non-monotone batch planning", () => {
   it("finds a valid grouping when an invalid prefix becomes valid after another group", async () => {

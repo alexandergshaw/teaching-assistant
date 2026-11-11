@@ -3,7 +3,7 @@ import { ZIP_MAX_ARCHIVE_RATIO, ZIP_MAX_CUMULATIVE_DECLARED_BYTES, ZIP_MAX_CUMUL
 import { GRADING_ZIP_MAX_BYTES } from "./grading-zip-transport";
 import { inferStudentPrefix } from "./utils";
 
-type Reason = "nested archive" | "member size" | "unsupported type" | "compression ratio" | "group size" | "unassigned index";
+type Reason = "nested archive" | "member size" | "unsupported type" | "compression ratio" | "group size" | "unassigned index" | "student identity could not be resolved" | "student identity is ambiguous" | "index evidence could not be assigned completely" | "nested project has unsupported files or no usable source" | "held for review" | "not selected";
 export interface RecoverableGroup { readonly label: string; readonly sourceIdentifier: string; readonly members: readonly LargeZipMember[]; readonly reason?: Reason }
 export type RecoverablePlan = { readonly ok: true; readonly groups: readonly RecoverableGroup[] } | { readonly ok: false; readonly reason: string };
 const supported = new Set(["txt", "md", "py", "ipynb", "csv", "pdf", "docx", "html", "mp4", "m4v", "mov", "webm", "c", "cc", "cpp", "cxx", "h", "hpp", "user", "recipe", "log", "command"]);

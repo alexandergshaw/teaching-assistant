@@ -1,6 +1,9 @@
 import type { RecoverableGroup } from "@/lib/grade/large-zip-subset";
 
-/** Auto-submit only when every source group is fully accounted for. */
+/** Auto-submit only fully supported groups; the handoff records the rest. */
 export function automaticArchiveAdmission(incoming: boolean, groups: readonly RecoverableGroup[], admitted: readonly RecoverableGroup[], completeNested: (group: RecoverableGroup) => boolean = () => false): boolean {
-  return incoming && admitted.length > 0 && admitted.length === groups.length && groups.every((group) => !group.reason || (group.reason === "nested archive" && completeNested(group)));
+  if (!incoming || !admitted.length) return false;
+  const source = new Map(groups.map((group) => [group.label, group]));
+  if (source.size !== groups.length || new Set(admitted.map((group) => group.label)).size !== admitted.length) return false;
+  return admitted.every((group) => { const actual = source.get(group.label); return actual === group && (!actual.reason || (actual.reason === "nested archive" && completeNested(actual))); });
 }

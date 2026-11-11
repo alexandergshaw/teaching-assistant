@@ -5,7 +5,7 @@ import { Alert, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTi
 import type { PartialHashProgress, PartialHashReview, PartialProjects } from "./partialHandoff";
 import { buildRecoverableZip, planRecoverableZip, type RecoverableGroup } from "@/lib/grade/large-zip-subset";
 import { inferArchiveNames } from "@/lib/grade/recoverable-zip-names";
-import { omittedGroups, preflightSingles, remainingGroups, submitBoundedGroups } from "./partialGroupBatch";
+import { annotateOmittedGroups, omittedGroups, preflightSingles, remainingGroups, submitBoundedGroups } from "./partialGroupBatch";
 import { inspectBrightspaceProject, type ProjectInventoryFile } from "@/lib/grade/brightspace-project-inventory";
 import { buildBrightspaceGroup } from "@/lib/grade/brightspace-group-build";
 import { projectReady } from "./nestedProjectReady";
@@ -26,7 +26,7 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
   const [indexEvidence, setIndexEvidence] = useState<{ bytes: Uint8Array; evidence: BrightspaceIndexEvidence } | null>(null);
   const [indexAccounted, setIndexAccounted] = useState(false);
   const [busy, setBusy] = useState(!!incomingFile), [error, setError] = useState(""), [progress, setProgress] = useState<PartialHashProgress | null>(null), [completed, setCompleted] = useState(0), [uncertain, setUncertain] = useState(false);
-  const generation = useRef(0), hashing = useRef(false), submitting = useRef(false), automatic = useRef<File | null>(null);
+  const generation = useRef(0), hashing = useRef(false), submitting = useRef(false), automatic = useRef<{ file: File; labels: readonly string[] } | null>(null);
   useEffect(() => () => { generation.current++; }, []);
   const close = () => { generation.current++; automatic.current = null; setOpen(false); setFile(null); setGroups([]); setSourceGroups([]); setSelected([]); setAdmittedLabels([]); setNames({}); setProjectFiles({}); setIndexEvidence(null); setIndexAccounted(false); setBusy(false); setError(""); setProgress(null); setCompleted(0); onClose?.(); };
   const choose = async (next: File | undefined) => {
@@ -54,19 +54,19 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
       const eligible = visibleGroups.filter((group) => (!group.reason || projectReady(group, projects)) && !!inferred[group.label] && (!indexData || !/^\d+-\d+$/.test(group.label) || indexComplete));
       const counts = new Map<string, number>(); for (const group of eligible) { const key = inferred[group.label].normalize("NFKC").toLocaleLowerCase(); counts.set(key, (counts.get(key) ?? 0) + 1); }
       const admitted = eligible.filter((group) => counts.get(inferred[group.label].normalize("NFKC").toLocaleLowerCase()) === 1);
-      // Automatic submission is restricted to archives with a complete, unambiguous
-      // inventory. A nested project must preserve every inventoried file.
-      automatic.current = automaticArchiveAdmission(autoSubmit && next === incomingFile, visibleGroups, admitted, (group) => projectReady(group, projects) && group.members.filter((member) => member.nestedArchive).every((member) => projects[member.path].every((item) => item.disposition === "retain"))) ? next : null;
-      setProjectFiles(projects); setNames(inferred); setGroups(visibleGroups); setSourceGroups(result.groups); setIndexEvidence(indexData); setIndexAccounted(indexComplete); setSelected(admitted.map((group) => group.label));
+      const completeNested = (group: RecoverableGroup) => projectReady(group, projects) && group.members.filter((member) => member.nestedArchive).every((member) => projects[member.path].every((item) => item.disposition === "retain"));
+      const automaticGroups = admitted.filter((group) => !group.reason || (group.reason === "nested archive" && completeNested(group)));
+      automatic.current = automaticArchiveAdmission(autoSubmit && next === incomingFile, visibleGroups, automaticGroups, completeNested) ? { file: next, labels: automaticGroups.map((group) => group.label) } : null;
+      setProjectFiles(projects); setNames(inferred); setGroups(visibleGroups); setSourceGroups(result.groups); setIndexEvidence(indexData); setIndexAccounted(indexComplete); setSelected((automatic.current ? automaticGroups : admitted).map((group) => group.label));
     } catch { if (token === generation.current) setError("Archive review failed. Try choosing the file again."); }
     finally { if (token === generation.current) setBusy(false); }
   };
   useEffect(() => { let current = true; if (incomingFile) void Promise.resolve().then(() => { if (current) return choose(incomingFile); }); return () => { current = false; }; }, [incomingFile]);
 
   const nameCounts = new Map<string, number>(); for (const group of groups) { const name = names[group.label]; if (name && (!group.reason || projectReady(group, projectFiles))) { const key = name.normalize("NFKC").toLocaleLowerCase(); nameCounts.set(key, (nameCounts.get(key) ?? 0) + 1); } }
-  const blocked = (group: RecoverableGroup) => (group.reason && !projectReady(group, projectFiles) ? group.reason : undefined) ?? (!names[group.label] ? "student identity could not be resolved" : nameCounts.get(names[group.label].normalize("NFKC").toLocaleLowerCase()) !== 1 ? "student identity is ambiguous" : undefined) ?? (indexEvidence && /^\d+-\d+$/.test(group.label) && !indexAccounted ? "index evidence could not be assigned completely" : undefined);
+  const blocked = (group: RecoverableGroup): RecoverableGroup["reason"] => (group.reason && !projectReady(group, projectFiles) ? (group.reason === "nested archive" ? "nested project has unsupported files or no usable source" : group.reason) : undefined) ?? (!names[group.label] ? "student identity could not be resolved" : nameCounts.get(names[group.label].normalize("NFKC").toLocaleLowerCase()) !== 1 ? "student identity is ambiguous" : undefined) ?? (indexEvidence && /^\d+-\d+$/.test(group.label) && !indexAccounted ? "index evidence could not be assigned completely" : undefined);
   const eligible = groups.filter((group) => !blocked(group));
-  const grade = async () => {
+  const grade = async (automaticRun = false) => {
     if (!file || !selected.length || busy || uncertain || submitting.current || selected.some((label) => !eligible.some((group) => group.label === label))) return;
     submitting.current = true; onSelectionStart?.(); const token = generation.current, verifiedMembers = new WeakMap<Blob, Set<string>>(), sourceDigests = new WeakMap<File, string>(); let dispatched = 0, refusedBeforeDispatch = false; setBusy(true); setError(""); setCompleted(0);
     try {
@@ -116,7 +116,7 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
         return "batch exceeds grading limits";
       }, buildBatch, async (result, count) => {
         refusedBeforeDispatch = false; setUncertain(true);
-        const omitted = omittedGroups(result.omitted, selected, admittedLabels).filter((group) => !(indexAccounted && group.reason === "unassigned index"));
+        const omitted = annotateOmittedGroups(omittedGroups(result.omitted, selected, admittedLabels).filter((group) => !(indexAccounted && group.reason === "unassigned index")), blocked, automaticRun);
         const currentBatch = new Set(result.selected.map((group) => group.label));
         const future = new Set([...remaining].filter((label) => !currentBatch.has(label)));
         const refusal = await onSubmit(file, new File([result.archive], "reviewed-partial-submissions.zip", { type: "application/zip" }), result.selected, omitted, names, { current: () => token === generation.current, bindOwnerSession: true, sourceDigests, indexBytes: indexEvidence?.bytes, extraMapping: result.extraMapping, projects: result.projects, pendingAtHandoff: groups.filter((group) => future.has(group.label)), onAdmitted, onRefused: () => { refusedBeforeDispatch = true; }, onProgress: (value) => { if (token === generation.current) { hashing.current = !!value; setProgress(value); } } }, result.project);
@@ -133,9 +133,9 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
     finally { submitting.current = false; if (token === generation.current) { hashing.current = false; setProgress(null); setBusy(false); } }
   };
   useEffect(() => {
-    if (!file || automatic.current !== file || busy || !groups.length || selected.length !== groups.length) return;
+    if (!file || automatic.current?.file !== file || busy || !groups.length || selected.length !== automatic.current.labels.length || automatic.current.labels.some((label) => !selected.includes(label))) return;
     automatic.current = null;
-    void grade();
+    void grade(true);
   });
   return <>
     <Button onClick={() => { onManualOpen?.(); setOpen(true); }}>Review oversized ZIP</Button>
@@ -148,8 +148,8 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
         {busy && <Typography role="status">{progress ? `Checking ${progress.phase === "source" ? "original archive" : "selected files"}: ${progress.written} of ${progress.total} bytes` : `Preparing submissions${completed ? `; ${completed} groups submitted` : ""}...`}</Typography>}
         {progress && <LinearProgress variant={progress.total ? "determinate" : "indeterminate"} value={progress.total ? progress.written / progress.total * 100 : undefined} aria-label="Archive verification progress" />}
         {error && <Alert severity="error">{error}</Alert>}{uncertain && <Alert severity="warning">Submission may have started. Check results before retrying.</Alert>}
-        {!!groups.length && <FormControlLabel control={<Checkbox disabled={busy || !eligible.length} checked={eligible.length > 0 && selected.length === eligible.length} indeterminate={selected.length > 0 && selected.length < eligible.length} onChange={(_, checked) => setSelected(checked ? eligible.map((group) => group.label) : [])} />} label={`Select all eligible (${eligible.length})`} />}
-        <Stack spacing={0} sx={{ maxHeight: 320, overflowY: "auto" }}>{groups.map((group) => <Stack key={group.label} spacing={0.5}><FormControlLabel control={<Checkbox checked={selected.includes(group.label)} disabled={busy || !!blocked(group)} onChange={(_, checked) => setSelected((previous) => checked ? [...previous, group.label] : previous.filter((label) => label !== group.label))} />} label={`${names[group.label] ?? group.label}${blocked(group) ? ` — held: ${blocked(group)}` : ""}`} /><Tooltip title={group.members.map((member) => member.path).join(", ")}><Typography variant="body2" tabIndex={0}>{group.members.length} {group.members.length === 1 ? "file" : "files"}{projectReady(group, projectFiles) ? `; ${group.members.flatMap((member) => projectFiles[member.path] ?? []).filter((item) => item.disposition === "candidate-build-artifact" || item.disposition === "course-fixture").length} build artifacts or verified course datasets excluded` : ""}</Typography></Tooltip></Stack>)}</Stack>
+        {!!groups.length && <FormControlLabel control={<Checkbox disabled={busy || !eligible.length} checked={eligible.length > 0 && selected.length === eligible.length} indeterminate={selected.length > 0 && selected.length < eligible.length} onChange={(_, checked) => { automatic.current = null; setSelected(checked ? eligible.map((group) => group.label) : []); }} />} label={`Select all eligible (${eligible.length})`} />}
+        <Stack spacing={0} sx={{ maxHeight: 320, overflowY: "auto" }}>{groups.map((group) => <Stack key={group.label} spacing={0.5}><FormControlLabel control={<Checkbox checked={selected.includes(group.label)} disabled={busy || !!blocked(group)} onChange={(_, checked) => { automatic.current = null; setSelected((previous) => checked ? [...previous, group.label] : previous.filter((label) => label !== group.label)); }} />} label={`${names[group.label] ?? group.label}${blocked(group) ? ` — held: ${blocked(group)}` : ""}`} /><Tooltip title={group.members.map((member) => member.path).join(", ")}><Typography variant="body2" tabIndex={0}>{group.members.length} {group.members.length === 1 ? "file" : "files"}{projectReady(group, projectFiles) ? `; ${group.members.flatMap((member) => projectFiles[member.path] ?? []).filter((item) => item.disposition === "candidate-build-artifact" || item.disposition === "course-fixture").length} build artifacts or verified course datasets excluded` : ""}</Typography></Tooltip></Stack>)}</Stack>
       </Stack></DialogContent>
       <DialogActions><Button disabled={busy && !progress} onClick={() => { if (busy && !hashing.current) return; if (hashing.current) setUncertain(false); close(); }}>{progress ? "Cancel verification" : "Close"}</Button><Button variant="contained" disabled={busy || uncertain || !selected.length} onClick={() => void grade()}>Grade selected ({selected.length})</Button></DialogActions>
     </Dialog>

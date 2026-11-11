@@ -1,3 +1,5 @@
+import type { RecoverableGroup } from "@/lib/grade/large-zip-subset";
+
 export function remainingGroups(selected: readonly string[], admitted: readonly string[]): string[] {
   const accepted = new Set(admitted);
   return selected.filter((label) => !accepted.has(label));
@@ -6,6 +8,11 @@ export function remainingGroups(selected: readonly string[], admitted: readonly 
 export function omittedGroups<T extends { label: string }>(groups: readonly T[], selected: readonly string[], admitted: readonly string[]): T[] {
   const accounted = new Set([...selected, ...admitted]);
   return groups.filter((group) => !accounted.has(group.label));
+}
+
+/** Keep the actual hold reason with the omitted record and visible notice. */
+export function annotateOmittedGroups(groups: readonly RecoverableGroup[], blocked: (group: RecoverableGroup) => RecoverableGroup["reason"], automatic: boolean): RecoverableGroup[] {
+  return groups.map((group) => ({ ...group, reason: blocked(group) ?? (automatic ? "held for review" : group.reason ?? "not selected") }));
 }
 
 /** Check nested rebuilds sequentially before any batch is submitted. */

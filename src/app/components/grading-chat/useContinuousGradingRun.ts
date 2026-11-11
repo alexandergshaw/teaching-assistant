@@ -1,5 +1,7 @@
 "use client";
 import { bindPartialEvidence, skippedEvidenceIntake } from "./partialEvidence";
+import type { UseContinuousGradingRunParams } from "./continuousRunParams";
+export type { UseContinuousGradingRunParams } from "./continuousRunParams";
 
 // GRADING-CHAT wave 1 (docs/grading-chat-waves.md section 3, N3). The
 // continuous, dispatch-on-arrival driver behind the chat surface (AC-L/AC-5/
@@ -33,7 +35,6 @@ import type {
   StudentSubmissionEntry,
   SubmissionZipClassification,
 } from "@/lib/grade/types";
-import type { LlmProvider } from "@/lib/llm";
 import { chatSeamNowMs, classifyChatSeamFailure, decideChatSeamDiagnostic, recordChatSeamSettled, type ChatSeamFailureClass } from "./chatSeamDiagnostic";
 import { GRADING_DIAGNOSTIC_OPERATION_LABELS, recordClassifySettled } from "@/app/components/grading/gradingDiagnosticLog";
 import { recordSessionDiagnosticEntry } from "@/lib/session-diagnostic-log";
@@ -50,7 +51,7 @@ import { countPendingVideos, pendingDisplay } from "./pendingVideoCount";
 import type { ChatGradingSetup } from "./chatVersionedSetup";
 import { bindVersionedResultRows, projectVersionedResults, type VersionedArrival, type VersionedResultRow } from "./versionedResultProjection";
 import { partialBatchNotice } from "./partialBatchNotice";
-import { postClassifyRecording, postPrepareVideo, videoFailureOf, type ClassifyRecordingFn, type PrepareVideoFn } from "./videoClient";
+import { postClassifyRecording, postPrepareVideo, videoFailureOf, type PrepareVideoFn } from "./videoClient";
 import { postPrepareSingleFile, type PrepareSingleFileFn } from "./singleFileClient";
 import { recordVideoSettled, recordZipVideoOutcomes } from "./videoDiagnostic";
 import { intakeExtBucket, intakeSignalsFor, ledgerSignals, recordAdmitAnomaly, recordPrepareDetail, recordSplitDecision } from "./chatIntakeDiagnostic";
@@ -81,33 +82,6 @@ export type { ItemDiagnostic, ItemDiagnosticSink };
 const ITEM_DIAGNOSTIC_CAP = 200;
 
 export type HeaderState = "unset" | "resolving" | "ready" | "refused";
-
-export interface UseContinuousGradingRunParams {
-  readonly provider: LlmProvider;
-  /** Injected so the hook is driven by the no-render lifecycle harness with a
-   * MOCKED seam. Defaults to the real /api/grade-run-item POST. */
-  readonly dispatchItem?: (request: GradeRunItemRequestBody, sink?: ItemDiagnosticSink) => Promise<GradeResult>;
-  /** Injected storaged-zip ingest (BULK-ZIP BW2). Defaults to the real
-   * never-throw NDJSON client for POST /api/grade-submission-zip. */
-  readonly ingestZip?: (storagePath: string, provider: string, onEntry: (entry: StudentSubmissionEntry) => void, reviewedZipMapping?: Readonly<Record<string, string>>, staticOnly?: true) => Promise<IngestOutcome>;
-  /** Injected loose-video prepare (VIDEO-GRADING W4). Defaults to the real
-   * never-throw POST /api/grade-submission-video. */
-  readonly prepareVideo?: PrepareVideoFn;
-  /** Injected one-vs-many classifier (RECORDING ONE-VS-MANY W2). Defaults to the
-   * real never-throw POST /api/classify-recording; only consulted when
-   * RECORDING_SPLIT_ENABLED is on. */
-  readonly classifyRecording?: ClassifyRecordingFn;
-  /** Injected large-single-file prepare (LARGE-SINGLE-FILE W2). Defaults to the
-   * real never-throw POST /api/grade-submission-file. */
-  readonly prepareSingleFile?: PrepareSingleFileFn;
-  /** The per-session entry ceiling (R4). Defaults to DEFAULT_MAX_ENTRIES. */
-  readonly maxEntries?: number;
-  /** Opt in to the did-right/did-wrong comment split on every grade request.
-   * Absent = body byte-identical to before. */
-  readonly commentSplit?: boolean;
-  /** Internal test gate; the page must not enable until mixed-version operations are safe. */
-  readonly enableSetupCorrections?: boolean;
-}
 
 export interface UseContinuousGradingRunResult {
   readonly repositoryAdapter: ContinuousRepositoryAdapter;
@@ -195,7 +169,7 @@ export interface UseContinuousGradingRunResult {
 export function useContinuousGradingRun(params: UseContinuousGradingRunParams): UseContinuousGradingRunResult {
   const { provider, maxEntries = DEFAULT_MAX_ENTRIES, commentSplit } = params;
   const dispatchItem = params.dispatchItem ?? postGradeRunItem;
-  const ingestZip = params.ingestZip ?? ((path, provider, onEntry, mapping, staticOnly) => ingestStoragedZip(path, provider, onEntry, undefined, mapping, staticOnly));
+  const ingestZip = params.ingestZip ?? ((path, provider, onEntry, mapping, staticOnly, ownerSession) => ingestStoragedZip(path, provider, onEntry, undefined, mapping, staticOnly, ownerSession));
   const prepareVideo = params.prepareVideo ?? postPrepareVideo;
   const classifyRecording = params.classifyRecording ?? postClassifyRecording;
   const prepareSingleFile = params.prepareSingleFile ?? postPrepareSingleFile;
@@ -420,7 +394,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   // window onto its request body.
   const enqueueAdmitted = (
     admitted: readonly StudentSubmissionEntry[],
-    opts: { pointsPossible: number | null; submitLabel: string; setup: ChatGradingSetup; windows?: readonly RecordingWindow[] }
+    opts: { pointsPossible: number | null; submitLabel: string; setup: ChatGradingSetup; windows?: readonly RecordingWindow[]; expectedOwnerSession?: { readonly accountId: string; readonly sessionId: string } }
   ) => {
     const flaggedNow: string[] = [];
     admitted.forEach((rawEntry, index) => {
@@ -440,6 +414,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         entry,
         ...opts.setup,
         pointsPossible: opts.pointsPossible,
+        ...(opts.expectedOwnerSession ? { expectedOwnerSession: opts.expectedOwnerSession } : {}),
         ...(window ? { gradeWindowSec: { startSec: window.startSec, endSec: window.endSec } } : {}),
       };
       retainedBodiesRef.current.set(sourceIndex, body);
@@ -538,7 +513,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       let ingest: IngestOutcome;
       const classifyStartedAtMs = chatSeamNowMs();
       try {
-        ingest = await ingestZip(input.storagePath, provider, (entry) => collected.push(entry), input.reviewedZipMapping, input.staticOnly);
+        ingest = await ingestZip(input.storagePath, provider, (entry) => collected.push(entry), input.reviewedZipMapping, input.staticOnly, input.expectedOwnerSession);
       } catch {
         // ingestStoragedZip never throws; this guards an injected replacement.
         ingest = { kind: "refused", reason: "The zip could not be prepared." };
@@ -708,6 +683,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         formData.set("file", input.file);
         if (input.reviewedZipMapping) formData.set("reviewedZipMapping", JSON.stringify(input.reviewedZipMapping));
         if (input.staticOnly) formData.set("staticOnly", "true");
+        if (input.expectedOwnerSession) formData.set("expectedOwnerSession", JSON.stringify(input.expectedOwnerSession));
         // A typed label reaches the server's `labelled` flag, which suppresses
         // name inference (grading-chat-intake.ts reads formData.get("label")).
         formData.set("label", input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS) ?? "");
@@ -758,7 +734,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     const skippedIntake = skippedEvidenceIntake(entries, ingestSkipped, storageLedger);
     if (skippedIntake) { setIngestLedger((prev) => mergeIngestLedgers(prev, skippedIntake.ledger)); return { kind: "refused", reason: skippedIntake.reason }; }
 
-    const boundEntries = bindPartialEvidence(entries, input.kind === "file" || input.kind === "storaged-zip" ? input.evidenceOmissions : undefined, input.kind === "file" || input.kind === "storaged-zip" ? input.staticOnly : undefined);
+    const boundEntries = bindPartialEvidence(entries, input.kind === "file" || input.kind === "storaged-zip" ? input.evidenceOmissions : undefined, input.kind === "file" || input.kind === "storaged-zip" ? input.staticOnly : undefined, input.kind === "file" || input.kind === "storaged-zip" ? input.perStudentEvidence : undefined);
     if (!boundEntries) return { kind: "refused", reason: "Partial evidence record is invalid. Nothing was graded." }; else entries = boundEntries;
     // RES-GC-8: clip to what the session ceiling still allows; refuse only
     // the remainder, never the whole event.
@@ -797,7 +773,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         ? (input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS) ?? "")
         : "";
 
-    const firstAdmittedIndex = dispatchedCountRef.current; enqueueAdmitted(admitted, { pointsPossible, submitLabel, setup });
+    const firstAdmittedIndex = dispatchedCountRef.current; enqueueAdmitted(admitted, { pointsPossible, submitLabel, setup, ...((input.kind === "file" || input.kind === "storaged-zip") && input.expectedOwnerSession ? { expectedOwnerSession: input.expectedOwnerSession } : {}) });
 
     if (refusedCount > 0 || ingestSkipped.length > 0) {
       safeDiagnostic(() =>

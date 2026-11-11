@@ -248,6 +248,7 @@ describe("classification carrier (ZIP-CLASS-VS-SINGLE)", () => {
 it("forwards the reviewed static-project flag to the storage route", async () => {
   let body = "";
   const fetcher: IngestFetch = async (_url, init) => { body = String(init.body); return okFetch(buildIngestLines([], []))(_url, init); };
-  await ingestStoragedZip("u/grading-uploads/a.zip", "gemini", () => {}, fetcher, { "a.zip/main.cpp": "Synthetic" }, true);
-  expect(JSON.parse(body)).toMatchObject({ staticOnly: true, reviewedZipMapping: { "a.zip/main.cpp": "Synthetic" } });
+  const expectedOwnerSession = { accountId: "11111111-1111-4111-8111-111111111111", sessionId: "22222222-2222-4222-8222-222222222222" };
+  await ingestStoragedZip("u/grading-uploads/a.zip", "gemini", () => {}, fetcher, { "a.zip/main.cpp": "Synthetic" }, true, expectedOwnerSession);
+  expect(JSON.parse(body)).toMatchObject({ staticOnly: true, reviewedZipMapping: { "a.zip/main.cpp": "Synthetic" }, expectedOwnerSession });
 });

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { requireAppOwner } from "@/lib/supabase/auth";
+import { verifySingleZipOwnerSession } from "@/lib/supabase/single-zip-owner-session";
+import { isExpectedOwnerSession } from "@/lib/grade/owner-session-binding";
 import { createClient as createServerSupabaseClient } from "@/lib/supabase/server";
 import { removeFiles, uploadFile } from "@/lib/supabase/storage";
 import { readBoundedZipStream } from "@/lib/grade/bounded-zip-stream";
@@ -138,6 +140,8 @@ export async function POST(req: NextRequest) {
   if (body.staticOnly !== undefined && (!staticOnly || body.reviewedZipMapping === undefined)) return NextResponse.json({ error: "Invalid static review request. Nothing was queued." }, { status: 400 });
   const reviewedMapping = body.reviewedZipMapping === undefined ? undefined : parseReviewedZipMapping(body.reviewedZipMapping);
   if (body.reviewedZipMapping !== undefined && !reviewedMapping) return NextResponse.json({ error: "The reviewed file mapping is invalid. Nothing was queued." }, { status: 400 });
+  const includesIndexEvidence = !!reviewedMapping && Object.keys(reviewedMapping).some((path) => /brightspace-index-evidence\.txt$/i.test(path));
+  if ((body.expectedOwnerSession !== undefined || includesIndexEvidence) && (!isExpectedOwnerSession(body.expectedOwnerSession) || !await verifySingleZipOwnerSession(body.expectedOwnerSession))) return NextResponse.json({ error: "The owner session changed. Nothing was queued." }, { status: 401 });
 
   // SEGMENT BIND, before any Storage call: isKnownUploadPath (inside the
   // lifecycle) only checks membership in the SHARED segment union, so a

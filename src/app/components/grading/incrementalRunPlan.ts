@@ -58,6 +58,7 @@ export interface IncrementalRunPlan {
 
 /** The JSON body POSTed to one /api/grade-run-item call. */
 export interface GradeRunItemRequestBody {
+  readonly expectedOwnerSession?: { readonly accountId: string; readonly sessionId: string };
   readonly sourceIndex: number;
   readonly entry: StudentSubmissionEntry;
   readonly assignmentInstructions: string;
@@ -136,7 +137,7 @@ export function stripUnneededRawBase64(entry: StudentSubmissionEntry): StudentSu
     if (entry.staticOnly && isStaticProjectText(file.extension) && file.rawBase64 && file.rawBase64.length <= 4_000_000) {
       try {
         const binary = atob(file.rawBase64), bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-        const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
         const first = text ? content.indexOf(text) : -1;
         if (first >= 0 && content.indexOf(text, first + 1) < 0) {
           let marker = "";

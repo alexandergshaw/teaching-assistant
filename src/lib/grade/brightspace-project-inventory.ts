@@ -1,11 +1,14 @@
 import { inspectLargeZipDirectory, type LargeZipMember } from "./recoverable-zip-directory";
 import { streamLargeZipMember } from "./stream-large-zip-member";
 import JSZip from "jszip";
+import { GUARDED_TEXT_EXTENSIONS } from "@/lib/guarded-text-formats";
+import { validateGuardedZipText } from "./validate-guarded-zip-text";
 
 const MAX_PROJECT_ARCHIVE_BYTES = 80 * 1024 * 1024;
 const MAX_PROJECT_FILES = 1000;
 const artifactExtensions = new Set(["obj", "pdb", "ilk", "idb", "ipch", "tlog", "vsidx", "suo", "wsuo", "lastbuildstate"]);
 const sourceExtensions = new Set(["c", "cc", "cpp", "cxx", "h", "hpp", "txt", "md", "markdown", "csv", "tsv", "json", "xml", "vcxproj", "sln", "slnx", "filters", "props", "targets", "docx", "doc", "pdf", "ppt", "pptx", "xls", "xlsx", "odt", "odp", "ods", "rtf", "ipynb", "py", "js", "jsx", "ts", "tsx", "java", "cs", "css", "html", "htm", "yml", "yaml", "sql", "png", "jpg", "jpeg", "webp", "heic", "heif"]);
+export function isBrightspaceProjectSource(path: string): boolean { const ext = path.split(".").pop()?.toLowerCase() ?? ""; return sourceExtensions.has(ext) || GUARDED_TEXT_EXTENSIONS.has(ext); }
 
 export type ProjectFileDisposition = "retain" | "candidate-build-artifact" | "course-fixture" | "needs-review";
 export interface ProjectInventoryFile { readonly path: string; readonly declaredBytes: number; readonly disposition: ProjectFileDisposition }
@@ -36,6 +39,9 @@ async function inspectProjectBlob(blob: Blob): Promise<ProjectInventory> {
   for (const member of nested.members) {
     const extension = member.path.split(".").pop()?.toLowerCase() ?? "";
     let disposition: ProjectFileDisposition = member.nestedArchive ? "needs-review" : sourceExtensions.has(extension) ? "retain" : artifactExtensions.has(extension) ? "candidate-build-artifact" : "needs-review";
+    // These extensions are admitted as text only after a full CRC check and
+    // strict UTF-8 validation; retain the student's original filename.
+    if (GUARDED_TEXT_EXTENSIONS.has(extension) && await validateGuardedZipText(blob, member)) disposition = "retain";
     // Only the exact published course dataset may be represented by provenance.
     if (extension === "csv" && member.declaredBytes === 2_039_946 && crypto.subtle) {
       const parts: Uint8Array[] = [];

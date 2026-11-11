@@ -15,7 +15,10 @@ describe("large ZIP directory inspection", () => {
     const virtual = { size: total, slice(start = 0, finish = total) { reads.push(finish - start); const from = Math.max(0, start - prefix); const pad = Math.max(0, prefix - start); return new Blob([new Uint8Array(pad), tail.slice(from, finish - prefix)]); } };
     const result = await inspectLargeZipDirectory(virtual);
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.members.map((m) => [m.path, m.nestedArchive])).toEqual([["Ada/work.txt", false], ["Lin/child.zip", true]]);
+    if (result.ok) {
+      expect(result.members.map((m) => [m.path, m.nestedArchive])).toEqual([["Ada/work.txt", false], ["Lin/child.zip", true]]);
+      expect(result.entryCount).toBe(4); // The two directory records also consume extractor budget.
+    }
     expect(Math.max(...reads)).toBeLessThanOrEqual(65_557);
   });
   it("fails closed for truncated data, encrypted entries and ZIP64", async () => {

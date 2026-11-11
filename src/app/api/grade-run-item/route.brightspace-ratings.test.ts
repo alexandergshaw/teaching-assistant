@@ -20,7 +20,7 @@ it("accepts exact tiers and derives the total from validated criteria", async ()
   const row = (await (await send()).json()).result;
   expect(row.ungraded).toBeUndefined(); expect(row.totalScore).toBe("92.50/100");
 });
-it.each([[{ area: "Reasoning", score: "25/25" }], [{ area: "Reasoning", score: "25/25" }, { area: "Reasoning", score: "25/25" }], [{ area: "Reasoning", score: "70%" }, { area: "Content", score: "75/75" }], [{ area: "Reasoning", score: "17.5/30" }, { area: "Content", score: "75/75" }]])("holds missing, duplicate or unparseable criteria", async (scores) => {
+it.each([{ scores: [{ area: "Reasoning", score: "25/25" }] }, { scores: [{ area: "Reasoning", score: "25/25" }, { area: "Reasoning", score: "25/25" }] }, { scores: [{ area: "Reasoning", score: "70%" }, { area: "Content", score: "75/75" }] }, { scores: [{ area: "Reasoning", score: "17.5/30" }, { area: "Content", score: "75/75" }] }])("holds missing, duplicate or unparseable criteria", async ({ scores }) => {
   llm.mockResolvedValue(reply(scores)); expect((await (await send()).json()).result.ungraded.kind).toBe("grading-failed");
 });
 const liveShape = "Reasoning (25 points): Explain reasoning.\nContent (75 points): Provide content.\nRating scale: Meets Expectations 100%; Partially Meets Expectations 70%; Does Not Meet Expectations 0%.";

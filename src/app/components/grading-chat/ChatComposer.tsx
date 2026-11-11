@@ -72,7 +72,7 @@ export interface ChatComposerProps {
   readonly sessionEpoch?: number;
   readonly sharedLatch?: IntakeFence;
   readonly onSubmitText: (content: string, label: string | undefined) => void;
-  readonly onSubmitFiles: (files: File[], label?: string) => Promise<DirectFileOutcome[]>;
+  readonly onSubmitFiles: (files: File[], label?: string, mode?: "single" | "multiple") => Promise<DirectFileOutcome[]>;
   readonly onSubmitUrl: (url: string, label?: string) => Promise<SubmitOutcome>;
   readonly onSubmitComposite: (student: string, parts: CompositePartInput[]) => Promise<SubmitOutcome>;
   readonly onSubmitReviewed?: (student: string, content: string, discussion: ReviewedPastedDiscussion) => Promise<SubmitOutcome>;
@@ -299,8 +299,8 @@ export function ChatComposer({ disabled, sharedLatch, reviewFiles = false, getSe
 
   return (
     <div className={chatStyles.composer} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
-      <SubmissionDrop disabled={controlsDisabled} sharedLatch={intakeLatch} reviewFiles={reviewFiles} getSessionEpoch={getSessionEpoch} sessionEpoch={sessionEpoch} onMany={(files) => onSubmitFiles(files)}
-        onOne={(name, files) => submitOneFileGroup(name, files, onSubmitFiles, onSubmitComposite)}
+      <SubmissionDrop disabled={controlsDisabled} sharedLatch={intakeLatch} reviewFiles={reviewFiles} getSessionEpoch={getSessionEpoch} sessionEpoch={sessionEpoch} onMany={(files) => onSubmitFiles(files, undefined, "multiple")}
+        onOne={(name, files) => submitOneFileGroup(name, files, (items, label) => onSubmitFiles(items, label, "single"), onSubmitComposite)}
         onText={(name, content) => onSubmitComposite(name, [{ kind: "text", content }])} onReviewed={onSubmitReviewed} />
       {dropNotice && <span role="status">Drop files in the submission area above.</span>}
       <Accordion>

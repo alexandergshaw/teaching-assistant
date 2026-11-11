@@ -1,7 +1,7 @@
 import { zip64Directory, zip64Extra } from "./zip64-metadata";
 /** Metadata-only ZIP inventory. No decompression, upload, or grading occurs. */
 export interface LargeZipMember { readonly path: string; readonly compressedBytes: number; readonly declaredBytes: number; readonly nestedArchive: boolean; readonly dataOffset: number; readonly flags: number; readonly method: number; readonly crc: number; readonly crc32: number; readonly rawName: Uint8Array; readonly centralEntry: Uint8Array }
-export type LargeZipInventory = { readonly ok: true; readonly members: readonly LargeZipMember[]; readonly archiveBytes: number } | { readonly ok: false; readonly reason: "invalid" | "unsupported" | "too-many-entries" | "directory-too-large" | "read-failed" };
+export type LargeZipInventory = { readonly ok: true; readonly members: readonly LargeZipMember[]; readonly entryCount: number; readonly archiveBytes: number } | { readonly ok: false; readonly reason: "invalid" | "unsupported" | "too-many-entries" | "directory-too-large" | "read-failed" };
 const MAX_DIRECTORY_BYTES = 8 * 1024 * 1024;
 const MAX_ENTRIES = 20_000;
 const MAX_TAIL_BYTES = 22 + 65_535;
@@ -103,6 +103,6 @@ export async function inspectLargeZipDirectory(file: Pick<Blob, "size" | "slice"
     }
     ranges.sort((a, b) => a.start - b.start);
     for (let i = 1; i < ranges.length; i++) if (ranges[i].start < ranges[i - 1].end) return fail("invalid");
-    return { ok: true, members, archiveBytes: file.size };
+    return { ok: true, members, entryCount: entries, archiveBytes: file.size };
   } catch { return fail("read-failed"); }
 }

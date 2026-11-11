@@ -20,7 +20,7 @@ export function indexNames(html: string, groups: readonly RecoverableGroup[]): R
     const cells = [...row[1].matchAll(/<td\b[^>]*>([\s\S]*?)<\/td\s*>/gi)].map((cell) => decode(cell[1]));
     if (cells.length === 1) { const name = cells[0]; current = name && name.length <= 200 && /^[^,\r\n]+,\s*[^,\r\n]+$/.test(name) ? name : null; continue; }
     if (cells.length !== 2 || !cells[0]) { current = null; continue; }
-    const match = /^(\d+-\d+) - (.+)$/.exec(cells[0]), label = match?.[1]; if (!label || !byLabel.has(label)) continue;
+    const match = /^(\d+-\d+) - ([\s\S]+)$/.exec(cells[0]), label = match?.[1]; if (!label || !byLabel.has(label)) continue;
     const groupRows = rows.get(label) ?? []; groupRows.push(match![2]); rows.set(label, groupRows);
     if (!current || (names.has(label) && names.get(label) !== current)) invalid.add(label); else names.set(label, current);
   }

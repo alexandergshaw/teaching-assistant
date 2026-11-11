@@ -6,6 +6,7 @@ vi.mock("@/lib/supabase/auth", () => ({
   requireAppOwner: vi.fn().mockResolvedValue({ id: "owner-1", email: "owner@example.com" }),
   requireUser: vi.fn().mockRejectedValue(new Error("requireUser should never be called by this action")),
 }));
+vi.mock("@/lib/supabase/single-zip-owner-session", () => ({ verifySingleZipOwnerSession: vi.fn() }));
 
 // extraction.ts is fully mocked here (no `vi.importActual`) - the collision-
 // refusal path (AC-9) and the Canvas pointsPossible path (BLOCKER-1) are both
@@ -37,6 +38,7 @@ vi.mock("@/lib/grade/rubric", async () => {
 });
 
 import { requireAppOwner } from "@/lib/supabase/auth";
+import { verifySingleZipOwnerSession } from "@/lib/supabase/single-zip-owner-session";
 import { ingestZipEntries, extractCanvasEntries } from "@/lib/grade/extraction";
 import { fetchGradableRepoContent } from "@/lib/grade/repo-content";
 import { fetchGoogleDriveFile } from "@/lib/grade/google-drive-content";
@@ -154,6 +156,14 @@ describe("prepareChatSubmissionAction - text", () => {
 });
 
 describe("prepareChatSubmissionAction - file", () => {
+  it("refuses index evidence when the expected signed session is missing or mismatched", async () => {
+    const file = new File(["zip"], "class.zip"), mapping = { "10-20 - brightspace-index-evidence.txt": "Student" };
+    const missing = await prepareChatSubmissionAction(fileFormData(file, { reviewedZipMapping: JSON.stringify(mapping) })); expect(missing.kind).toBe("refused");
+    vi.mocked(verifySingleZipOwnerSession).mockResolvedValue(false);
+    const expected = { accountId: "11111111-1111-4111-8111-111111111111", sessionId: "22222222-2222-4222-8222-222222222222" };
+    const changed = await prepareChatSubmissionAction(fileFormData(file, { reviewedZipMapping: JSON.stringify(mapping), expectedOwnerSession: JSON.stringify(expected) }));
+    expect(changed.kind).toBe("refused"); expect(verifySingleZipOwnerSession).toHaveBeenCalledWith(expected); expect(mockIngestZipEntries).not.toHaveBeenCalled();
+  });
   it("passes reviewed mapping to ZIP extraction and refuses malformed mapping", async () => {
     const mapping = { "ada_1_2_work.txt": "ada" };
     mockIngestZipEntries.mockResolvedValue(ingested([canvasEntry]));

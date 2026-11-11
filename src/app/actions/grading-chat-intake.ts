@@ -13,6 +13,8 @@
 // prepareGradingRunAction, grading-incremental.ts:80, and the already-
 // tightened /api/grade-run-item route this surface dispatches to).
 import { requireAppOwner } from "@/lib/supabase/auth";
+import { verifySingleZipOwnerSession } from "@/lib/supabase/single-zip-owner-session";
+import { isExpectedOwnerSession } from "@/lib/grade/owner-session-binding";
 import { normalizeProvider } from "@/lib/llm";
 import type { LlmProvider } from "@/lib/llm";
 import { checkFileWireBudget } from "@/lib/upload-budget";
@@ -155,6 +157,10 @@ export async function prepareChatSubmissionAction(formData: FormData): Promise<I
     try { reviewedMapping = typeof rawMapping === "string" && rawMapping.length <= 1_000_000 ? parseReviewedZipMapping(JSON.parse(rawMapping)) ?? undefined : undefined; } catch { /* Refuse malformed mapping below. */ }
     if (!reviewedMapping || kind !== "file") return { kind: "refused", reason: "The reviewed file mapping is invalid. Nothing was queued.", refusalClass: "read-failed" };
   }
+  const rawOwnerSession = formData.get("expectedOwnerSession"); let ownerSession: unknown;
+  try { if (typeof rawOwnerSession === "string" && rawOwnerSession.length <= 300) ownerSession = JSON.parse(rawOwnerSession); } catch { /* Refuse malformed binding below. */ }
+  const includesIndexEvidence = !!reviewedMapping && Object.keys(reviewedMapping).some((path) => /brightspace-index-evidence\.txt$/i.test(path));
+  if ((rawOwnerSession !== null || includesIndexEvidence) && (!isExpectedOwnerSession(ownerSession) || !await verifySingleZipOwnerSession(ownerSession))) return { kind: "refused", reason: "The owner session changed. Nothing was queued.", refusalClass: "read-failed" };
   const staticOnly = formData.get("staticOnly") === "true";
   if (formData.get("staticOnly") !== null && (!staticOnly || !reviewedMapping)) return { kind: "refused", reason: "Invalid static review request. Nothing was queued.", refusalClass: "read-failed" };
   return resolveOnePart(kind, {

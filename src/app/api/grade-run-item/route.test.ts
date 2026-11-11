@@ -175,6 +175,7 @@ vi.mock("@/lib/supabase/auth", () => ({
 vi.mock("@/lib/grade/engine", () => ({
   gradeEntries: vi.fn(),
 }));
+vi.mock("@/lib/supabase/single-zip-owner-session", () => ({ verifySingleZipOwnerSession: vi.fn() }));
 vi.mock("@/lib/bounded-race", () => ({
   raceWithTimeout: vi.fn(),
 }));
@@ -186,6 +187,7 @@ import { requireAppOwner } from "@/lib/supabase/auth";
 import { gradeEntries } from "@/lib/grade/engine";
 import { raceWithTimeout } from "@/lib/bounded-race";
 import { resolveEntryLinks } from "@/lib/grade/extraction";
+import { verifySingleZipOwnerSession } from "@/lib/supabase/single-zip-owner-session";
 import { POST } from "./route";
 import { ITEM_REQUEST_BYTE_BUDGET, estimateNeededWireBytes } from "@/app/components/grading/incrementalRunPlan";
 import { getGeminiMaxCharsPerSubmission } from "@/lib/gemini";
@@ -220,6 +222,18 @@ beforeEach(() => {
 });
 
 describe("POST /api/grade-run-item (behavioral, mocked seam)", () => {
+  it("refuses index evidence before any model call when the owner session differs", async () => {
+    const body = { ...VALID_BODY, entry: { ...VALID_BODY.entry, submittedFiles: [{ name: "10-20 - brightspace-index-evidence.txt", extension: "txt", previewContent: "note", previewTruncated: false }] } };
+    expect((await POST(jsonRequest(body) as never)).status).toBe(401); expect(mockGradeEntries).not.toHaveBeenCalled();
+    vi.mocked(verifySingleZipOwnerSession).mockResolvedValue(false);
+    const expectedOwnerSession = { accountId: "11111111-1111-4111-8111-111111111111", sessionId: "22222222-2222-4222-8222-222222222222" };
+    expect((await POST(jsonRequest({ ...body, expectedOwnerSession }) as never)).status).toBe(401); expect(mockGradeEntries).not.toHaveBeenCalled();
+    expect(verifySingleZipOwnerSession).toHaveBeenCalledWith(expectedOwnerSession);
+    vi.mocked(verifySingleZipOwnerSession).mockResolvedValue(true);
+    mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
+    mockRaceWithTimeout.mockImplementationOnce(async (work) => ({ kind: "settled", value: await work } as never));
+    expect((await POST(jsonRequest({ ...body, expectedOwnerSession }) as never)).status).toBe(200); expect(mockGradeEntries).toHaveBeenCalledOnce();
+  });
   it("passes partial evidence to the model and rejects malformed omission records", async () => {
     mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
     mockRaceWithTimeout.mockImplementationOnce(async (work) => ({ kind: "settled", value: await work } as never));

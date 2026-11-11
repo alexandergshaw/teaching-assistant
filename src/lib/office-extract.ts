@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { GUARDED_TEXT_EXTENSIONS } from "./guarded-text-formats";
 import { OfficeParser, type SupportedFileType } from "officeparser";
 import {
   assertBytesWithinMemberCap,
@@ -40,6 +41,10 @@ export const TEXT_EXTENSIONS = new Set([
   "filters",
   "props",
   "targets",
+  "user",
+  "recipe",
+  "log",
+  "command",
   "cs",
   "html",
   "htm",
@@ -252,6 +257,11 @@ export async function extractTextFromBuffer(
   const extension = getFileExtension(name);
 
   if (TEXT_EXTENSIONS.has(extension)) {
+    if (GUARDED_TEXT_EXTENSIONS.has(extension)) {
+      const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(buffer);
+      if (text.includes("\0")) throw new Error("This file is not valid text.");
+      return text;
+    }
     return buffer.toString("utf-8");
   }
 

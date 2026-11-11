@@ -7,3 +7,7 @@ it("holds duplicate names, mismatched filenames and missing rows", () => { const
 it("holds groups with duplicate or missing index rows", () => { const duplicate='<tr><td>Smith, Ada</td></tr><tr><td>10-20 - Smith-Ada-Nov 5, 2026 400 PM:</td><td>x</td></tr><tr><td>10-20 - Smith-Ada-Nov 5, 2026 400 PM:</td><td>x</td></tr>'; expect(Object.keys(indexNames(duplicate,groups))).toEqual([]); });
 it("rejects a name prefix embedded in a different name", () => { const html='<tr><td>Smith, Ada</td></tr><tr><td>10-20 - Smith-Ada2-Nov 5, 2026 400 PM:</td><td>x</td></tr>'; expect(Object.keys(indexNames(html,groups))).toEqual([]); });
 it("allows repeated LMS rows only when every file agrees with the same group identity", () => { const together = [{label:"10-20",sourceIdentifier:"10-20",members:[{path:"10-20 - Smith-Ada-Nov 5, 2026 400 PM.cpp"},{path:"10-20 - Smith-Ada-Nov 5, 2026 400 PM.txt"}]}] as unknown as RecoverableGroup[]; const html='<tr><td>Smith, Ada</td></tr><tr><td>10-20 - Smith-Ada-Nov 5, 2026 400 PM:</td><td>x</td></tr><tr><td>10-20 - Smith-Ada-Nov 5, 2026 400 PM:</td><td>x</td></tr>'; expect(indexNames(html,together)).toEqual({"10-20":"Smith, Ada"}); });
+it("keeps identity matching when a submission comment spans lines", () => {
+  const one = [groups[0]], html = '<tr><td>Smith, Ada</td></tr><tr><td>10-20 - Smith-Ada-Nov 5, 2026 400 PM:<p>Comments: first line\nsecond line</p></td><td>Submitted</td></tr>';
+  expect(indexNames(html, one)).toEqual({ "10-20": "Smith, Ada" });
+});

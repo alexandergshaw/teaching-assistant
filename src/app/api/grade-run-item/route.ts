@@ -6,6 +6,8 @@ import { isSubmissionFileInventories } from "@/lib/grade/submission-file-invento
 import { NextRequest, NextResponse } from "next/server";
 
 import { requireAppOwner } from "@/lib/supabase/auth";
+import { verifySingleZipOwnerSession } from "@/lib/supabase/single-zip-owner-session";
+import { isExpectedOwnerSession } from "@/lib/grade/owner-session-binding";
 import { normalizeProvider } from "@/lib/llm";
 import { raceWithTimeout } from "@/lib/bounded-race";
 import { gradeEntries } from "@/lib/grade/engine";
@@ -86,6 +88,7 @@ const MAX_CONTENT_CHARS = 2_000_000;
 const MAX_URL_CHARS = 2048;
 
 interface GradeRunItemRequestBody {
+  expectedOwnerSession?: unknown;
   sourceIndex?: unknown;
   entry?: unknown;
   assignmentInstructions?: unknown;
@@ -345,6 +348,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "This submission could not be read." }, { status: 400 });
   }
   const { sourceIndex, entry, assignmentInstructions, rubric, provider, pointsPossible, commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, suppressLengthDeduction, lengthDeductionThresholdWords, videoGradeWindowSec } = parsed;
+  const includesIndexEvidence = entry.submittedFiles.some((file) => /brightspace-index-evidence\.txt$/i.test(file.name));
+  if ((rawBody.expectedOwnerSession !== undefined || includesIndexEvidence) && (!isExpectedOwnerSession(rawBody.expectedOwnerSession) || !await verifySingleZipOwnerSession(rawBody.expectedOwnerSession))) return NextResponse.json({ error: "The owner session changed. Nothing was graded." }, { status: 401 });
 
   // VIDEO-GRADING W3 (T11): dark behind VIDEO_GRADING_ENABLED. With the flag on,
   // a videoRef must name an object in THIS caller's own grading-uploads

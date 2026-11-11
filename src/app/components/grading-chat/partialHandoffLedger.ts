@@ -6,6 +6,8 @@ export interface PartialHandoffRecord {
   readonly subsetDigest: string;
   readonly selected: readonly { readonly student: string; readonly files: readonly string[] }[];
   readonly omitted: readonly { readonly student: string; readonly files: readonly string[]; readonly reason: string }[];
+  readonly pendingAtHandoff?: readonly { readonly student: string; readonly files: readonly string[] }[];
+  readonly indexDigest?: string;
   readonly status: "pending" | "accepted" | "refused" | "unknown";
 }
 export type LedgerStorage = Pick<Storage, "getItem" | "setItem" | "key" | "length">;
@@ -18,7 +20,7 @@ export function listPartialHandoffs(storage: Storage, account: string): PartialH
     const itemKey = storage.key(index); if (!itemKey?.startsWith(prefix)) continue;
     try {
       const record = JSON.parse(storage.getItem(itemKey) ?? "null") as PartialHandoffRecord;
-      if (record?.account === account && /^[a-f0-9]{64}$/.test(record.sourceDigest) && /^[a-f0-9]{64}$/.test(record.subsetDigest) && ["pending", "accepted", "refused", "unknown"].includes(record.status) && Array.isArray(record.omitted) && record.omitted.every((item) => item && typeof item.student === "string" && typeof item.reason === "string" && Array.isArray(item.files) && item.files.every((file: unknown) => typeof file === "string")) && Array.isArray(record.selected)) records.push(record);
+      if (record?.account === account && /^[a-f0-9]{64}$/.test(record.sourceDigest) && /^[a-f0-9]{64}$/.test(record.subsetDigest) && ["pending", "accepted", "refused", "unknown"].includes(record.status) && Array.isArray(record.omitted) && record.omitted.every((item) => item && typeof item.student === "string" && typeof item.reason === "string" && Array.isArray(item.files) && item.files.every((file: unknown) => typeof file === "string")) && Array.isArray(record.selected) && (record.indexDigest === undefined || (typeof record.indexDigest === "string" && /^[a-f0-9]{64}$/.test(record.indexDigest))) && (record.pendingAtHandoff === undefined || (Array.isArray(record.pendingAtHandoff) && record.pendingAtHandoff.every((item) => item && typeof item.student === "string" && Array.isArray(item.files) && item.files.every((file: unknown) => typeof file === "string"))))) records.push(record);
     } catch { /* Malformed stored entries are not displayed. */ }
   }
   return records;

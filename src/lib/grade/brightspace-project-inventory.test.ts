@@ -31,6 +31,31 @@ it("retains diverse substantive project formats and refuses to classify an opaqu
   expect((await buildReviewedBrightspaceProject(source, directory.members[0], ["mystery.dat", "shot.gif", "shot.bmp"])).ok).toBe(false);
 });
 
+it("preserves verified UTF-8 configuration and log bytes under their original names", async () => {
+  const project = new JSZip(); project.file("main.cpp", "int main() {} "); project.file("config.vcxproj.user", "<config>valid</config>\r\n"); project.file("build.log", "line one\nline two");
+  const outer = new JSZip(); outer.file("100-200 - project.zip", await project.generateAsync({ type: "uint8array", compression: "STORE" }));
+  const source = new Blob([new Uint8Array(await outer.generateAsync({ type: "uint8array", compression: "STORE" })).buffer]), directory = await inspectLargeZipDirectory(source);
+  expect(directory.ok).toBe(true); if (!directory.ok) return;
+  const inventory = await inspectBrightspaceProject(source, directory.members[0]); expect(inventory.ok).toBe(true); if (!inventory.ok) return;
+  expect(inventory.files.find((file) => file.path === "config.vcxproj.user")).toMatchObject({ disposition: "retain" });
+  const built = await buildReviewedBrightspaceProject(source, directory.members[0], []); expect(built.ok).toBe(true); if (!built.ok) return;
+  const retained = await JSZip.loadAsync(await built.archive.arrayBuffer());
+  expect(await retained.file("config.vcxproj.user")!.async("string")).toBe("<config>valid</config>\r\n");
+  expect(await retained.file("build.log")!.async("string")).toBe("line one\nline two");
+  expect(built.retainedPaths).toContain("config.vcxproj.user");
+});
+
+it("holds invalid text bytes without changing existing paths", async () => {
+  const project = new JSZip(); project.file("main.cpp", "source"); project.file("bad.log", new Uint8Array([0xff, 0xfe])); project.file("config.user", "text"); project.file("config.user.txt", "different text");
+  const outer = new JSZip(); outer.file("100-200 - project.zip", await project.generateAsync({ type: "uint8array", compression: "STORE" }));
+  const source = new Blob([new Uint8Array(await outer.generateAsync({ type: "uint8array", compression: "STORE" })).buffer]), directory = await inspectLargeZipDirectory(source);
+  expect(directory.ok).toBe(true); if (!directory.ok) return;
+  const inventory = await inspectBrightspaceProject(source, directory.members[0]); expect(inventory.ok).toBe(true); if (!inventory.ok) return;
+  expect(inventory.files.find((file) => file.path === "bad.log")?.disposition).toBe("needs-review");
+  expect(inventory.files.find((file) => file.path === "config.user")?.disposition).toBe("retain");
+  expect((await buildReviewedBrightspaceProject(source, directory.members[0], [])).ok).toBe(false);
+});
+
 
 it("excludes only an exact verified course dataset while retaining changed data", async () => {
   const project = new JSZip(); project.file("src/main.cpp", "int main() {} "); project.file("data.csv", new Uint8Array(2_039_946));

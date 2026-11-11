@@ -21,6 +21,8 @@ import { assignUnclaimedLabel } from "@/lib/grade/utils";
 import type { VideoFailureClass } from "@/lib/grade/video-failure";
 import { buildReviewedPastedDiscussion, type ReviewedPastedDiscussion } from "@/lib/grade/reviewed-pasted-discussion";
 import { getGeminiMaxCharsPerSubmission } from "@/lib/gemini";
+import type { PerStudentEvidence } from "./partialEvidence";
+import type { ExpectedOwnerSession } from "@/lib/grade/owner-session-binding";
 
 /** The owner's "text submissions, zip submissions, url submissions, other
  * file submissions" taxonomy. `file` covers a single supported file OR a
@@ -29,14 +31,14 @@ import { getGeminiMaxCharsPerSubmission } from "@/lib/gemini";
  * two. */
 export type ChatSubmissionInput =
   | { readonly kind: "text"; readonly label?: string; readonly content: string; readonly reviewedDiscussion?: ReviewedPastedDiscussion }
-  | { readonly kind: "file"; readonly file: File; readonly label?: string; readonly reviewedZipMapping?: Readonly<Record<string, string>>; readonly evidenceOmissions?: readonly string[]; readonly staticOnly?: true; readonly captureSourceIndices?: true }
+  | { readonly kind: "file"; readonly file: File; readonly label?: string; readonly reviewedZipMapping?: Readonly<Record<string, string>>; readonly evidenceOmissions?: readonly string[]; readonly perStudentEvidence?: PerStudentEvidence; readonly expectedOwnerSession?: ExpectedOwnerSession; readonly staticOnly?: true; readonly captureSourceIndices?: true }
   | { readonly kind: "url"; readonly url: string; readonly label?: string }
   | { readonly kind: "composite"; readonly student: string; readonly parts: readonly CompositePartInput[] }
   // BULK-ZIP BW1: a class zip too large for the request body, already uploaded
   // to private Storage under `${userId}/grading-uploads/<uuid>.zip`. Carries
   // only the path; BW2's streaming ingest reads, parses and deletes it. The
   // driver does not consume this member until BW2.
-  | { readonly kind: "storaged-zip"; readonly storagePath: string; readonly name: string; readonly reviewedZipMapping?: Readonly<Record<string, string>>; readonly evidenceOmissions?: readonly string[]; readonly staticOnly?: true; readonly captureSourceIndices?: true }
+  | { readonly kind: "storaged-zip"; readonly storagePath: string; readonly name: string; readonly reviewedZipMapping?: Readonly<Record<string, string>>; readonly evidenceOmissions?: readonly string[]; readonly perStudentEvidence?: PerStudentEvidence; readonly expectedOwnerSession?: ExpectedOwnerSession; readonly staticOnly?: true; readonly captureSourceIndices?: true }
   // VIDEO-GRADING W4: a loose video already uploaded to private Storage under
   // `${userId}/grading-uploads/<uuid>.<ext>`. Carries only the path (a video can
   // never ride the request body); the driver's prepareVideo turns it into an

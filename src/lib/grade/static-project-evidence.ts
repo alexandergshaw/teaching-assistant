@@ -1,6 +1,7 @@
 import { isStaticProjectText } from "./static-project-text";
 import type { StudentSubmissionEntry } from "./types";
 import { MAX_STATIC_PROJECT_CONTENT_CHARS } from "./static-project-limits";
+import { GUARDED_TEXT_EXTENSIONS } from "@/lib/guarded-text-formats";
 
 /** Restore every static text file from its bounded original bytes, or refuse the entire entry. */
 export function restoreStaticTextEvidence(entry: StudentSubmissionEntry): StudentSubmissionEntry | null {
@@ -14,8 +15,8 @@ export function restoreStaticTextEvidence(entry: StudentSubmissionEntry): Studen
     markers.add(marker);
     try {
       const binary = atob(raw), bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-      const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-      if (!text || entry.content.indexOf(marker) < 0 || entry.content.indexOf(marker) !== entry.content.lastIndexOf(marker)) return null;
+      const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+      if (!text || (GUARDED_TEXT_EXTENSIONS.has(file.extension.toLowerCase()) && text.includes("\0")) || entry.content.indexOf(marker) < 0 || entry.content.indexOf(marker) !== entry.content.lastIndexOf(marker)) return null;
       replacements.push({ marker, text });
     } catch { return null; }
   }

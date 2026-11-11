@@ -7,6 +7,7 @@ import type { ConfirmedRoleSetup } from "./chatFileRoles";
 import type { SubmitOutcome } from "./useContinuousGradingRun";
 import * as diagnostic from "./chatFileRoleDiagnostic";
 import { claimIntake, releaseIntake, resetIntake } from "./intakeFence";
+import { oversizedReviewCandidate } from "./oversizedReviewCandidate";
 
 const source = ts.createSourceFile("Panel.tsx", readFileSync("src/app/components/grading-chat/GradingChatPanel.tsx", "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 function actual(name: string, bindings: Record<string, unknown>) {
@@ -25,7 +26,7 @@ function harness() {
     includeSetupFiles: false, setDirectPreparing: vi.fn(), setPreparing: (value: boolean) => busy.push(value), setSubmitError: (value: string | null) => errors.push(value),
     instructions: "Assignment", rubric: "Rubric", harshness: "strict", feedbackLengthText: "80", coerceFeedbackWordTarget: Number,
     applyNamingDeduction: false, applyLengthDeduction: true, lengthThresholdText: "25", parseLengthDeductionThreshold: Number,
-    ensureSession: start, handleConfirmedFiles: submit };
+    ensureSession: start, handleConfirmedFiles: submit, oversizedReviewCandidate };
   return { intake, errors, busy, stage, start, submit, bindings, route: () => actual("handleSubmitFiles", bindings) };
 }
 describe("actual Panel direct upload router", () => {
@@ -91,7 +92,7 @@ describe("actual Panel direct upload router", () => {
     const h = harness(), reset = vi.fn(), cancel = vi.fn(), intent = vi.fn();
     const sharedIntakeLatch = { busy: false, generation: 0 }, oldToken = claimIntake(sharedIntakeLatch)!;
     const bindings = { window: { confirm: () => false }, dropSessionEpoch: { current: 0 }, setVisibleDropEpoch: vi.fn(), sharedIntakeLatch, resetIntake, directIntake: { current: { cancel } }, setIncludeSetupFiles: intent, setDirectPreparing: vi.fn(), setPreparing: vi.fn(), setZipPhase: vi.fn(), driver: { reset },
-      setSetupExpanded: vi.fn(), roleIntake: { cancel: vi.fn() }, repositoryProposals: { reset: vi.fn() }, setRepositoryEvidence: vi.fn(), emptyRepositoryEvidence: vi.fn(), setRepositoryEvidenceSession: vi.fn(), setSubmitError: vi.fn(), setSetupNote: vi.fn() };
+      setSetupExpanded: vi.fn(), roleIntake: { cancel: vi.fn() }, repositoryProposals: { reset: vi.fn() }, setRepositoryEvidence: vi.fn(), emptyRepositoryEvidence: vi.fn(), setRepositoryEvidenceSession: vi.fn(), setSubmitError: vi.fn(), setSetupNote: vi.fn(), zipReview: { cancel: vi.fn() }, setPrioritySourceIndices: vi.fn(), archiveReviewQueue: { current: { reset: () => ({ wasActive: false, waiting: [] }) } }, setWaitingArchiveNames: vi.fn(), setReviewFile: vi.fn(), setPartialOmissions: vi.fn() };
     actual("handleNewSession", bindings)(); expect(cancel).not.toHaveBeenCalled(); expect(intent).not.toHaveBeenCalled(); expect(bindings.dropSessionEpoch.current).toBe(0); expect(sharedIntakeLatch).toEqual({ busy: true, generation: oldToken });
     bindings.window.confirm = () => true; actual("handleNewSession", bindings)(); expect(cancel).toHaveBeenCalledOnce(); expect(intent).not.toHaveBeenCalled(); expect(reset).toHaveBeenCalledOnce(); expect(bindings.setSetupExpanded).toHaveBeenCalledWith(true); expect(bindings.dropSessionEpoch.current).toBe(1); expect(bindings.setVisibleDropEpoch).toHaveBeenCalledWith(1); expect(h.intake.isPending()).toBe(false);
     expect(sharedIntakeLatch).toEqual({ busy: false, generation: oldToken + 1 });

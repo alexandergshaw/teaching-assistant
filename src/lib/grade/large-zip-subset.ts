@@ -6,9 +6,23 @@ import { inferStudentPrefix } from "./utils";
 type Reason = "nested archive" | "member size" | "unsupported type" | "compression ratio" | "group size" | "unassigned index";
 export interface RecoverableGroup { readonly label: string; readonly sourceIdentifier: string; readonly members: readonly LargeZipMember[]; readonly reason?: Reason }
 export type RecoverablePlan = { readonly ok: true; readonly groups: readonly RecoverableGroup[] } | { readonly ok: false; readonly reason: string };
-const supported = new Set(["txt", "md", "py", "ipynb", "csv", "pdf", "docx", "html", "mp4", "m4v", "mov", "webm", "c", "cc", "cpp", "cxx", "h", "hpp"]);
+const supported = new Set(["txt", "md", "py", "ipynb", "csv", "pdf", "docx", "html", "mp4", "m4v", "mov", "webm", "c", "cc", "cpp", "cxx", "h", "hpp", "user", "recipe", "log", "command"]);
 const videos = new Set(["mp4", "m4v", "mov", "webm"]);
 const ext = (path: string) => path.split(".").pop()?.toLowerCase() ?? "";
+
+/** Predict the existing subset builder's limits without reading or materializing members. */
+export function checkRecoverableBatch(groups: readonly RecoverableGroup[], allGroups: readonly RecoverableGroup[], extra: readonly { nameBytes: number; bytes: number }[] = [], deferAggregateRatio = false, inAppHandoff = false): string | null {
+  const members = groups.flatMap((group) => group.members);
+  if (members.length + extra.length > ZIP_MAX_CUMULATIVE_ENTRIES || members.reduce((n, m) => n + m.declaredBytes, 0) + extra.reduce((n, entry) => n + entry.bytes, 0) > ZIP_MAX_CUMULATIVE_DECLARED_BYTES || extra.some((entry) => entry.bytes > ZIP_MAX_MEMBER_DECLARED_BYTES || entry.nameBytes > 4096) || members.filter((m) => videos.has(ext(m.path))).length > ZIP_MAX_VIDEO_MEMBERS) return "batch exceeds grading limits";
+  let declared = 0, compressed = 0;
+  for (const member of members) { declared += member.declaredBytes; compressed += member.compressedBytes; if (!deferAggregateRatio && declared >= ZIP_RATIO_FLOOR_BYTES && Math.round(declared / Math.max(compressed, 1)) > ZIP_MAX_ARCHIVE_RATIO) return "batch exceeds compression ratio limit"; }
+  const estimated = members.reduce((n, m) => n + 30 + m.rawName.length + m.compressedBytes + m.centralEntry.length, 22);
+  const selected = new Set(groups.map((group) => group.label));
+  const describe = (group: RecoverableGroup) => ({ label: group.label, sourceField: group.sourceIdentifier, files: group.members.map((member) => member.path), reason: group.reason ?? null });
+  const sentinel = new TextEncoder().encode(JSON.stringify({ ownershipVerified: false, selected: groups.map(describe), omitted: allGroups.filter((group) => !selected.has(group.label)).map(describe) }));
+  const sentinelName = new TextEncoder().encode("PARTIAL_ARCHIVE_REQUIRES_REVIEW.json");
+  return estimated + (inAppHandoff ? 0 : 76 + sentinelName.length * 2 + sentinel.length) + extra.reduce((n, entry) => n + 76 + entry.nameBytes * 2 + entry.bytes, 0) > GRADING_ZIP_MAX_BYTES ? "batch exceeds transport limit" : null;
+}
 
 /** Conservative plan: root-level Canvas or numeric Brightspace-style names only. */
 export async function planRecoverableZip(file: Blob): Promise<RecoverablePlan> {
@@ -76,18 +90,21 @@ export async function verifyMember(file: Blob, member: LargeZipMember): Promise<
 
 /** Build one reviewed, whole-group batch without materializing the source ZIP.
  * Caller must disclose omitted groups and confirm ownership/grouping before use. */
-export async function buildRecoverableZip(file: Blob, selectedLabels: readonly string[], inAppHandoff = false): Promise<{ ok: true; archive: Blob; selected: readonly RecoverableGroup[]; omitted: readonly RecoverableGroup[]; ownershipVerified: false } | { ok: false; reason: string }> {
+export async function buildRecoverableZip(file: Blob, selectedLabels: readonly string[], inAppHandoff = false, verificationCache?: WeakMap<Blob, Set<string>>, deferAggregateRatio = false): Promise<{ ok: true; archive: Blob; selected: readonly RecoverableGroup[]; omitted: readonly RecoverableGroup[]; ownershipVerified: false } | { ok: false; reason: string }> {
   const plan = await planRecoverableZip(file); if (!plan.ok) return plan;
   const wanted = new Set(selectedLabels);
   const groups = plan.groups.filter((group) => wanted.has(group.label));
   if (!groups.length || groups.length !== wanted.size || groups.some((group) => group.reason)) return { ok: false, reason: "invalid or blocked group selection" };
   const members = groups.flatMap((group) => group.members);
-  if (members.length > ZIP_MAX_CUMULATIVE_ENTRIES || members.reduce((n, m) => n + m.declaredBytes, 0) > ZIP_MAX_CUMULATIVE_DECLARED_BYTES || members.filter((m) => videos.has(ext(m.path))).length > ZIP_MAX_VIDEO_MEMBERS) return { ok: false, reason: "batch exceeds grading limits" };
-  let declared = 0; let compressed = 0;
-  for (const member of members) { declared += member.declaredBytes; compressed += member.compressedBytes; if (declared >= ZIP_RATIO_FLOOR_BYTES && Math.round(declared / Math.max(compressed, 1)) > ZIP_MAX_ARCHIVE_RATIO) return { ok: false, reason: "batch exceeds compression ratio limit" }; }
-  const estimated = members.reduce((n, m) => n + 30 + m.rawName.length + m.compressedBytes + m.centralEntry.length, 22);
-  if (estimated > GRADING_ZIP_MAX_BYTES) return { ok: false, reason: "batch exceeds transport limit" };
-  for (const member of members) if (!(await verifyMember(file, member))) return { ok: false, reason: "member integrity could not be verified in this browser" };
+  const refusal = checkRecoverableBatch(groups, plan.groups, [], deferAggregateRatio, inAppHandoff); if (refusal) return { ok: false, reason: refusal };
+  const verifiedMembers = verificationCache?.get(file) ?? new Set<string>();
+  verificationCache?.set(file, verifiedMembers);
+  for (const member of members) {
+    const key = `${member.dataOffset}:${member.compressedBytes}:${member.declaredBytes}:${member.crc}`;
+    if (verifiedMembers.has(key)) continue;
+    if (!(await verifyMember(file, member))) return { ok: false, reason: "member integrity could not be verified in this browser" };
+    verifiedMembers.add(key);
+  }
   const chunks: BlobPart[] = [], directory: ArrayBuffer[] = []; let offset = 0;
   for (const member of members) {
     const header = new Uint8Array(30 + member.rawName.length); const view = new DataView(header.buffer);
@@ -101,7 +118,6 @@ export async function buildRecoverableZip(file: Blob, selectedLabels: readonly s
   const sentinelName = new TextEncoder().encode("PARTIAL_ARCHIVE_REQUIRES_REVIEW.json");
   const describe = (group: RecoverableGroup) => ({ label: group.label, sourceField: group.sourceIdentifier, files: group.members.map((member) => member.path), reason: group.reason ?? null });
   const sentinel = new TextEncoder().encode(JSON.stringify({ ownershipVerified: false, selected: groups.map(describe), omitted: plan.groups.filter((group) => !wanted.has(group.label)).map(describe) }));
-  if (estimated + 76 + sentinelName.length * 2 + sentinel.length > GRADING_ZIP_MAX_BYTES) return { ok: false, reason: "batch exceeds transport limit" };
   let checksum = 0xffffffff; for (const byte of sentinel) checksum = crcTable[(checksum ^ byte) & 0xff] ^ (checksum >>> 8); checksum = (checksum ^ 0xffffffff) >>> 0;
   const header = new Uint8Array(30 + sentinelName.length), hv = new DataView(header.buffer);
   hv.setUint32(0, 0x04034b50, true); hv.setUint16(4, 20, true); hv.setUint32(14, checksum, true); hv.setUint32(18, sentinel.length, true); hv.setUint32(22, sentinel.length, true); hv.setUint16(26, sentinelName.length, true); header.set(sentinelName, 30);

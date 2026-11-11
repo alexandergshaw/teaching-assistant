@@ -22,10 +22,22 @@ describe("static CSV evidence", () => {
   });
 });
 
-it.each(["cpp", "h", "txt", "py", "json", "csv", "html"])("holds invalid UTF-8 in static %s evidence", (extension) => {
+it.each(["cpp", "h", "txt", "py", "json", "csv", "html", "user", "recipe", "log", "command"])("holds invalid UTF-8 in static %s evidence", (extension) => {
   const file = { name: `work.${extension}`, extension, previewContent: "replacement", previewTruncated: false, rawBase64: "/w==" };
   const entry = { student: "Synthetic", content: "replacement", mergedFileCount: 1, submittedFiles: [file], staticOnly: true as const };
   expect(restoreStaticTextEvidence(stripUnneededRawBase64(entry))).toBeNull();
+});
+
+it("holds NUL bytes in guarded static text evidence", () => {
+  const text = "a\0b", file = { name: "work.log", extension: "log", previewContent: text, previewTruncated: false, rawBase64: Buffer.from(text).toString("base64") };
+  const input = { student: "Synthetic", content: text, mergedFileCount: 1, submittedFiles: [file], staticOnly: true as const };
+  expect(restoreStaticTextEvidence(stripUnneededRawBase64(input))).toBeNull();
+});
+
+it("restores guarded text with its original UTF-8 BOM exactly once", () => {
+  const text = "\ufeffconfiguration", file = { name: "settings.user", extension: "user", previewContent: text, previewTruncated: false, rawBase64: Buffer.from(text).toString("base64") };
+  const input = { student: "Synthetic", content: `header\n${text}`, mergedFileCount: 1, submittedFiles: [file], staticOnly: true as const };
+  expect(restoreStaticTextEvidence(stripUnneededRawBase64(input))?.content).toBe(input.content);
 });
 
 it("does not decode an oversized source file when compacting", () => {

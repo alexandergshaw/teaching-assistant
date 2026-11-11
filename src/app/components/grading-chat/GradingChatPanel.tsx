@@ -28,10 +28,15 @@ import GeneratedRubricCard from "../grading-results/GeneratedRubricCard";
 import SubmissionClassificationBadge from "../grading/SubmissionClassificationBadge";
 import { ChatComposer } from "./ChatComposer";
 import { oversizedReviewCandidate } from "./oversizedReviewCandidate";
+import { createArchiveReviewQueue } from "./archiveReviewQueue";
+import { createSingleZipBrowserAuthority } from "@/lib/grade/single-zip-browser-authority";
+import type { PerStudentEvidence } from "./partialEvidence";
+import type { ExpectedOwnerSession } from "@/lib/grade/owner-session-binding";
+import { boundZipStorage } from "@/lib/grade/bound-zip-storage";
 import { LargeZipRecovery } from "./LargeZipRecovery";
 import { PartialHandoffNotice, usePartialHandoffRecords } from "./PartialHandoffNotice";
 import { createPartialHandoffHandler } from "./partialHandoff";
-import { createDirectFileIntake } from "./chatDirectFileIntake";
+import { createDirectFileIntake, type DirectFileOutcome } from "./chatDirectFileIntake";
 import type { ConfirmedRoleSetup } from "./chatFileRoles";
 import { LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT, LENGTH_DEDUCTION_THRESHOLD_WORDS_MAX } from "@/lib/grade/length-deduction-policy";
 import { LENGTH_THRESHOLD_ERROR, parseLengthDeductionThreshold, recordLengthDeductionThresholdChange } from "./chatLengthDeduction";
@@ -278,14 +283,15 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
 
   const [instructions, setInstructions] = useState("");
   const [rubric, setRubric] = useState("");
-  const [prioritySourceIndices, setPrioritySourceIndices] = useState<ReadonlySet<number>>(new Set()), [submitError, setSubmitError] = useState<string | null>(null), [reviewFile, setReviewFile] = useState<{ file: File; id: number } | null>(null);
+  const [prioritySourceIndices, setPrioritySourceIndices] = useState<ReadonlySet<number>>(new Set()), [submitError, setSubmitError] = useState<string | null>(null), [reviewFile, setReviewFile] = useState<{ file: File; id: number; autoSubmit: boolean } | null>(null);
   const [setupNote, setSetupNote] = useState<string | null>(null);
   const [harshness, setHarshness] = useState<GradeHarshness>("balanced");
   const [feedbackLengthText, setFeedbackLengthText] = useState("");
   const [applyNamingDeduction, setApplyNamingDeduction] = useState(true);
   const [applyLengthDeduction, setApplyLengthDeduction] = useState(false);
   const [lengthThresholdText, setLengthThresholdText] = useState(String(LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT));
-  const directIntake = useRef(createDirectFileIntake()), reviewSequence = useRef(0);
+  const directIntake = useRef(createDirectFileIntake()), reviewSequence = useRef(0), archiveReviewQueue = useRef(createArchiveReviewQueue());
+  const [waitingArchiveNames, setWaitingArchiveNames] = useState<string[]>([]);
   const [directPreparing, setDirectPreparing] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -294,7 +300,7 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
   const sessionRefusalRef = useRef("Set instructions and a rubric before submitting.");
 
   const driver = useContinuousGradingRun({ provider: "gemini", commentSplit: true });
-  const { supabase, user } = useSupabase();
+  const { supabase, user, authObserver } = useSupabase();
   const { omissions: partialOmissions, setOmissions: setPartialOmissions, records: partialRecords, setRecords: setPartialRecords } = usePartialHandoffRecords(user?.id);
   const zipReview = useZipDuplicateReview(user?.id);
   const resetOnUnmount = useRef(driver.reset);
@@ -405,7 +411,8 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
     setZipPhase(null);
     driver.reset(); setPrioritySourceIndices(new Set());
     setSetupExpanded(true);
-    setSubmitError(null); setReviewFile(null);
+    const cancelledArchives = archiveReviewQueue.current.reset(); setWaitingArchiveNames([]);
+    setSubmitError([cancelledArchives.wasActive ? `Archive review${cancelledArchives.active ? ` of ${cancelledArchives.active.file.name}` : ""} ended; check previous results before retrying.` : "", cancelledArchives.waiting.length ? `These queued archives were not submitted: ${cancelledArchives.waiting.map((review) => review.file.name).join(", ")}.` : ""].filter(Boolean).join(" ") || null); setReviewFile(null);
     setPartialOmissions([]);
     setSetupNote(null);
   };
@@ -525,23 +532,25 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
   // driver. If the ingest call rejects or throws, the temp object is removed
   // best-effort (R10); the server's own delete and the orphan sweep remain the
   // real guarantees.
-  const submitStoragedZip = async (file: File, current: () => boolean, reviewedZipMapping?: Readonly<Record<string, string>>, fallbackBody = false, evidenceOmissions?: readonly string[], staticOnly?: true, captureSourceIndices?: true): Promise<SubmitOutcome> => {
+  const submitStoragedZip = async (file: File, current: () => boolean, reviewedZipMapping?: Readonly<Record<string, string>>, fallbackBody = false, evidenceOmissions?: readonly string[], staticOnly?: true, captureSourceIndices?: true, perStudentEvidence?: PerStudentEvidence, expectedOwnerSession?: ExpectedOwnerSession): Promise<SubmitOutcome> => {
     if (!user) return { kind: "refused", reason: "You must be signed in to upload a zip." };
     if (current()) setZipPhase("uploading");
     try {
-      const uploaded = await uploadGradingZip(supabase.storage, user.id, file);
+      const storage = expectedOwnerSession ? await boundZipStorage(supabase, expectedOwnerSession, current) : supabase.storage;
+      if (!storage || (expectedOwnerSession && user.id !== expectedOwnerSession.accountId) || !current()) return { kind: "refused", reason: "The owner session changed. Nothing was uploaded." };
+      const uploaded = await uploadGradingZip(storage, user.id, file);
       if (!uploaded.ok) {
         safeIntake(() => recordIntakeGate({ stage: "upload", file, transport: "storage", rawReason: uploaded.message }));
-        return zipUploadFallback(uploaded.message, fallbackBody, current, () => driver.submit({ kind: "file", file, reviewedZipMapping, evidenceOmissions, staticOnly, captureSourceIndices }));
+        return zipUploadFallback(uploaded.message, fallbackBody, current, () => driver.submit({ kind: "file", file, reviewedZipMapping, evidenceOmissions, perStudentEvidence, expectedOwnerSession, staticOnly, captureSourceIndices }));
       }
       if (current()) setZipPhase("preparing");
       try {
-        if (!current()) { await deleteGradingZipBestEffort(supabase.storage, uploaded.storagePath); return { kind: "refused", reason: "File intake was canceled." }; }
-        const outcome = await driver.submit({ kind: "storaged-zip", storagePath: uploaded.storagePath, name: file.name, reviewedZipMapping, evidenceOmissions, staticOnly, captureSourceIndices });
-        if (outcome.kind === "refused") await deleteGradingZipBestEffort(supabase.storage, uploaded.storagePath);
+        if (!current()) { await deleteGradingZipBestEffort(storage, uploaded.storagePath); return { kind: "refused", reason: "File intake was canceled." }; }
+        const outcome = await driver.submit({ kind: "storaged-zip", storagePath: uploaded.storagePath, name: file.name, reviewedZipMapping, evidenceOmissions, perStudentEvidence, expectedOwnerSession, staticOnly, captureSourceIndices });
+        if (outcome.kind === "refused") await deleteGradingZipBestEffort(storage, uploaded.storagePath);
         return outcome;
       } catch (err) {
-        await deleteGradingZipBestEffort(supabase.storage, uploaded.storagePath);
+        await deleteGradingZipBestEffort(storage, uploaded.storagePath);
         throw err;
       }
     } finally {
@@ -565,7 +574,7 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
       if (current()) setZipPhase(null);
     }
   };
-  const handleConfirmedFiles = async (files: File[], label: string | undefined, current: () => boolean, reviewedZipMapping?: Readonly<Record<string, string>>, evidenceOmissions?: readonly string[], staticOnly?: true, explicitReviewed = false): Promise<SubmitOutcome[]> => {
+  const handleConfirmedFiles = async (files: File[], label: string | undefined, current: () => boolean, reviewedZipMapping?: Readonly<Record<string, string>>, evidenceOmissions?: readonly string[], staticOnly?: true, explicitReviewed = false, perStudentEvidence?: PerStudentEvidence, expectedOwnerSession?: ExpectedOwnerSession): Promise<SubmitOutcome[]> => {
     const account = user?.id, accountToken = zipReview.capture(), safeCurrent = () => current() && zipReview.owns(account, accountToken);
     if ((!explicitReviewed && !(await zipReview.check(files, safeCurrent))) || !safeCurrent()) return files.map(() => ({ kind: "refused", reason: "ZIP review was deferred or the session changed. Nothing was submitted." }));
     // A label names ONE student's ONE submission: forwarded only for a
@@ -608,7 +617,7 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
         return { kind: "refused", reason: preflight.message };
       }
       if (!safeCurrent()) return { kind: "refused", reason: "File intake was canceled." };
-      const submit = () => transport.kind === "storage" ? (isZip ? submitStoragedZip(file, safeCurrent, reviewedZipMapping, chosen.kind === "body", evidenceOmissions, staticOnly, explicitReviewed ? true : undefined) : submitStoragedSingleFile(file, fileLabel, safeCurrent)) : driver.submit({ kind: "file", file, label: fileLabel, reviewedZipMapping, evidenceOmissions, staticOnly, captureSourceIndices: explicitReviewed ? true : undefined });
+      const submit = () => transport.kind === "storage" ? (isZip ? submitStoragedZip(file, safeCurrent, reviewedZipMapping, chosen.kind === "body", evidenceOmissions, staticOnly, explicitReviewed ? true : undefined, perStudentEvidence, expectedOwnerSession) : submitStoragedSingleFile(file, fileLabel, safeCurrent)) : driver.submit({ kind: "file", file, label: fileLabel, reviewedZipMapping, evidenceOmissions, perStudentEvidence, expectedOwnerSession, staticOnly, captureSourceIndices: explicitReviewed ? true : undefined });
       try { const outcome = await submit(); if (isZip && zipReview.owns(account, accountToken) && outcome.kind !== "refused") zipReview.remember([file]); return outcome; }
       catch (error) { if (isZip && zipReview.owns(account, accountToken)) zipReview.remember([file]); throw error; }
     });
@@ -619,15 +628,22 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
     if (safeCurrent()) setSubmitError(reasons.length > 0 ? reasons.join(" ") : null);
     return outcomes;
   };
-  const handleSubmitFiles = (files: File[], label?: string, reviewedZipMapping?: Readonly<Record<string, string>>, evidenceOmissions?: readonly string[], staticOnly?: true, explicitReviewed = false) => {
+  const handleSubmitFiles = (files: File[], label?: string, reviewedZipMapping?: Readonly<Record<string, string>>, evidenceOmissions?: readonly string[], staticOnly?: true, explicitReviewed = false, mode?: "single" | "multiple", perStudentEvidence?: PerStudentEvidence, expectedOwnerSession?: ExpectedOwnerSession): Promise<DirectFileOutcome[]> => {
     const blocked = directIntake.current.isPending() || preparing || driver.headerState === "resolving";
-    const oversized = !blocked ? oversizedReviewCandidate(files) : null; if (oversized) { setReviewFile({ file: oversized, id: ++reviewSequence.current }); return Promise.resolve([{ kind: "refused" as const, reason: "Opened oversized ZIP review. Nothing was submitted." }]); }
+    if (!blocked && files.length > 1 && files.some((file) => oversizedReviewCandidate([file]))) {
+      if (files.some((file) => !/\.zip$/i.test(file.name))) return Promise.resolve(files.map(() => ({ kind: "refused" as const, reason: "Select oversized ZIPs separately from other files so each submission stays together." })));
+      const epoch = dropSessionEpoch.current;
+      return submitFilesSequentially(files, async (file) => epoch === dropSessionEpoch.current
+        ? (await handleSubmitFiles([file], label, reviewedZipMapping, evidenceOmissions, staticOnly, explicitReviewed, mode, perStudentEvidence, expectedOwnerSession))[0]
+        : { kind: "refused" as const, reason: `${file.name}: session changed before submission.` });
+    }
+    const oversized = !blocked ? oversizedReviewCandidate(files) : null; if (oversized) { const next = archiveReviewQueue.current.enqueue(oversized, mode === "multiple"); setWaitingArchiveNames(archiveReviewQueue.current.waitingNames()); if (next) setReviewFile({ ...next, id: ++reviewSequence.current }); return Promise.resolve([{ kind: "refused" as const, reason: "Queued oversized ZIP for review. Nothing was submitted yet." }]); }
     return directIntake.current.run({ files, label, blocked, preparing: (value) => { setDirectPreparing(value); setPreparing(value); }, error: setSubmitError,
       setup: { instructions, rubric, harshness, feedbackWordTarget: coerceFeedbackWordTarget(feedbackLengthText), applyNamingDeduction, applyLengthDeduction,
         lengthDeductionThresholdWords: applyLengthDeduction ? parseLengthDeductionThreshold(lengthThresholdText) ?? NaN : undefined },
-      start: (setup, current) => ensureSession(undefined, setup, current), submit: (batch, batchLabel, current) => handleConfirmedFiles(batch, batchLabel, current, reviewedZipMapping, evidenceOmissions, staticOnly, explicitReviewed) });
+      start: (setup, current) => ensureSession(undefined, setup, current), submit: (batch, batchLabel, current) => handleConfirmedFiles(batch, batchLabel, current, reviewedZipMapping, evidenceOmissions, staticOnly, explicitReviewed, perStudentEvidence, expectedOwnerSession) });
   };
-  const handlePartialHandoff = (...args: Parameters<ReturnType<typeof createPartialHandoffHandler>>) => createPartialHandoffHandler({ getEpoch: () => dropSessionEpoch.current, account: user?.id, capture: zipReview.capture, owns: zipReview.owns, latch: sharedIntakeLatch, onRecords: setPartialRecords, onOmissions: (groups) => setPartialOmissions((previous) => [...previous, ...groups]), submit: (zip, mapping, omissions, staticOnly) => handleSubmitFiles([zip], undefined, mapping, omissions, staticOnly, true) })(...args);
+  const handlePartialHandoff = (...args: Parameters<ReturnType<typeof createPartialHandoffHandler>>) => createPartialHandoffHandler({ getEpoch: () => dropSessionEpoch.current, account: user?.id, capture: zipReview.capture, owns: zipReview.owns, latch: sharedIntakeLatch, indexAuthority: () => createSingleZipBrowserAuthority(authObserver), onRecords: setPartialRecords, onOmissions: (groups) => setPartialOmissions((previous) => [...previous, ...groups]), submit: (zip, mapping, omissions, staticOnly, perStudentEvidence, expectedOwnerSession) => handleSubmitFiles([zip], undefined, mapping, omissions, staticOnly, true, undefined, perStudentEvidence, expectedOwnerSession) })(...args);
   // RECORDING ONE-VS-MANY: resolve the held multi-submission recording.
   const reportSplitOutcome = (outcome: SubmitOutcome) => setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
   const handleConfirmSplit = () => reportSplitOutcome(driver.confirmRecordingSplit());
@@ -918,14 +934,15 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
 
       </div>
       <div className={chatStyles.stickyComposer}>
-        <PartialHandoffNotice omissions={partialOmissions} records={partialRecords} />
-        <LargeZipRecovery key={`${visibleDropEpoch}:${reviewFile?.id ?? "idle"}`} onSelectionStart={() => setPrioritySourceIndices(new Set())} onAdmitted={(indices) => setPrioritySourceIndices((previous) => new Set([...previous, ...indices]))} onSubmit={handlePartialHandoff} incomingFile={reviewFile?.file} onClose={() => setReviewFile(null)} />
+        <PartialHandoffNotice omissions={partialOmissions} records={partialRecords} observer={authObserver} />
+        {waitingArchiveNames.length > 0 && <Alert severity="info" role="status">Waiting for review: {waitingArchiveNames.join(", ")}. These archives have not yet been submitted.</Alert>}
+        <LargeZipRecovery key={`${visibleDropEpoch}:${reviewFile?.id ?? "idle"}`} autoSubmit={reviewFile?.autoSubmit} onManualOpen={() => archiveReviewQueue.current.reserve()} onSelectionStart={() => setPrioritySourceIndices(new Set())} onAdmitted={(indices) => setPrioritySourceIndices((previous) => new Set([...previous, ...indices]))} onSubmit={handlePartialHandoff} incomingFile={reviewFile?.file} onClose={() => { const next = archiveReviewQueue.current.complete(); setWaitingArchiveNames(archiveReviewQueue.current.waitingNames()); setReviewFile(next ? { ...next, id: ++reviewSequence.current } : null); }} />
         <ChatComposer
           sharedLatch={sharedIntakeLatch}
           disabled={busy || preparing}
           getSessionEpoch={() => dropSessionEpoch.current}
           sessionEpoch={visibleDropEpoch}
-          onSubmitText={handleSubmitText} onSubmitFiles={handleSubmitFiles} onSubmitUrl={handleSubmitUrl}
+          onSubmitText={handleSubmitText} onSubmitFiles={(files, label, mode) => handleSubmitFiles(files, label, undefined, undefined, undefined, false, mode)} onSubmitUrl={handleSubmitUrl}
           onSubmitComposite={handleSubmitComposite}
           onSubmitReviewed={handleSubmitReviewed}
         />

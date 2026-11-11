@@ -1,6 +1,6 @@
 import type { RecoverableGroup } from "@/lib/grade/large-zip-subset";
 import type { ProjectInventoryFile } from "@/lib/grade/brightspace-project-inventory";
-const safeCompanion = /\.(?:txt|md|py|ipynb|csv|pdf|docx|html|c|cc|cpp|cxx|h|hpp)$/i;
+const safeCompanion = /\.(?:txt|md|py|ipynb|csv|pdf|docx|html|c|cc|cpp|cxx|h|hpp|user|recipe|log|command)$/i;
 /** Preselect only groups the bounded project builder can preserve. */
 export function projectReady(group: RecoverableGroup, files: Readonly<Record<string, readonly ProjectInventoryFile[]>>): boolean {
   if (group.reason !== "nested archive" || !/^\d+-\d+$/.test(group.label)) return false;

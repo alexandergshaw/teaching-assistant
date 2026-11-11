@@ -15,6 +15,7 @@ import { createChatFileRolesController } from "./useChatFileRoles";
 import { submitFilesSequentially } from "./chatFileBatch";
 import { createDirectFileIntake } from "./chatDirectFileIntake";
 import { oversizedReviewCandidate } from "./oversizedReviewCandidate";
+import { createArchiveReviewQueue } from "./archiveReviewQueue";
 import { claimIntake, releaseIntake } from "./intakeFence";
 import { createPartialHandoffHandler } from "./partialHandoff";
 import { webcrypto } from "node:crypto";
@@ -43,6 +44,35 @@ function setupCallback(driver: ReturnType<typeof useContinuousGradingRun>, instr
     sessionRefusalRef: { current: "refused" }, setSubmitError: vi.fn(), setInstructions: vi.fn(), setRubric: vi.fn(), setSetupNote: vi.fn() });
 }
 describe("actual role controller -> Panel setup/transport callbacks -> continuous driver", () => {
+  it("passes the verified owner session into every reviewed ZIP handoff", async () => {
+    const records = new Map<string, string>(), storage = { get length() { return records.size; }, key: (i: number) => [...records.keys()][i] ?? null, getItem: (key: string) => records.get(key) ?? null, setItem: (key: string, value: string) => { records.set(key, value); } };
+    vi.stubGlobal("navigator", { locks: { request: async (_key: string, _options: unknown, work: (lock: object) => Promise<unknown>) => work({}) } }); vi.stubGlobal("crypto", webcrypto); vi.stubGlobal("localStorage", storage);
+    try {
+      const accountId = "11111111-1111-4111-8111-111111111111", sessionId = "22222222-2222-4222-8222-222222222222", controller = new AbortController(), lease = { signal: controller.signal };
+      const authority = { admit: async () => lease, resolve: (candidate: unknown) => candidate === lease ? accountId : null, identity: (candidate: unknown) => candidate === lease ? { accountId, sessionId } : null, revoke: vi.fn(), close: vi.fn() };
+      const submitted = vi.fn(async () => [{ kind: "accepted" as const, entryCount: 1 }]);
+      const run = createPartialHandoffHandler({ getEpoch: () => 0, account: accountId, capture: () => 0, owns: () => true, latch: { busy: false, generation: 0 }, indexAuthority: () => authority, onRecords: vi.fn(), onOmissions: vi.fn(), submit: submitted });
+      const group = { label: "student", sourceIdentifier: "student", members: [{ path: "work.txt" }] } as never;
+      expect(await run(new File(["source"], "source.zip"), new File(["subset"], "subset.zip"), [group], [], { student: "Student" }, { current: () => true, onProgress: vi.fn(), bindOwnerSession: true })).toBeNull();
+      expect(submitted).toHaveBeenCalledWith(expect.any(File), { "work.txt": "Student" }, undefined, undefined, undefined, { accountId, sessionId });
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it("hashes the same source once per attempt while hashing every submitted batch", async () => {
+    const records = new Map<string, string>();
+    const storage = { get length() { return records.size; }, key: (i: number) => [...records.keys()][i] ?? null, getItem: (key: string) => records.get(key) ?? null, setItem: (key: string, value: string) => { records.set(key, value); } };
+    vi.stubGlobal("navigator", { locks: { request: async (_key: string, _options: unknown, work: (lock: object) => Promise<unknown>) => work({}) } }); vi.stubGlobal("crypto", webcrypto); vi.stubGlobal("localStorage", storage);
+    try {
+      const submitted = vi.fn(async () => [{ kind: "accepted" }]);
+      const run = callback("handlePartialHandoff", { createPartialHandoffHandler, sharedIntakeLatch: { busy: false, generation: 0 }, dropSessionEpoch: { current: 0 }, user: { id: "owner" }, zipReview: { capture: () => 0, owns: () => true }, setPartialOmissions: vi.fn(), setPartialRecords: vi.fn(), handleSubmitFiles: submitted });
+      const source = new File(["source"], "source.zip"), sourceReads = vi.spyOn(source, "slice"), sourceDigests = new WeakMap<File, string>();
+      const group = { label: "student", members: [{ path: "work.txt" }] }, review = { current: () => true, onProgress: vi.fn(), sourceDigests };
+      expect(await run(source, new File(["first"], "first.zip"), [group], [], { student: "Student" }, review)).toBeNull();
+      expect(await run(source, new File(["second"], "second.zip"), [group], [], { student: "Student" }, review)).toBeNull();
+      expect(sourceReads).toHaveBeenCalledOnce(); expect(submitted).toHaveBeenCalledTimes(2);
+      const other = new File(["source"], "source.zip"), otherReads = vi.spyOn(other, "slice");
+      expect(await run(other, new File(["third"], "third.zip"), [group], [], { student: "Student" }, review)).toBeNull(); expect(otherReads).toHaveBeenCalledOnce();
+    } finally { vi.unstubAllGlobals(); }
+  });
   it("locks the actual partial handoff, records omissions before dispatch, and permits an explicit resubmission", async () => {
     const records = new Map<string, string>();
     const storage = { get length() { return records.size; }, key: (i: number) => [...records.keys()][i] ?? null, getItem: (key: string) => records.get(key) ?? null, setItem: (key: string, value: string) => { records.set(key, value); } };
@@ -51,9 +81,10 @@ describe("actual role controller -> Panel setup/transport callbacks -> continuou
     vi.stubGlobal("navigator", { locks: { request: lock } }); vi.stubGlobal("crypto", webcrypto); vi.stubGlobal("localStorage", storage);
     const run = callback("handlePartialHandoff", { createPartialHandoffHandler, sharedIntakeLatch: latch, dropSessionEpoch: epoch, user: { id: "owner" }, zipReview: { capture: () => 0, owns: () => true }, setPartialOmissions: vi.fn(), setPartialRecords: vi.fn(), handleSubmitFiles: submitted });
     const group = { label: "archive-name", members: [{ path: "work.txt" }] }, omitted = [{ label: "omitted", reason: "member size", members: [{ path: "video.mp4" }] }];
-    expect(await run(new File(["source"], "source.zip"), new File(["subset"], "subset.zip"), [group], omitted, { "archive-name": "Student" })).toBeNull();
-    expect(submitted).toHaveBeenCalledWith([expect.any(File)], undefined, { "work.txt": "Student" }, undefined, undefined, true);
-    expect([...records.values()][0]).toContain("video.mp4");
+    const future = { label: "next", members: [{ path: "next.txt" }] };
+    expect(await run(new File(["source"], "source.zip"), new File(["subset"], "subset.zip"), [group], omitted, { "archive-name": "Student", next: "Next Student" }, { current: () => true, onProgress: vi.fn(), pendingAtHandoff: [future] })).toBeNull();
+    expect(submitted).toHaveBeenCalledWith([expect.any(File)], undefined, { "work.txt": "Student" }, undefined, undefined, true, undefined, undefined, undefined);
+    expect([...records.values()][0]).toContain("video.mp4"); expect(JSON.parse([...records.values()][0]).pendingAtHandoff).toEqual([{ student: "Next Student", files: ["next.txt"] }]);
     expect(await run(new File(["source"], "source.zip"), new File(["subset"], "subset.zip"), [group], omitted, { "archive-name": "Student" })).toBeNull();
     expect(submitted).toHaveBeenCalledTimes(2); expect(lock).toHaveBeenCalledTimes(2);
     const interrupted = vi.fn(async () => { throw new Error("connection lost"); });
@@ -69,13 +100,43 @@ describe("actual role controller -> Panel setup/transport callbacks -> continuou
   });
   it("routes the original oversized ZIP into review without starting grading", async () => {
     const file = new File(["synthetic"], "Vector Sorting.zip"); Object.defineProperty(file, "size", { value: 282_107_616 });
-    const setReviewFile = vi.fn(), intake = { isPending: () => false, run: vi.fn() }, reviewSequence = { current: 0 };
-    const submit = callback("handleSubmitFiles", { directIntake: { current: intake }, preparing: false, driver: { headerState: "ready" }, oversizedReviewCandidate, setReviewFile, reviewSequence });
-    const outcome = await submit([file]); expect(setReviewFile).toHaveBeenCalledWith({ file, id: 1 }); expect(intake.run).not.toHaveBeenCalled(); expect(outcome[0]).toMatchObject({ kind: "refused", reason: expect.stringContaining("Nothing was submitted") });
-    const second = new File(["synthetic2"], "second.zip"); Object.defineProperty(second, "size", { value: 282_107_617 }); await submit([second]); expect(setReviewFile).toHaveBeenLastCalledWith({ file: second, id: 2 });
+    const setReviewFile = vi.fn(), intake = { isPending: () => false, run: vi.fn() }, reviewSequence = { current: 0 }, archiveReviewQueue = { current: createArchiveReviewQueue() };
+    const submit = callback("handleSubmitFiles", { directIntake: { current: intake }, preparing: false, driver: { headerState: "ready" }, oversizedReviewCandidate, setReviewFile, reviewSequence, archiveReviewQueue, setWaitingArchiveNames: vi.fn(), submitFilesSequentially, dropSessionEpoch: { current: 0 } });
+    const outcome = await submit([file]); expect(setReviewFile).toHaveBeenCalledWith({ file, id: 1, autoSubmit: false }); expect(intake.run).not.toHaveBeenCalled(); expect(outcome[0]).toMatchObject({ kind: "refused", reason: expect.stringContaining("Nothing was submitted") });
+    const second = new File(["synthetic2"], "second.zip"), third = new File(["synthetic3"], "third.zip"); Object.defineProperty(second, "size", { value: 282_107_617 }); Object.defineProperty(third, "size", { value: 282_107_618 }); await submit([second, third], undefined, undefined, undefined, undefined, false, "multiple"); expect(setReviewFile).toHaveBeenCalledTimes(1); expect(archiveReviewQueue.current.complete()).toEqual({ file: second, autoSubmit: true }); expect(archiveReviewQueue.current.complete()).toEqual({ file: third, autoSubmit: true });
+    expect((await submit([file], undefined, undefined, undefined, undefined, false, "single"))[0]).toMatchObject({ kind: "refused", reason: expect.stringContaining("Queued oversized ZIP") });
+    expect(archiveReviewQueue.current.waitingNames()).toEqual([file.name]); archiveReviewQueue.current.reset();
+    const mixed = await submit([second, new File(["part"], "part.txt")]); expect(mixed).toHaveLength(2); expect(mixed.every((item: { kind: string }) => item.kind === "refused")).toBe(true); expect(archiveReviewQueue.current.waitingNames()).toEqual([]);
     expect(panel).toContain("key={`${visibleDropEpoch}:${reviewFile?.id ?? \"idle\"}`}");
     expect(oversizedReviewCandidate([file, new File(["x"], "other.txt")])).toBeNull();
     expect(oversizedReviewCandidate([new File(["x"], "small.zip")])).toBeNull();
+  });
+  it("forwards the selected student mode from the composer into the panel route", () => {
+    const composer = readFileSync("src/app/components/grading-chat/ChatComposer.tsx", "utf8");
+    expect(composer).toContain('onMany={(files) => onSubmitFiles(files, undefined, "multiple")}');
+    expect(composer).toContain('(items, label) => onSubmitFiles(items, label, "single")');
+    expect(panel).toContain("handleSubmitFiles(files, label, undefined, undefined, undefined, false, mode)");
+    expect(panel).toContain('archiveReviewQueue.current.enqueue(oversized, mode === "multiple")');
+  });
+  it("keeps later selected batches pending instead of labeling them omitted", async () => {
+    const recovery = readFileSync("src/app/components/grading-chat/LargeZipRecovery.tsx", "utf8");
+    expect(recovery).toContain("omittedGroups(result.omitted, selected, admittedLabels)");
+    expect(recovery).toContain("[...remaining].filter((label) => !currentBatch.has(label))");
+    expect(recovery).toContain("pendingAtHandoff: groups.filter((group) => future.has(group.label))");
+    expect(recovery).toContain("remainingGroups(previous, admitted)");
+  });
+  it("does not queue a later ZIP after the session changes during the first upload", async () => {
+    let finish!: (value: unknown[]) => void;
+    const run = vi.fn(() => new Promise<unknown[]>((resolve) => { finish = resolve; }));
+    const epoch = { current: 0 }, setReviewFile = vi.fn();
+    const submit = callback("handleSubmitFiles", { directIntake: { current: { isPending: () => false, run } }, preparing: false, driver: { headerState: "ready" }, oversizedReviewCandidate, setReviewFile, reviewSequence: { current: 0 }, archiveReviewQueue: { current: createArchiveReviewQueue() }, setWaitingArchiveNames: vi.fn(), submitFilesSequentially, dropSessionEpoch: epoch,
+      setDirectPreparing: vi.fn(), setPreparing: vi.fn(), setSubmitError: vi.fn(), instructions: "", rubric: "", harshness: "balanced", feedbackLengthText: "", coerceFeedbackWordTarget: Number, applyNamingDeduction: false, applyLengthDeduction: false, lengthThresholdText: "1", parseLengthDeductionThreshold, ensureSession: vi.fn(), handleConfirmedFiles: vi.fn() });
+    const later = new File(["x"], "later.zip"); Object.defineProperty(later, "size", { value: 282_107_616 });
+    const pending = submit([new File(["x"], "first.zip"), later]);
+    expect(run).toHaveBeenCalledOnce(); epoch.current++; finish([{ kind: "refused", reason: "canceled" }]);
+    const result = await pending;
+    expect(result[1]).toMatchObject({ kind: "refused", reason: expect.stringContaining("later.zip: session changed") });
+    expect(setReviewFile).not.toHaveBeenCalled(); expect(run).toHaveBeenCalledOnce();
   });
   it("cancels long source hashing without recording or dispatching", async () => {
     const records = new Map<string, string>(); const storage = { get length() { return records.size; }, key: (i: number) => [...records.keys()][i] ?? null, getItem: (key: string) => records.get(key) ?? null, setItem: (key: string, value: string) => { records.set(key, value); } };
@@ -303,7 +364,7 @@ describe("actual role controller -> Panel setup/transport callbacks -> continuou
   });
   it("routes loose-file entry points directly and removes setup-file review controls", () => {
     expect(panel).not.toContain("Include assignment or rubric files"); expect(panel).not.toContain("roleIntake.stage");
-    expect(panel).toContain("claimIntake(sharedIntakeLatch)"); expect(panel).toContain("handleSubmitFiles(files).finally"); expect(panel).toContain("onSubmitFiles={handleSubmitFiles}");
+    expect(panel).toContain("claimIntake(sharedIntakeLatch)"); expect(panel).toContain("handleSubmitFiles(files).finally"); expect(panel).toContain("handleSubmitFiles(files, label, undefined, undefined, undefined, false, mode)");
     expect(panel).not.toContain("<ChatFileRolePreview"); expect(panel).toContain("disabled={busy || preparing}");
     expect(panel).toContain('label="Deduct when at least N words below the minimum"'); expect(panel).toContain("disabled={!applyLengthDeduction || sessionReady || busy || preparing}");
     expect(panel).toContain('aria-label="Clear all setup fields" disabled={sessionReady || busy || preparing}');
@@ -335,6 +396,17 @@ describe("actual role controller -> Panel setup/transport callbacks -> continuou
     const check=vi.fn(async()=>false),submit=vi.fn(async(input:unknown)=>{void input;return {kind:"accepted",entryCount:1,sourceIndices:[4]}});const consume=callback("handleConfirmedFiles",{driver:{submit,pendingVideoCount:()=>0},zipReview:{check,capture:()=>0,owns:()=>true,remember:vi.fn()},submitFilesSequentially,submitLooseVideo:vi.fn(async()=>null),user:{id:"owner"},supabase:{storage:{}},VIDEO_GRADING_ENABLED:false,isZipFileName:(n:string)=>n.endsWith(".zip"),chooseZipTransport:()=>({kind:"body"}),chooseSingleFileTransport:()=>({kind:"body"}),preflightUploadFile:()=>({ok:true}),safeIntake:(fn:()=>void)=>fn(),recordIntakeGate:vi.fn(),submitStoragedZip:vi.fn(),submitStoragedSingleFile:vi.fn(),setSubmitError:vi.fn()});
     const result=await consume([new File(["zip"],"reviewed.zip")],undefined,()=>true,{"work.txt":"Student"},undefined,undefined,true);expect(check).not.toHaveBeenCalled();expect(result[0]).toMatchObject({kind:"accepted",sourceIndices:[4]});expect(submit.mock.calls[0][0]).toMatchObject({captureSourceIndices:true});
   });
+  it("carries the expected owner session through reviewed intake and queued grading", async () => {
+    const expectedOwnerSession = { accountId: "11111111-1111-4111-8111-111111111111", sessionId: "22222222-2222-4222-8222-222222222222" };
+    header.mockImplementation(async (_instructions: string, rubric: string) => ({ kind: "ok", effectiveRubric: rubric, rubricFingerprint: "fixture", criteriaNames: [], rubricUsed: "provided" }));
+    prepare.mockResolvedValue({ kind: "entries", entries: [{ student: "Student", content: "work", submittedFiles: [], mergedFileCount: 0 }], pointsPossible: 10 });
+    const dispatch = vi.fn(async (request: GradeRunItemRequestBody) => result(request.entry.student)); h.begin(); const driver = useContinuousGradingRun({ provider: "gemini", dispatchItem: dispatch });
+    await driver.beginSession({ assignmentInstructions: "Assignment", rubric: "Rubric" });
+    const consume = callback("handleConfirmedFiles", { driver, zipReview: { check: async () => true, capture: () => 0, owns: () => true, remember: vi.fn() }, submitFilesSequentially, submitLooseVideo: vi.fn(async () => null), user: { id: expectedOwnerSession.accountId }, supabase: { storage: {} }, VIDEO_GRADING_ENABLED: false, isZipFileName: (name: string) => name.endsWith(".zip"), chooseZipTransport: () => ({ kind: "body" }), chooseSingleFileTransport: () => ({ kind: "body" }), preflightUploadFile: () => ({ ok: true }), safeIntake: (fn: () => void) => fn(), recordIntakeGate: vi.fn(), submitStoragedZip: vi.fn(), submitStoragedSingleFile: vi.fn(), setSubmitError: vi.fn() });
+    await consume([new File(["zip"], "reviewed.zip")], undefined, () => true, { "work.txt": "Student" }, undefined, undefined, true, undefined, expectedOwnerSession);
+    expect((prepare.mock.calls[0][0] as FormData).get("expectedOwnerSession")).toBe(JSON.stringify(expectedOwnerSession));
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledOnce()); expect(dispatch.mock.calls[0][0].expectedOwnerSession).toEqual(expectedOwnerSession);
+  });
 
 it("records a proven nested intake refusal separately from an uncertain handoff", async () => {
   const records = new Map<string, string>(); const storage = { get length() { return records.size; }, key: (i: number) => [...records.keys()][i] ?? null, getItem: (key: string) => records.get(key) ?? null, setItem: (key: string, value: string) => { records.set(key, value); } };
@@ -347,5 +419,19 @@ it("records a proven nested intake refusal separately from an uncertain handoff"
     expect(await run(new File(["source"], "source.zip"), new File(["subset"], "subset.zip"), [group], [], { "100-200": "Student" }, { current: () => true, onProgress: vi.fn(), onRefused }, project)).toContain("too large");
     expect(onRefused).toHaveBeenCalledOnce(); expect([...records.values()].map((v) => JSON.parse(v).status)).toEqual(["refused"]);
     expect(submitted).toHaveBeenCalledOnce();
+  } finally { vi.unstubAllGlobals(); }
+});
+
+it("binds nested omissions to the correct student in a mixed batch", async () => {
+  const records = new Map<string, string>(), storage = { get length() { return records.size; }, key: (i: number) => [...records.keys()][i] ?? null, getItem: (key: string) => records.get(key) ?? null, setItem: (key: string, value: string) => { records.set(key, value); } };
+  vi.stubGlobal("navigator", { locks: { request: async (_key: string, _options: unknown, work: (lock: object) => Promise<unknown>) => work({}) } }); vi.stubGlobal("crypto", webcrypto); vi.stubGlobal("localStorage", storage);
+  try {
+    const submitted = vi.fn(async () => [{ kind: "accepted" }]);
+    const run = callback("handlePartialHandoff", { createPartialHandoffHandler, sharedIntakeLatch: { busy: false, generation: 0 }, dropSessionEpoch: { current: 0 }, user: { id: "owner" }, zipReview: { capture: () => 0, owns: () => true }, setPartialOmissions: vi.fn(), setPartialRecords: vi.fn(), handleSubmitFiles: submitted });
+    const groups = [{ label: "100-200", members: [{ path: "100-200 - project.zip", nestedArchive: true }] }, { label: "101-201", members: [{ path: "101-201 - essay.txt", nestedArchive: false }] }];
+    const projects = { "100-200": { mappedPaths: ["100-200 - project.zip/main.cpp"], excludedPaths: ["100-200 - project.zip/build.obj"] } };
+    expect(await run(new File(["source"], "source.zip"), new File(["subset"], "subset.zip"), groups, [], { "100-200": "Ada", "101-201": "Lin" }, { current: () => true, onProgress: vi.fn(), projects })).toBeNull();
+    expect(submitted).toHaveBeenCalledWith([expect.any(File)], undefined, { "100-200 - project.zip/main.cpp": "Ada", "101-201 - essay.txt": "Lin" }, undefined, undefined, true, undefined, [{ student: "Ada", omissions: ["100-200 - project.zip/build.obj"], staticOnly: true }, { student: "Lin", omissions: [], staticOnly: false }], undefined);
+    expect([...records.values()].map((value) => JSON.parse(value).omitted)).toEqual([[{ student: "100-200", files: ["100-200 - project.zip/build.obj"], reason: "build artifact or verified course dataset excluded from grading" }]]);
   } finally { vi.unstubAllGlobals(); }
 });

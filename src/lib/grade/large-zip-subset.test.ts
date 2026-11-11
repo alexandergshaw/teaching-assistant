@@ -1,9 +1,45 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import JSZip from "jszip";
-import { buildRecoverableZip, planRecoverableZip } from "./large-zip-subset";
+import { buildRecoverableZip, checkRecoverableBatch, planRecoverableZip } from "./large-zip-subset";
 import { ingestZipEntries } from "./extraction";
+import { GRADING_ZIP_MAX_BYTES } from "./grading-zip-transport";
 
 describe("recoverable large ZIP subset", () => {
+  it("uses the same metadata limit when planning and building", async () => {
+    const zip = new JSZip(); zip.file("ada_1_2_a.txt", "a"); zip.file("lin_3_4_b.txt", "b");
+    const source = new Blob([new Uint8Array(await zip.generateAsync({ type: "uint8array" })).buffer]);
+    const plan = await planRecoverableZip(source); expect(plan.ok).toBe(true); if (!plan.ok) return;
+    for (const groups of [plan.groups, plan.groups.slice(0, 1), plan.groups.slice(1)]) {
+      expect(checkRecoverableBatch(groups, plan.groups)).toBeNull();
+      expect((await buildRecoverableZip(source, groups.map((group) => group.label), true)).ok).toBe(true);
+    }
+    const tooMany = Array.from({ length: 1001 }, () => plan.groups[0].members[0]);
+    expect(checkRecoverableBatch([{ ...plan.groups[0], members: tooMany }], plan.groups)).toBe("batch exceeds grading limits");
+    expect(checkRecoverableBatch(plan.groups, plan.groups, [{ nameBytes: 20, bytes: 200 * 1024 * 1024 }])).toBe("batch exceeds grading limits");
+  });
+  it("does not reserve space for a sentinel omitted from in-app batches", async () => {
+    const zip = new JSZip(); zip.file("ada_1_2_a.txt", "a");
+    const plan = await planRecoverableZip(new Blob([new Uint8Array(await zip.generateAsync({ type: "uint8array" })).buffer])); if (!plan.ok) throw new Error("fixture failed");
+    const member = plan.groups[0].members[0], overhead = 22 + 30 + member.rawName.length + member.centralEntry.length;
+    const group = { ...plan.groups[0], members: [{ ...member, compressedBytes: GRADING_ZIP_MAX_BYTES - overhead }] };
+    expect(checkRecoverableBatch([group], [group], [], false, true)).toBeNull();
+    expect(checkRecoverableBatch([group], [group])).toBe("batch exceeds transport limit");
+  });
+  it("reuses verified bytes only for the same immutable source", async () => {
+    const zip = new JSZip(); zip.file("ada_1_2_work.txt", "content");
+    const bytes = new Uint8Array(await zip.generateAsync({ type: "uint8array", compression: "STORE" }));
+    const source = new Blob([bytes.buffer]), plan = await planRecoverableZip(source); expect(plan.ok).toBe(true); if (!plan.ok) return;
+    const member = plan.groups[0].members[0], spy = vi.spyOn(source, "slice"), cache = new WeakMap<Blob, Set<string>>();
+    expect((await buildRecoverableZip(source, ["ada"], true, cache)).ok).toBe(true);
+    const reads = () => spy.mock.calls.filter(([start, end]) => start === member.dataOffset && end === member.dataOffset + member.compressedBytes).length;
+    const firstReads = reads(); expect(firstReads).toBeGreaterThan(0);
+    expect((await buildRecoverableZip(source, ["ada"], true, cache)).ok).toBe(true);
+    // Each build still slices the member for output; the second does not read it for CRC.
+    expect(reads() - firstReads).toBe(1);
+    bytes[member.dataOffset] ^= 1;
+    const changed = new Blob([bytes.buffer]);
+    expect(await buildRecoverableZip(changed, ["ada"], true, cache)).toEqual({ ok: false, reason: "member integrity could not be verified in this browser" });
+  });
   it("inventories numeric Brightspace groups and keeps the unassigned index out of grading", async () => {
     const zip = new JSZip(); zip.file("100-200 - Last-First-Nov 5, 2026 400 PM.cpp", "int main() {}"); zip.file("100-200 - Other-First-Nov 5, 2026 400 PM.docx", "synthetic"); zip.file("300-400 - project.zip", "not opened"); zip.file("index.html", "<html>summary</html>");
     const source = new Blob([new Uint8Array(await zip.generateAsync({ type: "uint8array" })).buffer]);
@@ -59,6 +95,8 @@ describe("recoverable large ZIP subset", () => {
     expect(JSON.parse(await extracted.file("PARTIAL_ARCHIVE_REQUIRES_REVIEW.json")!.async("string"))).toMatchObject({ ownershipVerified: false, selected: [{ label: "ada" }], omitted: [{ label: "lin", reason: "nested archive" }] });
     await expect(ingestZipEntries(await built.archive.arrayBuffer(), { requireSupportedFiles: true })).rejects.toThrow(/partial archive includes omitted submissions/i);
     const handoff = await buildRecoverableZip(source, ["ada"], true); expect(handoff.ok).toBe(true); if (!handoff.ok) return;
+    const handoffFiles = await JSZip.loadAsync(await handoff.archive.arrayBuffer(), { checkCRC32: true });
+    expect(handoffFiles.file("PARTIAL_ARCHIVE_REQUIRES_REVIEW.json")).toBeNull();
     expect(handoff.omitted.map((group) => [group.label, group.reason])).toEqual([["lin", "nested archive"]]);
     const mapping = { "ada_1_2_one.txt": "ada", "ada_1_2_two.py": "ada" };
     const admitted = await ingestZipEntries(await handoff.archive.arrayBuffer(), { requireSupportedFiles: true, reviewedMapping: mapping });

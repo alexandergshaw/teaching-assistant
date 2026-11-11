@@ -75,6 +75,8 @@ vi.mock("@/lib/grade/constants", async () => {
 });
 
 const requireAppOwnerMock = vi.fn();
+const verifyOwnerSessionMock = vi.fn();
+vi.mock("@/lib/supabase/single-zip-owner-session", () => ({ verifySingleZipOwnerSession: (...args: unknown[]) => verifyOwnerSessionMock(...args) }));
 vi.mock("@/lib/supabase/auth", () => ({
   requireAppOwner: (...args: unknown[]) => requireAppOwnerMock(...args),
 }));
@@ -127,6 +129,16 @@ beforeEach(() => {
 });
 
 describe("POST /api/grade-submission-zip", () => {
+  it("refuses mismatched owner sessions before any storage access", async () => {
+    const reviewedZipMapping = { "10-20 - brightspace-index-evidence.txt": "Student" }, expectedOwnerSession = { accountId: "11111111-1111-4111-8111-111111111111", sessionId: "22222222-2222-4222-8222-222222222222" };
+    expect((await POST(jsonRequest({ storagePath: GOOD_PATH, reviewedZipMapping }))).status).toBe(401);
+    verifyOwnerSessionMock.mockResolvedValue(false);
+    expect((await POST(jsonRequest({ storagePath: GOOD_PATH, reviewedZipMapping, expectedOwnerSession }))).status).toBe(401);
+    expect(verifyOwnerSessionMock).toHaveBeenCalledWith(expectedOwnerSession); expect(listMock).not.toHaveBeenCalled(); expect(ingestZipEntriesMock).not.toHaveBeenCalled();
+    verifyOwnerSessionMock.mockResolvedValue(true);
+    await readLines(await POST(jsonRequest({ storagePath: GOOD_PATH, reviewedZipMapping, expectedOwnerSession })));
+    expect(listMock).toHaveBeenCalled(); expect(ingestZipEntriesMock).toHaveBeenCalled();
+  });
   it("passes a reviewed mapping into ZIP extraction and refuses malformed mappings before storage", async () => {
     const mapping = { "ada_1_2_work.txt": "ada" };
     await readLines(await POST(jsonRequest({ storagePath: GOOD_PATH, reviewedZipMapping: mapping })));

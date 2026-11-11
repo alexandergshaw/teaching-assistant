@@ -1,3 +1,15 @@
+- id: 'REPO-GRADE-REQUIREMENT-EVIDENCE'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'grading-setup-interaction-cost'
+  title: 'Ground every repository grading requirement in submitted evidence before accepting a score.'
+  owns: ['src/lib/repo-grade-evaluator.ts', 'src/lib/grade/prompts.ts', 'src/lib/grade/repository-proposal.ts', 'src/lib/grade/parsing.ts']
+  verify: null
+  blocked_by: []
+  instrument: 'Reproduce the MU database module 11 case with a synthetic README requiring an explanatory comment and a same-pin SQL submission with valid policy code but no comment. Run the real repository grading path and ensure the missing explanation is identified for instructor review instead of silently receiving full credit. Cover requirement extraction, per-requirement positive and absent evidence, multiple files, incomplete coverage, conflicting requirements, model-invented references, missing rationale and prompt-injection text. Retain original source and grading history and do not automatically change or post existing grades. Independently review the result and verify the rendered workflow and a live provider run.'
+  from: '2026-11-11 live comparison of MU Databases module 11 against GitHub main: one saved 100/100 result at source pin abe828f4d460 had 25/25 for Security Concepts and RLS Explanation although its README required a five-sentence comment and the SQL file has no such comment.'
+  note: 'Owner: coordinator. Root cause not proven: the ordinary grading prompt requests requirement enumeration while accepting area and score only, so no requirement-level proof is validated or stored. Existing repository-proposal evidence-only path validates criterion rationale and file identifiers, but its criterion-level citations do not prove complete instruction-requirement coverage or absent evidence. Preserve nuanced grading and hold unknown evidence; do not hard-code a score.'
+  question: null
 - id: 'CHAT-CODE-RUNNER-ERROR-DIAGNOSTICS'
   state: 'actionable'
   kind: 'bug'

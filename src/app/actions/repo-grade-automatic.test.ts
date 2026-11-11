@@ -3,11 +3,11 @@ import { getAppUser, type AppUserRow } from "@/lib/supabase/app-users";
 import { createClient } from "@/lib/supabase/server";
 import {
   setRepoGradeAutomaticClassQueueAction, setRepoGradeAutomaticGithubRetryAction, setRepoGradeAutomaticScheduleAction,
-  startRepoGradeAutomaticRunAction, startRepoGradeTargetedRunAction, startRepoGradeBulkRunAction, startRepoGradeCellsRunAction, stopRepoGradeAutomaticRunAction,
+  startRepoGradeAutomaticRunAction, startRepoGradeTargetedRunAction, startRepoGradeBulkRunAction, startRepoGradeCellsRunAction, stopRepoGradeAutomaticRunAction, enqueueChangedRepoGradeAction,
 } from "./repo-grade-automatic";
 
 const mocks = vi.hoisted(() => ({
-  control: vi.fn(), read: vi.fn(), saveSchedule: vi.fn(), saveGithubRetry: vi.fn(), saveClassQueue: vi.fn(), targeted: vi.fn(), bulk: vi.fn(), cells: vi.fn(),
+  control: vi.fn(), read: vi.fn(), saveSchedule: vi.fn(), saveGithubRetry: vi.fn(), saveClassQueue: vi.fn(), targeted: vi.fn(), bulk: vi.fn(), cells: vi.fn(), changed: vi.fn(),
 }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 vi.mock("@/lib/supabase/app-users", async (original) => ({
@@ -22,6 +22,7 @@ vi.mock("@/lib/repo-grades-dashboard/automatic-store", () => ({
   startTargetedAutomaticRepoGrade: mocks.targeted,
   enqueueBulkAutomaticRepoGrade: mocks.bulk,
   enqueueCellsAutomaticRepoGrade: mocks.cells,
+  enqueueChangedRepoGrade: mocks.changed,
   saveAutomaticRepoGradeSchedule: mocks.saveSchedule, isAutomaticRepoGradeId: (id: unknown) => typeof id === "string",
 }));
 vi.mock("./repo-grades-dashboard", () => ({ retryRepoGradePreparationAction: vi.fn() }));
@@ -45,6 +46,16 @@ describe("owner automatic grading controls", () => {
     vi.mocked(getAppUser).mockResolvedValue(ownerRow);
     mocks.read.mockResolvedValue({ enabled: false, schedule: null, preparations: [], recoveries: [], run: null });
     mocks.saveSchedule.mockResolvedValue(true);
+  });
+
+  it("only queues a well-formed changed revision for the authorized owner", async () => {
+    const target = { repo: "org/student", folder: "assignments/module_11", ref: "main", sha: "b".repeat(40) };
+    mocks.changed.mockResolvedValue("queued");
+    expect(await enqueueChangedRepoGradeAction("foreign", "course", target)).toEqual({ status: "unavailable" });
+    expect(await enqueueChangedRepoGradeAction("owner", "course", { ...target, sha: "bad" })).toEqual({ status: "unavailable" });
+    expect(mocks.changed).not.toHaveBeenCalled();
+    expect(await enqueueChangedRepoGradeAction("owner", "course", target)).toEqual({ status: "started" });
+    expect(mocks.changed).toHaveBeenCalledWith("owner", "course", target);
   });
 
   it("starts only owner-authorized well-formed selected course targets", async () => {

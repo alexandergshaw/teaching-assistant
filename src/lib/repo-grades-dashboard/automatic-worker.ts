@@ -6,7 +6,7 @@ import {
 } from "./preparation-runtime";
 import { planRepoGradeCourse, runRepoGradeTarget } from "./runner";
 import { readRepoGradeStartupHistory } from "./startup-history";
-import { automaticRepoGradeEvidenceStore, isTargetedAutomaticRepoGrade, readAutomaticRepoGradeSnapshot, type AutomaticRepoGradeCompletion, type AutomaticRepoGradeWork } from "./automatic-store";
+import { automaticRepoGradeEvidenceStore, isTargetedAutomaticRepoGrade, readChangedRepoGrade, readAutomaticRepoGradeSnapshot, type AutomaticRepoGradeCompletion, type AutomaticRepoGradeWork } from "./automatic-store";
 import { captureAutomaticRepoGradeSnapshot } from "./automatic-snapshot";
 import { authorizeAutomaticRepoGradeEvidence, createAutomaticRepoGradeEvidenceResolver, PreparationEvidenceContinue } from "./automatic-evidence";
 import type { RepoGradeReadmeExample } from "./preparation-evidence";
@@ -20,6 +20,10 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
   const legacyPlans = new Map<string, Awaited<ReturnType<typeof planRepoGradeCourse>>>();
   return async (work: AutomaticRepoGradeWork, lease: string): Promise<AutomaticRepoGradeCompletion> => {
     const { accountId, courseId, runId } = work;
+    const refresh = await readChangedRepoGrade(work, lease).catch(() => undefined);
+    if (refresh === undefined) return work.phase === "discovering"
+      ? { state: "partial", reason: "changed-source-request-unavailable", targets: [] }
+      : { state: "blocked", reason: "changed-source-request-unavailable" };
     const stored = work.phase === "grading" ? await readAutomaticRepoGradeSnapshot(work, lease) : undefined;
     if (stored?.status === "unavailable") return { state: "blocked", reason: "pinned-inventory-unavailable" };
     const snapshot = stored?.status === "ready" ? stored.snapshot : undefined;
@@ -52,7 +56,9 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
       const targets = [...schedule.work.values()].map(({ target }) => target).filter((target) =>
         !work.targetFilter || (work.targetFilter.pairs ? work.targetFilter.pairs.some((pair) => pair.folder === target.folder && pair.repo === target.repo)
           : ((work.targetFilter.folders === null || work.targetFilter.folders.includes(target.folder))
-            && (work.targetFilter.repos === null || work.targetFilter.repos.includes(target.repo)))));
+            && (work.targetFilter.repos === null || work.targetFilter.repos.includes(target.repo)))))
+        .filter((target) => !refresh || (target.repo.toLowerCase() === refresh.repo.toLowerCase() && target.folder === refresh.folder
+          && target.sourceRef === refresh.ref && target.sha === refresh.sha));
       if (targets.length > 1000) return { state: "partial", reason: "target-limit", targets: [], repositories };
       if (work.targetFilter && targets.length === 0) return { state: "partial", reason: "target-not-found", targets: [], repositories };
       const bounded = targets.filter(({ folder, sourceRef }) => folder.length <= 512 && sourceRef.length <= 255);
@@ -83,7 +89,7 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
             && source.emptyFolders?.includes(folder)) return { ...selector, state: "no-submission" as const };
           // An explicit request asks for a fresh evaluation, but the database
           // independently blocks any unresolved prior attempt before dispatch.
-          if (work.targetFilter && prior) return selector;
+          if (work.targetFilter && !refresh && prior) return selector;
           switch (prior) {
             case "never-attempted":
             case "recoverable-partial": return selector;
@@ -103,12 +109,14 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
     }
 
     if (!plan) return { state: "blocked", reason: snapshot ? "configuration-changed" : "course-unavailable" };
+    if (refresh && (work.repo.toLowerCase() !== refresh.repo.toLowerCase() || work.folder !== refresh.folder
+      || work.ref !== refresh.ref || work.sha !== refresh.sha)) return { state: "blocked", reason: "changed-source-mismatch" };
     // Do not create a ledger attempt while this instance already knows that
     // the credential is throttled. The existing scheduler releases the run
     // lease and resumes the same pinned target after the cooldown.
     const cooldown = work.retryGithubRateLimits ? confirmedGradeSourceCooldown() : null;
     if (cooldown) return { state: "github-throttled", rateLimit: cooldown };
-    const targeted = await isTargetedAutomaticRepoGrade(work, lease);
+    const targeted = refresh ? false : await isTargetedAutomaticRepoGrade(work, lease);
     if (targeted === null) return { state: "blocked", reason: "targeted-run-unavailable" };
     const target = { accountId, courseId, repo: work.repo, folder: work.folder, sourceRef: work.ref, sha: work.sha };
     const history = await readRepoGradeStartupHistory(accountId, courseId, [target]);

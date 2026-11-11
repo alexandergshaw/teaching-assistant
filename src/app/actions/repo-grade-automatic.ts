@@ -4,7 +4,7 @@ import { repoGradeDurableStartupAvailable } from "@/lib/repo-grades-dashboard/ad
 import {
   automaticPreparationRetry, controlAutomaticRepoGrade, isAutomaticRepoGradeId, readAutomaticRecovery,
   readAutomaticRepoGrade, saveAutomaticRepoGradeSchedule,
-  saveAutomaticRepoGradeClassQueue, saveAutomaticRepoGradeGithubRetry, startTargetedAutomaticRepoGrade, enqueueBulkAutomaticRepoGrade, enqueueCellsAutomaticRepoGrade,
+  saveAutomaticRepoGradeClassQueue, saveAutomaticRepoGradeGithubRetry, startTargetedAutomaticRepoGrade, enqueueBulkAutomaticRepoGrade, enqueueCellsAutomaticRepoGrade, enqueueChangedRepoGrade,
 } from "@/lib/repo-grades-dashboard/automatic-store";
 import type { AutomaticRepoGradeStatus } from "@/lib/repo-grades-dashboard/automatic-status";
 import { parseAutomaticRepoGradeSchedule } from "@/lib/repo-grades-dashboard/automatic-schedule";
@@ -14,6 +14,23 @@ import { isRepoGradeProfileFolder } from "@/lib/repo-grades-dashboard/profile";
 import { validateGithubOwnerRepo } from "@/lib/github-ref-name";
 
 const unavailable = { status: "unavailable" } as const;
+
+/** Queue a newly scanned revision only when the server's durable history has an earlier empty check. */
+export async function enqueueChangedRepoGradeAction(expectedAccountId: unknown, courseId: unknown, input: unknown) {
+  const accountId = resolveAccount(expectedAccountId, await requireAppOwner().catch(() => null));
+  if (!accountId || !isAutomaticRepoGradeId(courseId) || !input || typeof input !== "object") return unavailable;
+  const target = input as Record<string, unknown>;
+  if (!isRepoGradeProfileFolder(target.folder) || typeof target.repo !== "string" || target.repo.length > 200
+    || typeof target.ref !== "string" || !target.ref.trim() || target.ref.length > 255
+    || typeof target.sha !== "string" || !/^[0-9a-f]{40}$/.test(target.sha)) return unavailable;
+  const [owner, name, extra] = target.repo.split("/");
+  if (!owner || !name || extra !== undefined || !validateGithubOwnerRepo(owner, name)) return unavailable;
+  try {
+    const result = await enqueueChangedRepoGrade(accountId, courseId,
+      { repo: target.repo, folder: target.folder, ref: target.ref, sha: target.sha });
+    return { status: result === "queued" ? "started" : result === "already-queued" ? "already-queued" : "unavailable" } as const;
+  } catch { return unavailable; }
+}
 
 function resolveAccount(expectedAccountId: unknown, owner: Awaited<ReturnType<typeof requireAppOwner>> | null) {
   return owner && owner.id === expectedAccountId && repoGradeDurableStartupAvailable() ? owner.id : undefined;

@@ -6,10 +6,10 @@ import { PreparationGithubThrottle } from "./preparation-github-throttle";
 import { prepareRepoGradeStartupProfile } from "./preparation-runtime";
 import { PreparationEvidenceContinue } from "./automatic-evidence";
 
-const mocks = vi.hoisted(() => ({ plan: vi.fn(), evaluate: vi.fn(), history: vi.fn(), snapshot: vi.fn(), evidenceStore: vi.fn(), cooldown: vi.fn(), targeted: vi.fn(), authorize: vi.fn() }));
+const mocks = vi.hoisted(() => ({ plan: vi.fn(), evaluate: vi.fn(), history: vi.fn(), snapshot: vi.fn(), evidenceStore: vi.fn(), cooldown: vi.fn(), targeted: vi.fn(), authorize: vi.fn(), refresh: vi.fn() }));
 vi.mock("@/lib/github-grade-archive", () => ({ confirmedGradeSourceCooldown: mocks.cooldown }));
 vi.mock("./runner", () => ({ planRepoGradeCourse: mocks.plan, runRepoGradeTarget: mocks.evaluate }));
-vi.mock("./automatic-store", () => ({ readAutomaticRepoGradeSnapshot: mocks.snapshot, automaticRepoGradeEvidenceStore: mocks.evidenceStore, isTargetedAutomaticRepoGrade: mocks.targeted }));
+vi.mock("./automatic-store", () => ({ readAutomaticRepoGradeSnapshot: mocks.snapshot, automaticRepoGradeEvidenceStore: mocks.evidenceStore, isTargetedAutomaticRepoGrade: mocks.targeted, readChangedRepoGrade: mocks.refresh }));
 vi.mock("./startup-history", () => ({ readRepoGradeStartupHistory: mocks.history }));
 vi.mock("./automatic-evidence", async (importOriginal) => ({
   ...await importOriginal<typeof import("./automatic-evidence")>(), authorizeAutomaticRepoGradeEvidence: mocks.authorize,
@@ -19,7 +19,28 @@ vi.mock("./preparation-runtime", () => ({
 }));
 
 describe("durable repository grading discovery", () => {
-  beforeEach(() => { vi.resetAllMocks(); mocks.snapshot.mockResolvedValue({ status: "legacy" }); mocks.targeted.mockResolvedValue(false); mocks.authorize.mockResolvedValue(true); });
+  beforeEach(() => { vi.resetAllMocks(); mocks.snapshot.mockResolvedValue({ status: "legacy" }); mocks.targeted.mockResolvedValue(false); mocks.authorize.mockResolvedValue(true); mocks.refresh.mockResolvedValue(null); });
+
+  it("does not repeat a settled revision for an automatic changed-source request", async () => {
+    const sha = "a".repeat(40), work = { phase: "grading", runId: "run", accountId: "owner", courseId: "course",
+      repo: "Org/Student", folder: "lab", ref: "main", sha } as const;
+    mocks.refresh.mockResolvedValue({ repo: work.repo, folder: work.folder, ref: work.ref, sha });
+    mocks.plan.mockResolvedValue({ discovery: { status: "scanned", repos: [] }, folderSources: new Map() });
+    mocks.history.mockImplementation(async (_owner, _course, targets: RepoGradeStartupTarget[]) =>
+      new Map(targets.map((target) => [repoGradeStartupKey(target), "succeeded"])));
+    const worker = createAutomaticRepoGradeWorker("coordinated");
+    await expect(worker(work, "lease")).resolves.toEqual({ state: "already-processed" });
+    expect(mocks.evaluate).not.toHaveBeenCalled();
+    mocks.history.mockImplementation(async (_owner, _course, targets: RepoGradeStartupTarget[]) =>
+      new Map(targets.map((target) => [repoGradeStartupKey(target), "never-attempted"])));
+    mocks.evaluate.mockResolvedValue({ status: "succeeded" });
+    await expect(worker(work, "lease")).resolves.toEqual({ state: "succeeded" });
+    expect(mocks.evaluate).toHaveBeenCalledWith(expect.anything(), expect.anything(),
+      expect.not.objectContaining({ targetedRun: expect.anything() }));
+    mocks.evaluate.mockClear();
+    await expect(worker({ ...work, sha: "b".repeat(40) }, "lease")).resolves.toEqual({ state: "blocked", reason: "changed-source-mismatch" });
+    expect(mocks.evaluate).not.toHaveBeenCalled();
+  });
 
   it("queues a prepared partial and uses the fenced recovery claim only for that state", async () => {
     const sha = "a".repeat(40);

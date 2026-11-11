@@ -34,6 +34,7 @@ import TabHeader from "../TabHeader";
 import { RepoGradeReservationRecovery } from "../repo-grades-dashboard/RepoGradeReservationRecovery";
 import { RepoGradesStartupBrief, RepoGradesStartupStatus, useRepoGradesStartupHistoryRevision, useRepoGradesTargetedGrading } from "../repo-grades-dashboard/RepoGradesStartup";
 import { useRepoGradeTargetRequests, type TargetCommand } from "./useRepoGradeTargetRequests";
+import { useRepoChangedSubmissions } from "./useRepoChangedSubmissions";
 import { gradeSelectionKey, gradeSelectionRectangle, toggleGradeSelection, type GradeSelection } from "./repoGradeSelection";
 import { useRepoGradesAutomaticBlocks } from "../repo-grades-dashboard/useRepoGradesAutomaticBlocks";
 import RepoGradesGithubQuota from "./RepoGradesGithubQuota";
@@ -396,6 +397,8 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
     buildRepoGradesDashboard(cellEdits, scan, targetBranch),
     cellEdits, saved.results, columnsWithMapping, assignments, roster, effectiveStudentRepos, automaticBlocks.targets,
   );
+  const changedSubmissionsNotice = useRepoChangedSubmissions(ownerId, selectedCourseId, scan, targetBranch,
+    saved.results, automaticBlocks.targets, !!targetedGrading && !scanLoading && !saved.pending && !saved.incomplete);
   const selectionFiltered = selectionFilterSummary({
     folderScopedCount: displayedRows.length,
     selectedShownCount: displayedRows.filter(({ repo }) => selected.has(repo)).length,
@@ -656,6 +659,7 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
       />
       <RepoGradesLoadingStatus label={coursesLoading ? "Loading classes…"
         : course && scanLoading ? `Scanning ${course.githubOrg?.trim()} on GitHub for ${course.name}…` : null} />
+      {changedSubmissionsNotice && <Alert severity="info" role="status">{changedSubmissionsNotice}</Alert>}
       {scan?.repos.some((repo) => repo.partial) && <Alert severity="warning" role="status">
         Some repositories contain submodules or unsupported entries that were not scanned. Listed folders may be incomplete.
       </Alert>}

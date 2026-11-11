@@ -81,6 +81,22 @@ export async function enqueueCellsAutomaticRepoGrade(accountId: string, courseId
   return rpc("repo_grade_target_request_enqueue_cells", { p_user_id: accountId, p_course_id: courseId, p_pairs: pairs });
 }
 
+export async function enqueueChangedRepoGrade(accountId: string, courseId: string, target: Selector) {
+  return rpc("repo_grade_refresh_enqueue", { p_user_id: accountId, p_course_id: courseId,
+    p_repo: target.repo, p_folder: target.folder, p_ref: target.ref, p_sha: target.sha });
+}
+
+/** A null result means this is an ordinary run, never a failed lookup. */
+export async function readChangedRepoGrade(work: ClaimScope, lease: string): Promise<Selector | null> {
+  const result = await rpc("repo_grade_refresh_for_lease", { p_user_id: work.accountId, p_run_id: work.runId, p_lease: lease });
+  if (result === null) return null;
+  if (!record(result) || typeof result.repo !== "string" || typeof result.folder !== "string"
+    || typeof result.ref !== "string" || typeof result.sha !== "string" || !/^[0-9a-f]{40}$/.test(result.sha)) {
+    throw new Error("Invalid changed-repository request");
+  }
+  return { repo: result.repo, folder: result.folder, ref: result.ref, sha: result.sha };
+}
+
 function parseClassQueue(value: unknown): AutomaticRepoGradeClassQueue | null {
   if (!record(value) || typeof value.customized !== "boolean" || !Array.isArray(value.courses)
     || value.courses.length > 1_000) return null;

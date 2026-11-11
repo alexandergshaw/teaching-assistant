@@ -107,6 +107,7 @@ export interface GradingPostOutcome {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export type GradingResultsProps = {
+  prioritySourceIndices?: ReadonlySet<number>;
   getVersionedResult?: (result: GradeRow) => VersionedResultRow | undefined;
   repositoryProposals?: RepositoryWorkflowAdapter;
   /** The grading run to display (non-null; callers gate on results.length). */
@@ -235,6 +236,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   unresolvedStudents,
   repositoryProposals,
   getVersionedResult,
+  prioritySourceIndices,
 }: GradingResultsProps, ref) {
   // A3 (docs/grading-results-feedback-boxes-acceptance-criteria.md):
   // edits persist under an assignment-scoped key - `edits` is keyed by bare
@@ -573,7 +575,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   // Sort state, the derived sorted row list, and the handlers that read/write
   // them - see ./grading-results/useResultsSort.ts's own header comment for
   // why this is a pure relocation, not a behaviour change.
-  const { sortedResults, sortState, handleSort, sortLabel } = useResultsSort(run);
+  const { sortedResults, sortState, handleSort, sortLabel } = useResultsSort(run, prioritySourceIndices, getVersionedResult ? (row) => getVersionedResult(row)?.sourceIndex : undefined);
   const visibleResults = searchable ? filterGradeRowsForTable(sortedResults, filterQuery) : sortedResults;
 
   const handleDownloadFile = (

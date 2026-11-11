@@ -10,12 +10,12 @@ import { inspectBrightspaceProject, type ProjectInventoryFile } from "@/lib/grad
 import { buildBrightspaceGroup } from "@/lib/grade/brightspace-group-build";
 import { projectReady } from "./nestedProjectReady";
 
-export function LargeZipRecovery({ onSubmit, incomingFile, onClose }: { incomingFile?: File | null; onClose?: () => void; onSubmit: (source: File, file: File, selected: readonly RecoverableGroup[], omitted: readonly RecoverableGroup[], mapping: Readonly<Record<string, string>>, review?: PartialHashReview, project?: { readonly mappedPaths: readonly string[]; readonly excludedPaths: readonly string[] }) => Promise<string | null> }) {
+export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incomingFile, onClose }: { incomingFile?: File | null; onClose?: () => void; onSelectionStart?: () => void; onAdmitted?: (indices: readonly number[]) => void; onSubmit: (source: File, file: File, selected: readonly RecoverableGroup[], omitted: readonly RecoverableGroup[], mapping: Readonly<Record<string, string>>, review?: PartialHashReview, project?: { readonly mappedPaths: readonly string[]; readonly excludedPaths: readonly string[] }) => Promise<string | null> }) {
   const [open, setOpen] = useState(!!incomingFile), [file, setFile] = useState<File | null>(incomingFile ?? null);
   const [groups, setGroups] = useState<readonly RecoverableGroup[]>([]), [selected, setSelected] = useState<string[]>([]), [names, setNames] = useState<Readonly<Record<string, string>>>({});
   const [projectFiles, setProjectFiles] = useState<Record<string, readonly ProjectInventoryFile[]>>({});
   const [busy, setBusy] = useState(!!incomingFile), [error, setError] = useState(""), [progress, setProgress] = useState<PartialHashProgress | null>(null), [completed, setCompleted] = useState(0), [uncertain, setUncertain] = useState(false);
-  const generation = useRef(0), hashing = useRef(false);
+  const generation = useRef(0), hashing = useRef(false), submitting = useRef(false);
   useEffect(() => () => { generation.current++; }, []);
   const close = () => { generation.current++; setOpen(false); setFile(null); setGroups([]); setSelected([]); setNames({}); setProjectFiles({}); setBusy(false); setError(""); setProgress(null); setCompleted(0); onClose?.(); };
   const choose = async (next: File | undefined) => {
@@ -43,8 +43,8 @@ export function LargeZipRecovery({ onSubmit, incomingFile, onClose }: { incoming
   const blocked = (group: RecoverableGroup) => (group.reason && !projectReady(group, projectFiles) ? group.reason : undefined) ?? (!names[group.label] ? "student identity could not be resolved" : nameCounts.get(names[group.label].normalize("NFKC").toLocaleLowerCase()) !== 1 ? "student identity is ambiguous" : undefined);
   const eligible = groups.filter((group) => !blocked(group));
   const grade = async () => {
-    if (!file || !selected.length || busy || uncertain || selected.some((label) => !eligible.some((group) => group.label === label))) return;
-    const token = generation.current; let dispatched = 0; setBusy(true); setError(""); setCompleted(0);
+    if (!file || !selected.length || busy || uncertain || submitting.current || selected.some((label) => !eligible.some((group) => group.label === label))) return;
+    submitting.current = true; onSelectionStart?.(); const token = generation.current; let dispatched = 0; setBusy(true); setError(""); setCompleted(0);
     try {
       await submitBoundedGroups<{ archive: Blob; selected: readonly RecoverableGroup[]; omitted: readonly RecoverableGroup[]; project?: { mappedPaths: readonly string[]; excludedPaths: readonly string[] } }>(selected, async (labels) => {
         const nested = labels.map((label) => groups.find((group) => group.label === label)!).find((group) => projectReady(group, projectFiles));
@@ -58,15 +58,15 @@ export function LargeZipRecovery({ onSubmit, incomingFile, onClose }: { incoming
         return result.ok ? { ok: true, value: { ...result, project: undefined } } : result;
       }, async (result, count) => {
         setUncertain(true);
-        const refusal = await onSubmit(file, new File([result.archive], "reviewed-partial-submissions.zip", { type: "application/zip" }), result.selected, result.omitted, names, { current: () => token === generation.current, onProgress: (value) => { if (token === generation.current) { hashing.current = !!value; setProgress(value); } } }, result.project);
+        const refusal = await onSubmit(file, new File([result.archive], "reviewed-partial-submissions.zip", { type: "application/zip" }), result.selected, result.omitted, names, { current: () => token === generation.current, onAdmitted, onProgress: (value) => { if (token === generation.current) { hashing.current = !!value; setProgress(value); } } }, result.project);
         if (token !== generation.current) throw new Error("The session changed; check results before retrying.");
-        if (refusal) { if (hashing.current && dispatched === 0) setUncertain(false); throw new Error(refusal); }
+        if (refusal) { if ((hashing.current || (refusal === "The intake record could not be saved. Nothing was submitted." || refusal === "Another submission from this archive is in progress. Nothing was submitted.")) && dispatched === 0) setUncertain(false); throw new Error(refusal); }
         dispatched += count; setCompleted(dispatched); setUncertain(false);
       });
       if (token === generation.current) close();
     }
     catch (failure) { if (token === generation.current) { if (dispatched > 0) setUncertain(true); setError(`${failure instanceof Error ? failure.message : "The handoff could not be confirmed."}${dispatched ? ` ${dispatched} groups were already submitted; check results before retrying.` : ""}`); } }
-    finally { if (token === generation.current) { hashing.current = false; setProgress(null); setBusy(false); } }
+    finally { submitting.current = false; if (token === generation.current) { hashing.current = false; setProgress(null); setBusy(false); } }
   };
   return <>
     <Button onClick={() => setOpen(true)}>Review oversized ZIP</Button>

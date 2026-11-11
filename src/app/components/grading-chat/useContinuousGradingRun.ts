@@ -797,7 +797,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         ? (input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS) ?? "")
         : "";
 
-    enqueueAdmitted(admitted, { pointsPossible, submitLabel, setup });
+    const firstAdmittedIndex = dispatchedCountRef.current; enqueueAdmitted(admitted, { pointsPossible, submitLabel, setup });
 
     if (refusedCount > 0 || ingestSkipped.length > 0) {
       safeDiagnostic(() =>
@@ -808,12 +808,12 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       );
       return {
         kind: "partial",
-        dispatchedCount: admitted.length,
+        ...((input.kind === "file" || input.kind === "storaged-zip") && input.captureSourceIndices ? { sourceIndices: admitted.map((_, index) => firstAdmittedIndex + index) } : {}), dispatchedCount: admitted.length,
         refusedCount: refusedCount + ingestSkipped.length,
         reason: partialBatchNotice(admitted.length, entries.length, maxEntries, ingestSkipped, clipped),
       };
     }
-    return { kind: "accepted", entryCount: admitted.length };
+    return { kind: "accepted", entryCount: admitted.length, ...((input.kind === "file" || input.kind === "storaged-zip") && input.captureSourceIndices ? { sourceIndices: admitted.map((_, index) => firstAdmittedIndex + index) } : {}) };
   };
 
   // Resolves the OLDEST held recording: as one distinct row per segment

@@ -19,7 +19,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from "re
 import { fetchCanvasMetaAction } from "../../actions/grading";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
-import { Accordion, AccordionSummary, AccordionDetails, Table, TableHead, TableBody, TableRow, TableCell } from "@mui/material";
+import { Alert, Accordion, AccordionSummary, AccordionDetails, Table, TableHead, TableBody, TableRow, TableCell } from "@mui/material";
 import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import GradingResults from "../GradingResults";
@@ -282,7 +282,7 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
 
   const [instructions, setInstructions] = useState("");
   const [rubric, setRubric] = useState("");
-  const [submitError, setSubmitError] = useState<string | null>(null), [reviewFile, setReviewFile] = useState<{ file: File; id: number } | null>(null);
+  const [prioritySourceIndices, setPrioritySourceIndices] = useState<ReadonlySet<number>>(new Set()), [submitError, setSubmitError] = useState<string | null>(null), [reviewFile, setReviewFile] = useState<{ file: File; id: number } | null>(null);
   const [setupNote, setSetupNote] = useState<string | null>(null);
   const [harshness, setHarshness] = useState<GradeHarshness>("balanced");
   const [feedbackLengthText, setFeedbackLengthText] = useState("");
@@ -415,7 +415,7 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
     setDirectPreparing(false);
     setPreparing(false);
     setZipPhase(null);
-    driver.reset();
+    driver.reset(); setPrioritySourceIndices(new Set());
     setSetupExpanded(true);
     setSubmitError(null); setReviewFile(null);
     setPartialOmissions([]);
@@ -537,19 +537,19 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
   // driver. If the ingest call rejects or throws, the temp object is removed
   // best-effort (R10); the server's own delete and the orphan sweep remain the
   // real guarantees.
-  const submitStoragedZip = async (file: File, current: () => boolean, reviewedZipMapping?: Readonly<Record<string, string>>, fallbackBody = false, evidenceOmissions?: readonly string[], staticOnly?: true): Promise<SubmitOutcome> => {
+  const submitStoragedZip = async (file: File, current: () => boolean, reviewedZipMapping?: Readonly<Record<string, string>>, fallbackBody = false, evidenceOmissions?: readonly string[], staticOnly?: true, captureSourceIndices?: true): Promise<SubmitOutcome> => {
     if (!user) return { kind: "refused", reason: "You must be signed in to upload a zip." };
     if (current()) setZipPhase("uploading");
     try {
       const uploaded = await uploadGradingZip(supabase.storage, user.id, file);
       if (!uploaded.ok) {
         safeIntake(() => recordIntakeGate({ stage: "upload", file, transport: "storage", rawReason: uploaded.message }));
-        return zipUploadFallback(uploaded.message, fallbackBody, current, () => driver.submit({ kind: "file", file, reviewedZipMapping, evidenceOmissions, staticOnly }));
+        return zipUploadFallback(uploaded.message, fallbackBody, current, () => driver.submit({ kind: "file", file, reviewedZipMapping, evidenceOmissions, staticOnly, captureSourceIndices }));
       }
       if (current()) setZipPhase("preparing");
       try {
         if (!current()) { await deleteGradingZipBestEffort(supabase.storage, uploaded.storagePath); return { kind: "refused", reason: "File intake was canceled." }; }
-        const outcome = await driver.submit({ kind: "storaged-zip", storagePath: uploaded.storagePath, name: file.name, reviewedZipMapping, evidenceOmissions, staticOnly });
+        const outcome = await driver.submit({ kind: "storaged-zip", storagePath: uploaded.storagePath, name: file.name, reviewedZipMapping, evidenceOmissions, staticOnly, captureSourceIndices });
         if (outcome.kind === "refused") await deleteGradingZipBestEffort(supabase.storage, uploaded.storagePath);
         return outcome;
       } catch (err) {
@@ -577,9 +577,9 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
       if (current()) setZipPhase(null);
     }
   };
-  const handleConfirmedFiles = async (files: File[], label: string | undefined, current: () => boolean, reviewedZipMapping?: Readonly<Record<string, string>>, evidenceOmissions?: readonly string[], staticOnly?: true): Promise<SubmitOutcome[]> => {
+  const handleConfirmedFiles = async (files: File[], label: string | undefined, current: () => boolean, reviewedZipMapping?: Readonly<Record<string, string>>, evidenceOmissions?: readonly string[], staticOnly?: true, explicitReviewed = false): Promise<SubmitOutcome[]> => {
     const account = user?.id, accountToken = zipReview.capture(), safeCurrent = () => current() && zipReview.owns(account, accountToken);
-    if (!(await zipReview.check(files, safeCurrent)) || !safeCurrent()) return files.map(() => ({ kind: "refused", reason: "ZIP review was deferred or the session changed. Nothing was submitted." }));
+    if ((!explicitReviewed && !(await zipReview.check(files, safeCurrent))) || !safeCurrent()) return files.map(() => ({ kind: "refused", reason: "ZIP review was deferred or the session changed. Nothing was submitted." }));
     // A label names ONE student's ONE submission: forwarded only for a
     // single-file pick; a multi-file batch falls back to the filenames.
     const fileLabel = files.length === 1 ? label : undefined;
@@ -620,7 +620,7 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
         return { kind: "refused", reason: preflight.message };
       }
       if (!safeCurrent()) return { kind: "refused", reason: "File intake was canceled." };
-      const submit = () => transport.kind === "storage" ? (isZip ? submitStoragedZip(file, safeCurrent, reviewedZipMapping, chosen.kind === "body", evidenceOmissions, staticOnly) : submitStoragedSingleFile(file, fileLabel, safeCurrent)) : driver.submit({ kind: "file", file, label: fileLabel, reviewedZipMapping, evidenceOmissions, staticOnly });
+      const submit = () => transport.kind === "storage" ? (isZip ? submitStoragedZip(file, safeCurrent, reviewedZipMapping, chosen.kind === "body", evidenceOmissions, staticOnly, explicitReviewed ? true : undefined) : submitStoragedSingleFile(file, fileLabel, safeCurrent)) : driver.submit({ kind: "file", file, label: fileLabel, reviewedZipMapping, evidenceOmissions, staticOnly, captureSourceIndices: explicitReviewed ? true : undefined });
       try { const outcome = await submit(); if (isZip && zipReview.owns(account, accountToken) && outcome.kind !== "refused") zipReview.remember([file]); return outcome; }
       catch (error) { if (isZip && zipReview.owns(account, accountToken)) zipReview.remember([file]); throw error; }
     });
@@ -631,15 +631,15 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
     if (safeCurrent()) setSubmitError(reasons.length > 0 ? reasons.join(" ") : null);
     return outcomes;
   };
-  const handleSubmitFiles = (files: File[], label?: string, reviewedZipMapping?: Readonly<Record<string, string>>, evidenceOmissions?: readonly string[], staticOnly?: true) => {
+  const handleSubmitFiles = (files: File[], label?: string, reviewedZipMapping?: Readonly<Record<string, string>>, evidenceOmissions?: readonly string[], staticOnly?: true, explicitReviewed = false) => {
     const blocked = directIntake.current.isPending() || preparing || driver.headerState === "resolving";
     const oversized = !blocked ? oversizedReviewCandidate(files) : null; if (oversized) { setReviewFile({ file: oversized, id: ++reviewSequence.current }); return Promise.resolve([{ kind: "refused" as const, reason: "Opened oversized ZIP review. Nothing was submitted." }]); }
     return directIntake.current.run({ files, label, blocked, preparing: (value) => { setDirectPreparing(value); setPreparing(value); }, error: setSubmitError,
       setup: { instructions, rubric, harshness, feedbackWordTarget: coerceFeedbackWordTarget(feedbackLengthText), applyNamingDeduction, applyLengthDeduction,
         lengthDeductionThresholdWords: applyLengthDeduction ? parseLengthDeductionThreshold(lengthThresholdText) ?? NaN : undefined },
-      start: (setup, current) => ensureSession(undefined, setup, current), submit: (batch, batchLabel, current) => handleConfirmedFiles(batch, batchLabel, current, reviewedZipMapping, evidenceOmissions, staticOnly) });
+      start: (setup, current) => ensureSession(undefined, setup, current), submit: (batch, batchLabel, current) => handleConfirmedFiles(batch, batchLabel, current, reviewedZipMapping, evidenceOmissions, staticOnly, explicitReviewed) });
   };
-  const handlePartialHandoff = (...args: Parameters<ReturnType<typeof createPartialHandoffHandler>>) => createPartialHandoffHandler({ getEpoch: () => dropSessionEpoch.current, account: user?.id, capture: zipReview.capture, owns: zipReview.owns, latch: sharedIntakeLatch, onRecords: setPartialRecords, onOmissions: (groups) => setPartialOmissions((previous) => [...previous, ...groups]), submit: (zip, mapping, omissions, staticOnly) => handleSubmitFiles([zip], undefined, mapping, omissions, staticOnly) })(...args);
+  const handlePartialHandoff = (...args: Parameters<ReturnType<typeof createPartialHandoffHandler>>) => createPartialHandoffHandler({ getEpoch: () => dropSessionEpoch.current, account: user?.id, capture: zipReview.capture, owns: zipReview.owns, latch: sharedIntakeLatch, onRecords: setPartialRecords, onOmissions: (groups) => setPartialOmissions((previous) => [...previous, ...groups]), submit: (zip, mapping, omissions, staticOnly) => handleSubmitFiles([zip], undefined, mapping, omissions, staticOnly, true) })(...args);
   // RECORDING ONE-VS-MANY: resolve the held multi-submission recording.
   const reportSplitOutcome = (outcome: SubmitOutcome) => setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
   const handleConfirmSplit = () => reportSplitOutcome(driver.confirmRecordingSplit());
@@ -927,11 +927,11 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
 
       {hasRows && driver.run && (
         <div className={chatStyles.stream}>
-        {driver.run && <RubricProvenance run={driver.run} />}
+        {prioritySourceIndices.size > 0 && <Alert severity="info">Latest ZIP submissions appear first; earlier results remain below.</Alert>}{driver.run && <RubricProvenance run={driver.run} />}
         <SubmissionClassificationBadge classification={driver.run.submissionClassification} />
         {driver.generatedRubric && <GeneratedRubricCard generatedRubric={driver.generatedRubric} />}
         <GradingResults
-          run={driver.run}
+          run={driver.run} prioritySourceIndices={prioritySourceIndices}
           getVersionedResult={driver.getVersionedResult}
           canvasUrl={driver.canvasUrl}
           runKey={driver.runKey}
@@ -982,7 +982,7 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
       </div>
       <div className={chatStyles.stickyComposer}>
         <PartialHandoffNotice omissions={partialOmissions} records={partialRecords} />
-        <LargeZipRecovery key={`${visibleDropEpoch}:${reviewFile?.id ?? "idle"}`} onSubmit={handlePartialHandoff} incomingFile={reviewFile?.file} onClose={() => setReviewFile(null)} />
+        <LargeZipRecovery key={`${visibleDropEpoch}:${reviewFile?.id ?? "idle"}`} onSelectionStart={() => setPrioritySourceIndices(new Set())} onAdmitted={(indices) => setPrioritySourceIndices((previous) => new Set([...previous, ...indices]))} onSubmit={handlePartialHandoff} incomingFile={reviewFile?.file} onClose={() => setReviewFile(null)} />
         <ChatComposer
           sharedLatch={sharedIntakeLatch}
           disabled={busy || preparing}

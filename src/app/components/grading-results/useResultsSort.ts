@@ -19,6 +19,7 @@
 // `sortState` and recomputing the sorted list via useMemo when it or `run`
 // changes.
 import { useMemo, useState } from "react";
+import { prioritizeRecentZipRows } from "./prioritizeRecentZipRows";
 import {
   DEFAULT_SORT,
   sortColumnKey,
@@ -35,10 +36,10 @@ export interface UseResultsSortResult {
   sortLabel: (column: SortColumn) => string;
 }
 
-export function useResultsSort(run: GradingRun): UseResultsSortResult {
+export function useResultsSort(run: GradingRun, priorityIndices?: ReadonlySet<number>, sourceIndex?: (row: GradeRow) => number | undefined): UseResultsSortResult {
   const [sortState, setSortState] = useState(DEFAULT_SORT);
 
-  const sortedResults = useMemo(() => sortGradeRows(run.results, sortState), [run, sortState]);
+  const sortedResults = useMemo(() => prioritizeRecentZipRows(sortGradeRows(run.results, sortState), priorityIndices, sourceIndex ?? (() => undefined)), [run, sortState, priorityIndices, sourceIndex]);
 
   const handleSort = (column: SortColumn) => {
     const nextKey = sortColumnKey(column);

@@ -16,13 +16,13 @@ export function PartialHandoffNotice({ omissions, records }: { omissions: readon
     .map((status) => ({ status, count: records.filter((record) => record.status === status).length }))
     .filter(({ count }) => count > 0).map(({ status, count }) => `${count} ${status}`).join(", ");
   return <>
-    {records.length === 50 && <p role="status">Only the first 50 saved partial intake records are displayed. Earlier records still block overlapping submissions.</p>}
+    {records.length === 50 && <p role="status">Only the latest 50 saved partial intake records are displayed. Older records remain saved.</p>}
     {records.length > 0 && <Accordion disableGutters elevation={0}>
       <AccordionSummary expandIcon={<span aria-hidden="true">+</span>}>
-        <span role="status">{`${records.length} prior partial archive ${records.length === 1 ? "record" : "records"} (${statuses}); ${omittedCount} omitted group ${omittedCount === 1 ? "entry" : "entries"} across records. Check earlier results before retrying.`}</span>
+        <span role="status">{`${records.length} prior partial archive ${records.length === 1 ? "record" : "records"} (${statuses}); ${omittedCount} omitted group ${omittedCount === 1 ? "entry" : "entries"} across records. Earlier attempts remain saved.`}</span>
       </AccordionSummary>
       <AccordionDetails>
-        {records.map((record) => <p key={`${record.sourceDigest}:${record.subsetDigest}`}>Prior partial archive ({record.status}; source {record.sourceDigest.slice(0, 12)}): omitted {record.omitted.map((group) => `${group.student} (${group.reason}): ${group.files.join(", ")}`).join("; ") || "none"}.</p>)}
+        {records.map((record) => <p key={`${record.sourceDigest}:${record.subsetDigest}:${record.attemptId ?? "legacy"}`}>Prior partial archive ({record.status}; source {record.sourceDigest.slice(0, 12)}): omitted {record.omitted.map((group) => `${group.student} (${group.reason}): ${group.files.join(", ")}`).join("; ") || "none"}.</p>)}
       </AccordionDetails>
     </Accordion>}
     {omissions.length > 0 && <Accordion disableGutters elevation={0}>

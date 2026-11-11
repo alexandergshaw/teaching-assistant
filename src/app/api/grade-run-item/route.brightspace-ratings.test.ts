@@ -32,3 +32,9 @@ it("accepts exact 70 and 100 percent ratings in the live shape", async () => {
   llm.mockResolvedValue(reply([{ area: "Reasoning", score: "17.5/25" }, { area: "Content", score: "75/75" }]));
   expect((await (await send(liveShape)).json()).result.totalScore).toBe("92.50/100");
 });
+it.each([20, 50])("validates the allowed rating on a %i-point rubric before scaling", async (points) => {
+  const text = `Reasoning (${points} points): Explain.\nRating scale: Meets Expectations 100%; Partially Meets Expectations 70%; Does Not Meet Expectations 0%.`;
+  llm.mockResolvedValue(reply([{ area: "Reasoning", score: `${points * 0.7}/${points}` }]));
+  const row = (await (await send(text)).json()).result;
+  expect(row.ungraded).toBeUndefined(); expect(row.totalScore).toBe("70/100");
+});

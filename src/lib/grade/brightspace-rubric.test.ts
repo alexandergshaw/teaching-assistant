@@ -25,8 +25,17 @@ const lineScale = "Code Reflection (25 points): Explain.\nPseudocode or Flowchar
 it("parses the observed criterion-per-line rating scale", () => {
   expect(extractRubricCriteria(lineScale)).toEqual([{ name: "Code Reflection", points: 25 }, { name: "Pseudocode or Flowchart", points: 10 }, { name: "Specifications and Correctness: Algorithm", points: 20 }, { name: "Data Structure", points: 20 }, { name: "Annotation", points: 10 }, { name: "Modular", points: 10 }, { name: "Readability", points: 5 }]);
 });
-it.each([lineScale.replace("70%", "50%"), lineScale.replace("; Does Not Meet Expectations 0%", ""), lineScale.replace("Readability (5 points): Clear.", "Readability: Clear."), lineScale.replace("5 points", "6 points"), `${lineScale}\nAdditional instruction`])("rejects an ambiguous global scale or incomplete criteria", (bad) => {
+it.each([lineScale.replace("70%", "50%"), lineScale.replace("; Does Not Meet Expectations 0%", ""), lineScale.replace("Readability (5 points): Clear.", "Readability: Clear."), `${lineScale}\nAdditional instruction`])("rejects an ambiguous global scale or incomplete criteria", (bad) => {
   expect(() => extractRubricCriteria(bad)).toThrow(/could not be read/i);
+});
+it.each([20, 50])("accepts a %i-point criterion total with a 100/70/0 rating scale", (total) => {
+  const text = `Reasoning (${total} points): Explain.\nRating scale: Meets Expectations 100%; Partially Meets Expectations 70%; Does Not Meet Expectations 0%.`;
+  expect(extractRubricCriteria(text)).toEqual([{ name: "Reasoning", points: total }]);
+});
+it("refuses mixed or incomplete percentage weights", () => {
+  const scale = "Rating scale: Meets Expectations 100%; Partially Meets Expectations 70%; Does Not Meet Expectations 0%.";
+  expect(() => extractRubricCriteria(`A (20%): A.\nB (30 points): B.\n${scale}`)).toThrow();
+  expect(() => extractRubricCriteria(`A (20%): A.\n${scale}`)).toThrow();
 });
 it("does not claim unrelated rating scales", () => {
   expect(extractRubricCriteria("Writing (20 pts): quality\nRating scale: Excellent 100%; Poor 0%.")).toEqual([{ name: "Writing", points: 20 }]);

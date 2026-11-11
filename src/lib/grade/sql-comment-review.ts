@@ -6,7 +6,7 @@ function sqlComments(source: string): { blocks: string[]; uncertain: boolean } {
   let previousLineEnd = -1;
   while (i < source.length) {
     const start = i;
-    if (source[i] === "#") return { blocks: [], uncertain: true }; // Dialect-dependent operator or comment.
+    if (source[i] === "#") return { blocks: comments, uncertain: true }; // Dialect-dependent operator or comment.
     if (source.startsWith("--", i)) {
       i += 2;
       const end = source.indexOf("\n", i);
@@ -25,7 +25,7 @@ function sqlComments(source: string): { blocks: string[]; uncertain: boolean } {
         else if (source.startsWith("*/", i)) { depth--; i += 2; }
         else i++;
       }
-      if (depth) return { blocks: [], uncertain: true };
+      if (depth) return { blocks: comments, uncertain: true };
       if (!executable) comments.push(source.slice(from, i - 2));
       previousLineEnd = -1;
     } else {
@@ -33,24 +33,24 @@ function sqlComments(source: string): { blocks: string[]; uncertain: boolean } {
       const dollar = quote === "$" ? source.slice(i).match(/^\$(?:[A-Za-z_][A-Za-z_0-9]*)?\$/)?.[0] : undefined;
       if (dollar) {
         const end = source.indexOf(dollar, i + dollar.length);
-        if (end < 0) return { blocks: [], uncertain: true };
+        if (end < 0) return { blocks: comments, uncertain: true };
         i = end + dollar.length;
       } else if (quote === "'" || quote === '"' || quote === "`" || quote === "[") {
         const close = quote === "[" ? "]" : quote;
         i++;
         let closed = false;
         while (i < source.length) {
-          if (source[i] === "\\") return { blocks: [], uncertain: true }; // Escape rules differ by dialect.
+          if (source[i] === "\\") return { blocks: comments, uncertain: true }; // Escape rules differ by dialect.
           if (source[i] === close) {
             if (source[i + 1] === close) { i += 2; continue; }
             i++; closed = true; break;
           }
           i++;
         }
-        if (!closed) return { blocks: [], uncertain: true };
+        if (!closed) return { blocks: comments, uncertain: true };
       } else i++;
     }
-    if (i <= start) return { blocks: [], uncertain: true };
+    if (i <= start) return { blocks: comments, uncertain: true };
   }
   return { blocks: comments, uncertain: false };
 }
@@ -64,9 +64,11 @@ export function missingSqlCommentRequiresReview(
   if (!requirement) return false;
   const sqlFiles = files.filter((file) => /\.sql$/i.test(file.path));
   if (!sqlFiles.length) return false;
+  if (!requirement[1] && sqlFiles.length !== files.length) return false;
   const numbers: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
   const required = numbers[requirement[2].toLowerCase()] ?? Number(requirement[2]);
   const parsed = sqlFiles.map((file) => sqlComments(file.content));
-  return !parsed.some((file) => !file.uncertain && file.blocks.some((block) =>
+  return !parsed.some((file) => file.blocks.some((block) =>
     (block.match(/[\p{L}\p{N}][^.!?]*[.!?](?=\s|$)/gu) ?? []).length >= required));
 }
+

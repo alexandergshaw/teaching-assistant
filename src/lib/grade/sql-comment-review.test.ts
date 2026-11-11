@@ -25,10 +25,12 @@ describe("SQL comment review preflight", () => {
     expect(review(instructions, [{ path: "answer.txt", content: "Explanation" }])).toBe(false);
     expect(review("Explain row-level security.", [{ path: "security.sql", content: "SELECT 1;" }])).toBe(false);
   });
-  it("checks SQL explanations even when other submission files are present", () => {
+  it("checks mixed files only when SQL comment scope is explicit", () => {
     const sql = { path: "security.sql", content: "SELECT 1;" };
     const notes = { path: "notes.txt", content: "One. Two. Three. Four. Five." };
-    expect(review(instructions, [sql, notes])).toBe(true);
+    expect(review(instructions, [sql, notes])).toBe(false);
+    expect(review(instructions, [sql, { path: "answer.py", content: "# One. Two. Three. Four. Five." }])).toBe(false);
+    expect(review("In a SQL comment of at least 5 sentences, explain row-level security.", [sql, notes])).toBe(true);
     expect(review(instructions, [{ ...sql, content: "-- One. Two. Three. Four. Five." }, notes])).toBe(false);
     expect(review("In a SQL comment of at least 5 sentences, explain row-level security.", [{ ...sql, content: "-- One. Two. Three. Four. Five." }, notes])).toBe(false);
   });
@@ -42,5 +44,7 @@ describe("SQL comment review preflight", () => {
   it("accepts a qualifying comment even if a different SQL file is ambiguous", () => {
     const files = [{ path: "good.sql", content: "-- One. Two. Three. Four. Five." }, { path: "other.sql", content: "SELECT 'unterminated" }];
     expect(review(instructions, files)).toBe(false);
+    expect(check("-- One. Two. Three. Four. Five.\nSELECT 'unterminated")).toBe(false);
+    expect(check("SELECT 'unterminated -- One. Two. Three. Four. Five.")).toBe(true);
   });
 });

@@ -28,6 +28,10 @@ it("holds a 50 percent rating in the criterion-per-line live shape", async () =>
   llm.mockResolvedValue(reply([{ area: "Reasoning", score: "12.5/25" }, { area: "Content", score: "75/75" }]));
   expect((await (await send(liveShape)).json()).result.ungraded.kind).toBe("grading-failed");
 });
+it("holds a 50 percent rating when the scale is labelled Ratings", async () => {
+  llm.mockResolvedValue(reply([{ area: "Reasoning", score: "12.5/25" }, { area: "Content", score: "75/75" }]));
+  expect((await (await send(liveShape.replace("Rating scale:", "Ratings:"))).json()).result.ungraded.kind).toBe("grading-failed");
+});
 it("accepts exact 70 and 100 percent ratings in the live shape", async () => {
   llm.mockResolvedValue(reply([{ area: "Reasoning", score: "17.5/25" }, { area: "Content", score: "75/75" }]));
   expect((await (await send(liveShape)).json()).result.totalScore).toBe("92.50/100");

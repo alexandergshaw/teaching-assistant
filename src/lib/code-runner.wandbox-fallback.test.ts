@@ -19,6 +19,17 @@ describe("code-runner", () => {
   describe("runSubmittedCode - Wandbox fallback and edge cases", () => {
     const python = [{ name: "main.py", extension: "py", previewContent: "print(1)" }];
 
+    it("reports a Wandbox container startup failure as unavailable, not a student exit code", async () => {
+      global.fetch = vi.fn(async (url: Parameters<typeof fetch>[0]) => {
+        if (String(url).endsWith("/runtimes")) return new Response(null, { status: 401 });
+        if (String(url).endsWith("/list.json")) return Response.json([]);
+        if (String(url).endsWith("/compile.json")) return Response.json({ status: "126", program_error: "Error: OCI runtime error: crun: clone: Resource temporarily unavailable\n" });
+        throw new Error("unexpected request");
+      });
+      const result = await runSubmittedCode(python);
+      expect(result).toMatchObject({ ran: false, exitCode: null, error: expect.stringMatching(/sandbox could not start/i) });
+    });
+
     it("uses Wandbox directly when the Piston catalog explicitly rejects access", async () => {
       const fetcher = vi.fn(async (url: Parameters<typeof fetch>[0]) => {
         if (String(url).endsWith("/runtimes")) return new Response(null, { status: 401 });

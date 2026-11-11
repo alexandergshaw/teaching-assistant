@@ -372,6 +372,11 @@ async function runViaWandbox(
     throw new Error(`Wandbox returned ${res.status}`);
   }
   const result = (await res.json()) as WandboxResponse;
+  // Wandbox may return HTTP 200 with its container runtime failure in the
+  // program stream. This is not evidence about the student's program.
+  if (result.status === "126" && /^Error: OCI runtime error: crun: clone: Resource temporarily unavailable\s*$/i.test(result.program_error ?? "")) {
+    return { language, files: files.map((file) => file.name), ran: false, exitCode: null, stdout: "", stderr: "", error: "The code sandbox could not start. Execution was not verified.", timedOut: false };
+  }
   const terminalStatus = typeof result?.status === "string" && /^-?\d+$/.test(result.status)
     && Number.isSafeInteger(Number(result.status));
   if (beforeDispatch && !terminalStatus && !nonblankSignal(result?.signal)) {

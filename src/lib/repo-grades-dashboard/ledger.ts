@@ -50,6 +50,7 @@ export async function claimRepoGrade(request: RepoGradeClaimRequest): Promise<
   const preparation = automatic ? request.preparation : undefined;
   const startupBatchId = automatic ? request.startupBatchId : undefined;
   const targetedRun = automatic ? request.targetedRun : undefined;
+  const changedRefreshRun = automatic ? request.changedRefreshRun : undefined;
   const recoveryRun = automatic ? request.recoveryRun : undefined;
   if (automatic && (!cohort || !validRepoGradeCohortId(cohort.cohortId)
     || cohort.receipt?.accountId !== owner.id || cohort.receipt.courseId !== request.courseId
@@ -72,7 +73,7 @@ export async function claimRepoGrade(request: RepoGradeClaimRequest): Promise<
   let response: unknown;
   if (recoveryRun) {
     const { p_mode: mode, ...targetArgs } = args;
-    if (mode !== "retry" || targetedRun || startupBatchId || !validRepoGradeCohortId(recoveryRun.runId)
+    if (mode !== "retry" || targetedRun || changedRefreshRun || startupBatchId || !validRepoGradeCohortId(recoveryRun.runId)
       || !validRepoGradeCohortId(recoveryRun.lease)) return { status: "forbidden" };
     response = await ledgerRpc(recoveryRun.capability === "text-extension-v1" ? "repo_grade_claim_text_recovery" : "repo_grade_claim_prepared_recovery", {
       ...targetArgs, p_run_id: recoveryRun.runId, p_lease: recoveryRun.lease,
@@ -80,10 +81,18 @@ export async function claimRepoGrade(request: RepoGradeClaimRequest): Promise<
     }, true);
   } else if (targetedRun) {
     const { p_mode: mode, ...targetArgs } = args;
-    if (mode !== "retry" || startupBatchId || !validRepoGradeCohortId(targetedRun.runId)
+    if (mode !== "retry" || changedRefreshRun || startupBatchId || !validRepoGradeCohortId(targetedRun.runId)
       || !validRepoGradeCohortId(targetedRun.lease)) return { status: "forbidden" };
     response = await ledgerRpc("repo_grade_claim_targeted_regrade", {
       ...targetArgs, p_run_id: targetedRun.runId, p_lease: targetedRun.lease,
+      p_preparation_key: preparation?.key ?? null,
+    }, true);
+  } else if (changedRefreshRun) {
+    const { p_mode: mode, ...targetArgs } = args;
+    if (mode !== "automatic" || startupBatchId || !validRepoGradeCohortId(changedRefreshRun.runId)
+      || !validRepoGradeCohortId(changedRefreshRun.lease)) return { status: "forbidden" };
+    response = await ledgerRpc("repo_grade_claim_changed_refresh", {
+      ...targetArgs, p_run_id: changedRefreshRun.runId, p_lease: changedRefreshRun.lease,
       p_preparation_key: preparation?.key ?? null,
     }, true);
   } else if (startupBatchId) {

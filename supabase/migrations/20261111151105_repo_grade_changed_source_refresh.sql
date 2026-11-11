@@ -30,7 +30,24 @@ begin
       and a.source_ref = p_ref and a.source_sha <> p_sha and a.status = 'no-submission'
       and a.generation = (select max(newer.generation) from public.repo_grade_attempts newer
         where newer.user_id = p_user_id and newer.course_id = p_course_id
-          and lower(newer.repo) = lower(p_repo) and newer.folder = p_folder))
+          and lower(newer.repo) = lower(p_repo) and newer.folder = p_folder)
+      and not exists (select 1 from public.repo_grade_automatic_targets later
+        join public.repo_grade_automatic_runs lr on lr.id = later.run_id
+        where lr.user_id = p_user_id and later.course_id = p_course_id and lower(later.repo) = lower(p_repo)
+          and later.folder = p_folder and lr.created_at > a.claimed_at))
+    and not (
+      -- A discovery-only empty target has no receipt. Admit it only when no
+      -- receipt exists at all and no later target could supersede it.
+      not exists (select 1 from public.repo_grade_attempts a where a.user_id = p_user_id
+        and a.course_id = p_course_id and lower(a.repo) = lower(p_repo) and a.folder = p_folder)
+      and exists (select 1 from public.repo_grade_automatic_targets t
+        join public.repo_grade_automatic_runs r on r.id = t.run_id
+        where r.user_id = p_user_id and t.course_id = p_course_id and lower(t.repo) = lower(p_repo)
+          and t.folder = p_folder and t.source_ref = p_ref and t.source_sha <> p_sha and t.state = 'no-submission'
+          and not exists (select 1 from public.repo_grade_automatic_targets later
+            join public.repo_grade_automatic_runs lr on lr.id = later.run_id
+            where lr.user_id = p_user_id and later.course_id = p_course_id
+              and lower(later.repo) = lower(p_repo) and later.folder = p_folder and later.id > t.id)))
     then return 'invalid'; end if;
   if (select count(*) from public.repo_grade_target_requests where user_id = p_user_id and state in ('queued', 'paused', 'running')) >= 1000
     then return 'invalid'; end if;
@@ -55,3 +72,39 @@ returns jsonb language sql security invoker set search_path = '' as $$
 $$;
 revoke all on function public.repo_grade_refresh_for_lease(uuid, uuid, uuid) from public, anon, authenticated, service_role;
 grant execute on function public.repo_grade_refresh_for_lease(uuid, uuid, uuid) to service_role;
+
+-- A refresh must still own its unpaused queue lease when it claims a model
+-- attempt. The normal automatic ledger then suppresses a duplicate SHA.
+create function public.repo_grade_claim_changed_refresh(
+  p_user_id uuid, p_run_id uuid, p_lease uuid, p_course_id uuid, p_repo text, p_folder text,
+  p_source_ref text, p_source_sha text, p_course_config jsonb, p_cohort_id uuid,
+  p_receipt jsonb, p_preparation_key text
+) returns jsonb language plpgsql security invoker set search_path = '' as $$
+begin
+  perform 1 from public.repo_grade_automatic_runs r
+    where r.id = p_run_id and r.user_id = p_user_id and r.lease = p_lease
+      and r.lease_until > clock_timestamp() and r.phase = 'grading' and not r.targeted_paused for update;
+  if not found then return jsonb_build_object('status', 'forbidden'); end if;
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('repo-grade:' || p_user_id::text, 0));
+  if not exists (select 1 from public.repo_grade_target_requests q
+    where q.run_id = p_run_id and q.user_id = p_user_id and q.course_id = p_course_id
+      and q.state = 'running' and lower(q.repo) = lower(p_repo) and q.folder = p_folder
+      and q.refresh_ref = p_source_ref and q.refresh_sha = p_source_sha) then
+    return jsonb_build_object('status', 'forbidden');
+  end if;
+  perform 1 from public.repo_grade_automatic_targets t where t.run_id = p_run_id and t.course_id = p_course_id
+    and t.state = 'running' and t.repo = p_repo and t.folder = p_folder
+    and t.source_ref = p_source_ref and t.source_sha = p_source_sha for update;
+  if not found then return jsonb_build_object('status', 'forbidden'); end if;
+  if p_preparation_key is null then
+    return public.repo_grade_claim_tracked(p_user_id, p_course_id, p_repo, p_folder,
+      'automatic', p_source_ref, p_source_sha, p_course_config, p_cohort_id, p_receipt);
+  end if;
+  return public.repo_grade_claim_with_preparation(p_user_id, p_course_id, p_repo, p_folder,
+    'automatic', p_source_ref, p_source_sha, p_course_config, p_cohort_id, p_receipt, p_preparation_key);
+end;
+$$;
+revoke all on function public.repo_grade_claim_changed_refresh(uuid, uuid, uuid, uuid, text, text, text, text, jsonb, uuid, jsonb, text)
+  from public, anon, authenticated, service_role;
+grant execute on function public.repo_grade_claim_changed_refresh(uuid, uuid, uuid, uuid, text, text, text, text, jsonb, uuid, jsonb, text)
+  to service_role;

@@ -41,6 +41,17 @@ beforeEach(() => {
 });
 
 describe("repository grading ledger RPC boundary", () => {
+  it("binds a changed-source automatic claim to its live run and lease", async () => {
+    rpc.mockReturnValue({ retry: () => Promise.resolve({ data: { status: "claimed", generation: 42, token }, error: null }) });
+    const changedRefreshRun = { runId: token, lease: token };
+    await expect(claimRepoGrade({ ...automaticRequest, changedRefreshRun })).resolves.toEqual({
+      status: "claimed", claim: { mode: "automatic", generation: 42, token },
+    });
+    expect(rpc).toHaveBeenCalledWith("repo_grade_claim_changed_refresh", expect.objectContaining({
+      p_run_id: token, p_lease: token, p_user_id: "owner", p_source_sha: automaticRequest.sha,
+    }));
+    await expect(claimRepoGrade({ ...automaticRequest, mode: "retry", changedRefreshRun })).resolves.toEqual({ status: "forbidden" });
+  });
   it("routes a prepared-partial recovery through a live run and lease fence", async () => {
     rpc.mockReturnValue({ retry: () => Promise.resolve({ data: { status: "claimed", generation: 42, token }, error: null }) });
     await expect(claimRepoGrade({ ...automaticRequest, mode: "retry", recoveryRun: { runId: token, lease: token } }))

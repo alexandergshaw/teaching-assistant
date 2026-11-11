@@ -398,7 +398,7 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
     cellEdits, saved.results, columnsWithMapping, assignments, roster, effectiveStudentRepos, automaticBlocks.targets,
   );
   const changedSubmissions = useRepoChangedSubmissions(ownerId, selectedCourseId, scan, targetBranch,
-    saved.results, !!targetedGrading && !scanLoading && !saved.pending && !saved.incomplete,
+    saved.results, automaticBlocks.targets, !!targetedGrading && !scanLoading && !saved.pending && !saved.incomplete,
     targetedGrading?.status?.status === "loaded" && targetedGrading.status.enabled);
   const selectionFiltered = selectionFilterSummary({
     folderScopedCount: displayedRows.length,

@@ -79,6 +79,7 @@ type PinnedEvaluation = RepoGradeResponse | { knownFailure: true };
 type AutomaticRuntime = {
   startupBatchId?: string;
   targetedRun?: { runId: string; lease: string };
+  changedRefreshRun?: { runId: string; lease: string };
   recoveryRun?: { runId: string; lease: string; capability?: "text-extension-v1" };
   deferSourceThrottle?: boolean;
   loadPreparedProfile(scope: {
@@ -289,6 +290,7 @@ export async function runRepoGradeTarget(
     ...(prepared.preparation && { preparation: prepared.preparation }),
     ...(runtime.startupBatchId && { startupBatchId: runtime.startupBatchId }),
     ...(runtime.targetedRun && { targetedRun: runtime.targetedRun }),
+    ...(runtime.changedRefreshRun && { changedRefreshRun: runtime.changedRefreshRun }),
     ...(runtime.recoveryRun && { recoveryRun: runtime.recoveryRun }),
   }, async (beforeDispatch) => {
     const evaluatePinned = runtime.evaluatePinned ?? evaluatePinnedRepoGrade;

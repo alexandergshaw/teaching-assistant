@@ -36,7 +36,7 @@ describe("durable repository grading discovery", () => {
     mocks.evaluate.mockResolvedValue({ status: "succeeded" });
     await expect(worker(work, "lease")).resolves.toEqual({ state: "succeeded" });
     expect(mocks.evaluate).toHaveBeenCalledWith(expect.anything(), expect.anything(),
-      expect.not.objectContaining({ targetedRun: expect.anything() }));
+      expect.objectContaining({ changedRefreshRun: { runId: "run", lease: "lease" } }));
     mocks.evaluate.mockClear();
     await expect(worker({ ...work, sha: "b".repeat(40) }, "lease")).resolves.toEqual({ state: "blocked", reason: "changed-source-mismatch" });
     expect(mocks.evaluate).not.toHaveBeenCalled();

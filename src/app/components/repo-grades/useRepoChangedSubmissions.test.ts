@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { changedEmptyTargets } from "./useRepoChangedSubmissions";
+import { changedEmptyTargets, queueWhileCurrent } from "./useRepoChangedSubmissions";
 import type { OrgRepoTreesResult } from "@/lib/repo-grade-tree-scan";
 import type { RepoGradeSavedResults } from "./repoGradesDashboardModel";
 
@@ -25,5 +25,18 @@ describe("changed empty repository targets", () => {
     expect(changedEmptyTargets(scan, "main", withLatest({ ...attempt, status: "succeeded", commit: "c".repeat(40) }))).toEqual([]);
     expect(changedEmptyTargets({ ...scan, truncated: true }, "main", saved)).toEqual([]);
     expect(changedEmptyTargets({ ...scan, repos: [{ ...scan.repos[0], partial: true }] }, "main", saved)).toEqual([]);
+  });
+  it("supports a discovery-only empty target when no receipt exists, but never overrides a later receipt", () => {
+    const empty = { repo: "org/student", folder: "assignments/module_11", sourceRef: "main", sourceSha: old,
+      noSubmission: true as const, explanation: "" };
+    expect(changedEmptyTargets(scan, "main", new Map(), [empty])).toHaveLength(1);
+    const later = new Map([["cell", { latest: { ...attempt, status: "succeeded", commit: "c".repeat(40) }, scored: null }]]) as unknown as RepoGradeSavedResults;
+    expect(changedEmptyTargets(scan, "main", later, [empty])).toEqual([]);
+  });
+  it("stops queuing old-course targets after a course change during a request", async () => {
+    let current = true;
+    const submit = vi.fn(async () => { current = false; });
+    await queueWhileCurrent([1, 2], () => current, submit);
+    expect(submit).toHaveBeenCalledTimes(1);
   });
 });

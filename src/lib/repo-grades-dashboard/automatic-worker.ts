@@ -155,6 +155,7 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
     let evidenceContinue: PreparationEvidenceContinue | undefined;
     const outcome = await runRepoGradeTarget(plan, target, {
       ...(targeted && { targetedRun: { runId, lease } }),
+      ...(refresh && { changedRefreshRun: { runId, lease } }),
       ...(!targeted && prior === "recoverable-partial" && { recoveryRun: { runId, lease } }),
       ...(!targeted && prior === "recoverable-text" && { recoveryRun: { runId, lease, capability: "text-extension-v1" as const } }),
       deferSourceThrottle: work.retryGithubRateLimits === true,

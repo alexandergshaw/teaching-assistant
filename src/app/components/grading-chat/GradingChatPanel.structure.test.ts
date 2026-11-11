@@ -75,22 +75,24 @@ describe("GradingChatPanel - fields lock once the session is ready (verify doc a
     expect(source).toMatch(/sessionReady\s*=\s*driver\.headerState\s*===\s*"ready"/);
   });
 
-  it("the Instructions field is bound to sessionReady's disabled prop", () => {
+  it("the Instructions field becomes read-only when the session is ready", () => {
     const source = read(PANEL);
     const idx = source.indexOf('id="grading-chat-instructions"');
     expect(idx).toBeGreaterThan(-1);
     const fieldEnd = source.indexOf("/>", idx);
     const fieldMarkup = source.slice(idx, fieldEnd);
-    expect(fieldMarkup).toContain("disabled={sessionReady}");
+    expect(fieldMarkup).toContain("readOnly: sessionReady");
+    expect(fieldMarkup).toContain("if (!sessionReady) handleInstructionsChange");
   });
 
-  it("the Rubric field is bound to sessionReady's disabled prop", () => {
+  it("the Rubric field becomes read-only when the session is ready", () => {
     const source = read(PANEL);
     const idx = source.indexOf('id="grading-chat-rubric"');
     expect(idx).toBeGreaterThan(-1);
     const fieldEnd = source.indexOf("/>", idx);
     const fieldMarkup = source.slice(idx, fieldEnd);
-    expect(fieldMarkup).toContain("disabled={sessionReady}");
+    expect(fieldMarkup).toContain("readOnly: sessionReady");
+    expect(fieldMarkup).toContain("if (!sessionReady) handleRubricChange");
   });
 });
 
@@ -563,14 +565,10 @@ describe("submission labels: file and url modes carry the optional label", () =>
 const DRIVER = "src/app/components/grading-chat/useContinuousGradingRun.ts";
 
 describe("GradingChatPanel - controls #1: clear controls", () => {
-  it("each setup field has a clear handler inside the !sessionReady branch", () => {
+  it("each setup field only shows its clear handler before the session is ready", () => {
     const source = withoutLineComments(read(PANEL));
-    const guard = source.indexOf("!sessionReady ? (");
-    const summary = source.indexOf("chatStyles.setupSummary");
-    expect(guard).toBeGreaterThan(-1);
-    const branch = source.slice(guard, summary);
-    expect(branch).toContain("onClick={handleClearInstructions}");
-    expect(branch).toContain("onClick={handleClearRubric}");
+    expect(source).toMatch(/!sessionReady && instructions !== ""[\s\S]*?onClick=\{handleClearInstructions\}/);
+    expect(source).toMatch(/!sessionReady && rubric !== ""[\s\S]*?onClick=\{handleClearRubric\}/);
     expect(source).toMatch(/handleClearInstructions\s*=\s*\(\)\s*=>\s*setInstructions\(""\)/);
     expect(source).toMatch(/handleClearRubric\s*=\s*\(\)\s*=>\s*setRubric\(""\)/);
   });
@@ -828,12 +826,12 @@ describe("GradingChatPanel - locked setup text stays copyable (read-only, not ed
     return source.slice(from, to);
   }
 
-  it("renders both locked fields read-only with no change path and no disabled", () => {
+  it("keeps the same fields mounted and prevents changes while locked", () => {
     const slice = lockedSlice();
-    expect(slice).toContain("grading-chat-instructions-locked");
-    expect(slice).toContain("grading-chat-rubric-locked");
-    expect(slice.match(/readOnly: true/g)?.length).toBe(2);
-    expect(slice).not.toContain("onChange=");
+    expect(slice).toContain('id="grading-chat-instructions"');
+    expect(slice).toContain('id="grading-chat-rubric"');
+    expect(slice.match(/readOnly: sessionReady/g)?.length).toBe(2);
+    expect(slice.match(/if \(!sessionReady\) handle/g)?.length).toBe(2);
     expect(slice).not.toContain("disabled=");
   });
 

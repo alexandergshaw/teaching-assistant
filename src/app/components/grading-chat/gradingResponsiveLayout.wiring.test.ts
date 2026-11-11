@@ -27,11 +27,10 @@ describe("responsive grading chat presentation wiring", () => {
     expect(composerContainsOnlyInput('<div className={chatStyles.stickyComposer}><LedgerNotice /><ChatComposer /></div>')).toBe(false);
   });
 
-  it("uses MUI setup disclosure and limits automatic collapse to the ready transition", () => {
-    expect(panel).toContain('<Accordion ref={setupRef} className={chatStyles.setupDisclosure} expanded={setupExpanded}');
+  it("keeps MUI setup disclosure in the user's chosen state when grading starts", () => {
+    expect(panel).toContain('<Accordion className={chatStyles.setupDisclosure} expanded={setupExpanded}');
     expect(panel).toContain('sessionReady ? "Assignment setup (locked)" : "Assignment setup"');
-    expect(panel).toContain("sessionReady && !previousReadyRef.current");
-    expect(panel.indexOf('setupSummaryRef.current?.focus()')).toBeLessThan(panel.indexOf("setSetupExpanded(false)"));
+    expect(panel).not.toContain("setSetupExpanded(false)");
     const reset = panel.slice(panel.indexOf("const handleNewSession"), panel.indexOf("const withPreparing"));
     expect(reset.indexOf("window.confirm")).toBeLessThan(reset.indexOf("setSetupExpanded(true)"));
   });

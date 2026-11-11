@@ -257,11 +257,7 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
   const [editInstance] = useState(newChatEditInstance);
   const panelRef = useRef<HTMLDivElement>(null);
   const sessionActionsRef = useRef<HTMLDivElement>(null);
-  const setupRef = useRef<HTMLDivElement>(null);
-  const setupSummaryRef = useRef<HTMLDivElement>(null);
   const [setupExpanded, setSetupExpanded] = useState(true);
-  const setupFocusedRef = useRef(false);
-  const previousReadyRef = useRef(false);
 
   useEffect(() => {
     const panel = panelRef.current;
@@ -389,14 +385,6 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
   // is established closes that path by construction - they cannot diverge from
   // what was actually captured because they can no longer be edited.
   const sessionReady = driver.headerState === "ready";
-  useEffect(() => {
-    const setup = setupRef.current;
-    if (setup && sessionReady && !previousReadyRef.current) {
-      if (setupFocusedRef.current) setupSummaryRef.current?.focus();
-      setSetupExpanded(false);
-    }
-    previousReadyRef.current = sessionReady;
-  }, [sessionReady]);
 
   const dropSessionEpoch = useRef(0); const [visibleDropEpoch, setVisibleDropEpoch] = useState(0);
   useLayoutEffect(() => () => { dropSessionEpoch.current++; }, []);
@@ -742,33 +730,31 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
           </span>
         )}
       </div>
-      <Accordion ref={setupRef} className={chatStyles.setupDisclosure} expanded={setupExpanded} onChange={(_, expanded) => setSetupExpanded(expanded)}
-        onFocusCapture={() => { setupFocusedRef.current = true; }}
-        onBlurCapture={(event) => {
-          if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) setupFocusedRef.current = false;
-        }}>
-        <AccordionSummary ref={setupSummaryRef} expandIcon={<span aria-hidden="true">+</span>}>{sessionReady ? "Assignment setup (locked)" : "Assignment setup"}</AccordionSummary>
+      <Accordion className={chatStyles.setupDisclosure} expanded={setupExpanded} onChange={(_, expanded) => setSetupExpanded(expanded)}>
+        <AccordionSummary expandIcon={<span aria-hidden="true">+</span>}>{sessionReady ? "Assignment setup (locked)" : "Assignment setup"}</AccordionSummary>
         <AccordionDetails>
         <div className={chatStyles.setupGrid}>
-      {!sessionReady ? (
         <>
+          {sessionReady && <p className={chatStyles.setupSummary}>Instructions and rubric are set for this session. Start a new session to change them.</p>}
           <div className={chatStyles.compactField}>
             <label htmlFor="grading-chat-instructions">Assignment instructions</label>
             <TextField
               id="grading-chat-instructions"
               multiline
               minRows={3}
+              maxRows={6}
               fullWidth
               size="small"
               value={instructions}
-              onChange={(event) => handleInstructionsChange(event.target.value)}
-              disabled={sessionReady}
+              onChange={(event) => { if (!sessionReady) handleInstructionsChange(event.target.value); }}
+              slotProps={{ input: { readOnly: sessionReady } }}
             />
-            {instructions !== "" && (
+            {!sessionReady && instructions !== "" && (
               <Button variant="text" size="small" aria-label="Clear assignment instructions" onClick={handleClearInstructions}>
                 Clear
               </Button>
             )}
+            {sessionReady && instructions.trim() !== "" && <Button variant="text" size="small" aria-label="Copy assignment instructions" onClick={() => void onCopy(COPY_KEY_INSTRUCTIONS, instructions)}>{copiedKey === COPY_KEY_INSTRUCTIONS ? "Copied" : "Copy"}</Button>}
           </div>
 
           <div className={chatStyles.compactField}>
@@ -777,68 +763,20 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
               id="grading-chat-rubric"
               multiline
               minRows={3}
+              maxRows={6}
               fullWidth
               size="small"
               value={rubric}
-              onChange={(event) => handleRubricChange(event.target.value)}
-              disabled={sessionReady}
+              onChange={(event) => { if (!sessionReady) handleRubricChange(event.target.value); }}
+              slotProps={{ input: { readOnly: sessionReady } }}
             />
-            {rubric !== "" && (
+            {!sessionReady && rubric !== "" && (
               <Button variant="text" size="small" aria-label="Clear rubric" onClick={handleClearRubric}>
                 Clear
               </Button>
             )}
+            {sessionReady && rubric.trim() !== "" && <Button variant="text" size="small" aria-label="Copy rubric" onClick={() => void onCopy(COPY_KEY_RUBRIC, rubric)}>{copiedKey === COPY_KEY_RUBRIC ? "Copied" : "Copy"}</Button>}
           </div>
-        </>
-      ) : (
-        <>
-          <p className={chatStyles.setupSummary}>Instructions and rubric are set for this session.</p>
-          {instructions.trim() !== "" && (
-            <div className={chatStyles.compactField}>
-              <label htmlFor="grading-chat-instructions-locked">Assignment instructions</label>
-              <TextField
-                id="grading-chat-instructions-locked"
-                multiline
-                minRows={2}
-                maxRows={6}
-                fullWidth
-                size="small"
-                value={instructions}
-                slotProps={{ input: { readOnly: true } }}
-              />
-              <Button
-                variant="text"
-                size="small"
-                aria-label="Copy assignment instructions"
-                onClick={() => void onCopy(COPY_KEY_INSTRUCTIONS, instructions)}
-              >
-                {copiedKey === COPY_KEY_INSTRUCTIONS ? "Copied" : "Copy"}
-              </Button>
-            </div>
-          )}
-          {rubric.trim() !== "" && (
-            <div className={chatStyles.compactField}>
-              <label htmlFor="grading-chat-rubric-locked">Rubric</label>
-              <TextField
-                id="grading-chat-rubric-locked"
-                multiline
-                minRows={2}
-                maxRows={6}
-                fullWidth
-                size="small"
-                value={rubric}
-                slotProps={{ input: { readOnly: true } }}
-              />
-              <Button
-                variant="text"
-                size="small"
-                aria-label="Copy rubric"
-                onClick={() => void onCopy(COPY_KEY_RUBRIC, rubric)}
-              >
-                {copiedKey === COPY_KEY_RUBRIC ? "Copied" : "Copy"}
-              </Button>
-            </div>
-          )}
           <span role="status" aria-live="polite" style={visuallyHidden}>
             {copiedKey === COPY_KEY_INSTRUCTIONS
               ? "Copied assignment instructions"
@@ -847,7 +785,6 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
                 : ""}
           </span>
         </>
-      )}
 
       </div>
       <Accordion className={chatStyles.gradingOptions} disableGutters elevation={0}>

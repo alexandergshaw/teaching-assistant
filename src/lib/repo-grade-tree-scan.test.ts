@@ -112,6 +112,13 @@ describe("scanOrgRepoTrees", () => {
     expect(fetchTreePaths).toHaveBeenCalledWith("org/student", "main");
     expect(result).toMatchObject({ repos: [{ repo: "org/student", sourceCommit: "b".repeat(40), folders: ["assignments", "assignments/module_11"] }] });
   });
+  it("preserves available folders while marking a tree with excluded entries partial", async () => {
+    const result = await scanOrgRepoTrees("org", undefined, undefined, {
+      listRepos: async () => [{ fullName: "org/student", htmlUrl: "https://github.com/org/student", defaultBranch: "main" }],
+      fetchTreePaths: async () => ({ paths: ["assignments/module_11/module11.py"], sourceCommit: "b".repeat(40), partial: true }),
+    });
+    expect(result).toMatchObject({ repos: [{ repo: "org/student", partial: true, folders: ["assignments", "assignments/module_11"] }] });
+  });
   it("returns one row per scanned repo, each with its assignment folders", async () => {
     const fetchers: OrgRepoTreeFetchers = {
       listRepos: async () => [fakeRepo("org/alice-repo"), fakeRepo("org/bob-repo")],

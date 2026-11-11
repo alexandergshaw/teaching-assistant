@@ -59,6 +59,7 @@ export function updateRepoGradesCourseEdits(
 export function buildRepoGradesDashboard(
   edits: RepoGradeCellEditsByRepo,
   scan: OrgRepoTreesResult | null,
+  targetBranch = "",
 ): RepoGradesDashboardRow[] {
   const scanned = new Map(scan?.repos.map((entry) => [entry.repo, entry]));
   const repos = new Set([...Object.keys(edits), ...scanned.keys()]);
@@ -87,7 +88,8 @@ export function buildRepoGradesDashboard(
       else if (scan) discovery = "Repository not seen in scan";
 
       rows.push({ repo, folder, score, result, discovery,
-        ...(scannedRepo?.sourceCommit ? { scanRef: scannedRepo.defaultBranch, scanCommit: scannedRepo.sourceCommit } : {}) });
+        ...(scannedRepo?.sourceCommit && !scannedRepo.partial && (!targetBranch.trim() || targetBranch.trim() === scannedRepo.defaultBranch)
+          ? { scanRef: scannedRepo.defaultBranch, scanCommit: scannedRepo.sourceCommit } : {}) });
     }
   }
   return rows;

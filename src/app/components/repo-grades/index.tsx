@@ -393,7 +393,7 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
   // `displayedRows` above stays query-free and feeds every plan surface.
   const bodyRows = visibleRepoRows(displayedRows, uiState.searchQuery, showAll ? NO_GRADE_SET : selected);
   const matrix = buildRepoGradeMatrix(
-    buildRepoGradesDashboard(cellEdits, scan),
+    buildRepoGradesDashboard(cellEdits, scan, targetBranch),
     cellEdits, saved.results, columnsWithMapping, assignments, roster, effectiveStudentRepos, automaticBlocks.targets,
   );
   const selectionFiltered = selectionFilterSummary({
@@ -656,6 +656,9 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
       />
       <RepoGradesLoadingStatus label={coursesLoading ? "Loading classes…"
         : course && scanLoading ? `Scanning ${course.githubOrg?.trim()} on GitHub for ${course.name}…` : null} />
+      {scan?.repos.some((repo) => repo.partial) && <Alert severity="warning" role="status">
+        Some repositories contain submodules or unsupported entries that were not scanned. Listed folders may be incomplete.
+      </Alert>}
 
       {/* AC5 item 31 / U5.20: results are announced through a role="status"
           aria-live="polite" region, matching TasksTab.tsx:717. This is the

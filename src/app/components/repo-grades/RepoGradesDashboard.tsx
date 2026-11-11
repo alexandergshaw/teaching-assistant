@@ -88,7 +88,9 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
       label={`Saved rubric scores: ${repo.name} / ${folder || "Repository root"}`} />
     {cell?.saved && !provenNoSubmission && <SavedMatrixResult result={cell.saved} repo={repo.name} folder={folder} feedback={feedback} showSource={false} part="details" />}
     {(historicalEmpty || historicalAutomaticEmpty) && <Typography component="p" variant="caption" color="text.secondary">
-      An earlier check found no submission; the current branch revision has not been checked for this assignment.
+      {cell?.browser?.scanCommit
+        ? "An earlier check found no submission at a different revision. Check the current revision before grading."
+        : "A previous check found no submission, but the current target branch revision could not be verified against it."}
     </Typography>}
     {ambiguousNoSubmission && <Typography component="p" variant="caption" color="text.secondary">
       A repository check found no submission; its order relative to the saved grade could not be verified.

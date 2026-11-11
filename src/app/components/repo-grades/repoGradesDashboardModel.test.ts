@@ -47,6 +47,10 @@ describe("class repository results", () => {
     expect(noSubmissionMatchesScan("main", newCommit, row)).toBe(true);
     expect(noSubmissionMatchesScan("other", newCommit, row)).toBe(false);
     expect(noSubmissionMatchesScan("main", newCommit, undefined)).toBe(false);
+    const alternateTarget = buildRepoGradesDashboard({}, scanned, "release")[0];
+    expect(noSubmissionMatchesScan("main", newCommit, alternateTarget)).toBe(false);
+    const partial = { ...scanned, repos: [{ ...scanned.repos[0], partial: true }] };
+    expect(noSubmissionMatchesScan("main", newCommit, buildRepoGradesDashboard({}, partial)[0])).toBe(false);
   });
   it("replaces an older saved score only with a safely ordered verified empty new commit", () => {
     const savedAttempt = { ...attempt(1, "org/a", "lab", 90), settledAt: "2026-11-06T13:00:00.000Z" };

@@ -85,8 +85,8 @@ export async function loadOrgRepoTreesAction(
         const [owner, repo] = fullName.split("/");
         const sourceCommit = await resolveRepoSourceCommit(owner, repo, branch);
         const tree = await getRepoTreeWithMeta(owner, repo, sourceCommit);
-        if (tree.truncated || tree.unenumerated || tree.excluded?.length) throw new Error("Repository tree is incomplete; refresh to retry.");
-        return { paths: tree.entries.map((entry) => entry.path), sourceCommit };
+        if (tree.truncated || tree.unenumerated) throw new Error("Repository tree is incomplete; refresh to retry.");
+        return { paths: tree.entries.map((entry) => entry.path), sourceCommit, partial: !!tree.excluded?.length };
       },
     });
   } catch (err) {

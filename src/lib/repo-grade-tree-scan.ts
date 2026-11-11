@@ -139,6 +139,8 @@ export interface RepoFolderRow {
   defaultBranch: string;
   /** Immutable default-branch commit captured with this scan, when available. */
   sourceCommit?: string;
+  /** Some entries could not be enumerated (for example, submodules). */
+  partial?: boolean;
   /** This repo's assignment folders (AC3 items 13-14), or null when this
    * repo's tree fetch failed - never both. */
   folders: string[] | null;
@@ -167,7 +169,7 @@ export interface OrgRepoTreesResult {
  * full RepoTreeEntry. */
 export interface OrgRepoTreeFetchers {
   listRepos: (org: string, prefix?: string) => Promise<Pick<GithubRepo, "fullName" | "htmlUrl" | "defaultBranch">[]>;
-  fetchTreePaths: (fullName: string, branch: string) => Promise<string[] | { paths: string[]; sourceCommit: string }>;
+  fetchTreePaths: (fullName: string, branch: string) => Promise<string[] | { paths: string[]; sourceCommit: string; partial?: boolean }>;
 }
 
 export interface ScanOrgRepoTreesOptions {
@@ -242,6 +244,7 @@ export async function scanOrgRepoTrees(
         htmlUrl: repo.htmlUrl,
         defaultBranch: repo.defaultBranch,
         ...(!Array.isArray(tree) ? { sourceCommit: tree.sourceCommit } : {}),
+        ...(!Array.isArray(tree) && tree.partial ? { partial: true } : {}),
         folders: assignmentFolderPathsFromTree(paths, ignore),
         error: null,
       };

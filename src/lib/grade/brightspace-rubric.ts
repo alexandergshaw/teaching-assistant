@@ -19,6 +19,22 @@ export function validateBrightspaceRatings(areas: readonly RubricAreaResult[], c
 
 /** Parse the flattened three-rating Brightspace rubric only when the complete table is recognizable. */
 export function parseBrightspaceRubric(text: string): { kind: "other" } | { kind: "invalid" } | { kind: "parsed"; criteria: RubricCriterion[] } {
+  const scaleLines = text.split(/\r?\n/).filter((line) => /^\s*rating\s+scale\s*:/i.test(line));
+  if (scaleLines.some((line) => /(?:meets|partially meets|does not meet)\s+expectations/i.test(line))) {
+    if (scaleLines.length !== 1 || !/^\s*rating\s+scale\s*:\s*meets expectations\s+100%\s*;\s*partially meets expectations\s+70%\s*;\s*does not meet expectations\s+0%\s*\.?\s*$/i.test(scaleLines[0])) return { kind: "invalid" };
+    const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (lines.at(-1) !== scaleLines[0].trim()) return { kind: "invalid" };
+    const criteria: RubricCriterion[] = [], seen = new Set<string>();
+    for (const line of lines.slice(0, -1)) {
+      const match = /^(.+?)\s*\(\s*(\d+(?:\.\d+)?)\s*(?:pts?|points?|%)\s*\)\s*:\s*(\S.*)$/i.exec(line);
+      if (!match) return { kind: "invalid" };
+      const name = match[1].trim(), key = normalizeAreaName(name), points = Number(match[2]);
+      if (!key || name.length > 200 || seen.has(key) || !Number.isFinite(points) || points <= 0) return { kind: "invalid" };
+      seen.add(key); criteria.push({ name, points });
+    }
+    if (!criteria.length || Math.abs(criteria.reduce((sum, item) => sum + (item.points ?? 0), 0) - 100) > 0.0001) return { kind: "invalid" };
+    return { kind: "parsed", criteria };
+  }
   const lines = text.split(/[\r\n\t]+/).map((line) => line.trim()).filter(Boolean);
   const rating = /^(?:meets|partially meets|does not meet) expectations\s*\(\d+%\)$/i;
   const ratings = lines.filter((line) => rating.test(line)).length;

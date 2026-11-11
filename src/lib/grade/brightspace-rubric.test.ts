@@ -21,3 +21,13 @@ it("leaves unrelated ordinary rubric formats on the existing parser", () => {
 it.each([rubric.replace("Code Reflection", "Code-Style").replace("Pseudocode or Flowchart", "Code Style"), `${rubric}\n${rubric}`])("refuses normalized duplicate names or multiple tables", async (bad) => {
   expect((await resolveRunHeader("Explain your work", bad, "gemini", { synthesizeRubricWhenBlank: false })).kind).toBe("refused");
 });
+const lineScale = "Code Reflection (25 points): Explain.\nPseudocode or Flowchart (10 points): Plan.\nSpecifications and Correctness: Algorithm (20 points): Correct.\nData Structure (20 points): Correct.\nAnnotation (10 points): Explain.\nModular (10 points): Design.\nReadability (5 points): Clear.\nRating scale: Meets Expectations 100%; Partially Meets Expectations 70%; Does Not Meet Expectations 0%.";
+it("parses the observed criterion-per-line rating scale", () => {
+  expect(extractRubricCriteria(lineScale)).toEqual([{ name: "Code Reflection", points: 25 }, { name: "Pseudocode or Flowchart", points: 10 }, { name: "Specifications and Correctness: Algorithm", points: 20 }, { name: "Data Structure", points: 20 }, { name: "Annotation", points: 10 }, { name: "Modular", points: 10 }, { name: "Readability", points: 5 }]);
+});
+it.each([lineScale.replace("70%", "50%"), lineScale.replace("; Does Not Meet Expectations 0%", ""), lineScale.replace("Readability (5 points): Clear.", "Readability: Clear."), lineScale.replace("5 points", "6 points"), `${lineScale}\nAdditional instruction`])("rejects an ambiguous global scale or incomplete criteria", (bad) => {
+  expect(() => extractRubricCriteria(bad)).toThrow(/could not be read/i);
+});
+it("does not claim unrelated rating scales", () => {
+  expect(extractRubricCriteria("Writing (20 pts): quality\nRating scale: Excellent 100%; Poor 0%.")).toEqual([{ name: "Writing", points: 20 }]);
+});

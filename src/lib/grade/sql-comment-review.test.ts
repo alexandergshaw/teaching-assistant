@@ -18,6 +18,7 @@ describe("SQL comment review preflight", () => {
     expect(check("SELECT 'unterminated -- One. Two. Three. Four. Five.")).toBe(true);
     expect(check("/* One. Two. Three. Four. Five.")).toBe(true);
     expect(check("# One. Two. Three. Four. Five.\nSELECT 1;")).toBe(true);
+    expect(check("--One. Two. Three. Four. Five.\nSELECT 1;")).toBe(true);
   });
   it("recognizes a spelled-out count and does not infer unstated requirements", () => {
     expect(review("In a comment of at least five sentences, explain row-level security.", [{ path: "security.sql", content: "SELECT 1;" }])).toBe(true);

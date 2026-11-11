@@ -8,6 +8,7 @@ function sqlComments(source: string): { blocks: string[]; uncertain: boolean } {
     const start = i;
     if (source[i] === "#") return { blocks: comments, uncertain: true }; // Dialect-dependent operator or comment.
     if (source.startsWith("--", i)) {
+      if (i + 2 < source.length && !/\s/.test(source[i + 2])) return { blocks: comments, uncertain: true };
       i += 2;
       const end = source.indexOf("\n", i);
       const text = source.slice(i, end < 0 ? source.length : end);

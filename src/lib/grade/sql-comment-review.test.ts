@@ -29,7 +29,7 @@ describe("SQL comment review preflight", () => {
     const sql = { path: "security.sql", content: "SELECT 1;" };
     const notes = { path: "notes.txt", content: "One. Two. Three. Four. Five." };
     expect(review(instructions, [sql, notes])).toBe(true);
-    expect(review(instructions, [{ ...sql, content: "-- One. Two. Three. Four. Five." }, notes])).toBe(true);
+    expect(review(instructions, [{ ...sql, content: "-- One. Two. Three. Four. Five." }, notes])).toBe(false);
     expect(review("In a SQL comment of at least 5 sentences, explain row-level security.", [{ ...sql, content: "-- One. Two. Three. Four. Five." }, notes])).toBe(false);
   });
   it("does not combine unrelated comment blocks or separate files", () => {
@@ -38,5 +38,9 @@ describe("SQL comment review preflight", () => {
     expect(check("-- One. Two. Three.\n\n-- Four. Five.")).toBe(true);
     expect(check("/*! One. Two. Three. Four. Five. */ SELECT 1;")).toBe(true);
     expect(check("/*+ One. Two. Three. Four. Five. */ SELECT 1;")).toBe(true);
+  });
+  it("accepts a qualifying comment even if a different SQL file is ambiguous", () => {
+    const files = [{ path: "good.sql", content: "-- One. Two. Three. Four. Five." }, { path: "other.sql", content: "SELECT 'unterminated" }];
+    expect(review(instructions, files)).toBe(false);
   });
 });

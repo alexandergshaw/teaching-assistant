@@ -64,11 +64,9 @@ export function missingSqlCommentRequiresReview(
   if (!requirement) return false;
   const sqlFiles = files.filter((file) => /\.sql$/i.test(file.path));
   if (!sqlFiles.length) return false;
-  if (!requirement[1] && sqlFiles.length !== files.length) return true;
   const numbers: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
   const required = numbers[requirement[2].toLowerCase()] ?? Number(requirement[2]);
   const parsed = sqlFiles.map((file) => sqlComments(file.content));
-  if (parsed.some((file) => file.uncertain)) return true;
-  return !parsed.some((file) => file.blocks.some((block) =>
+  return !parsed.some((file) => !file.uncertain && file.blocks.some((block) =>
     (block.match(/[\p{L}\p{N}][^.!?]*[.!?](?=\s|$)/gu) ?? []).length >= required));
 }

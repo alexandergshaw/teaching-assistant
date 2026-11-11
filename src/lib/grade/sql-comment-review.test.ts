@@ -1,22 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { missingSqlCommentRequiresReview } from "./sql-comment-review";
+import { missingSqlCommentRequiresReview as review } from "./sql-comment-review";
 
 describe("SQL comment review preflight", () => {
   const instructions = "In a comment of at least 5 sentences, explain row-level security.";
-  it("flags the observed missing-comment case without scoring it", () => {
-    expect(missingSqlCommentRequiresReview(instructions, [{ path: "lab/security.sql", content: "CREATE POLICY own_row ON employees;" }])).toBe(true);
+  const check = (content: string) => review(instructions, [{ path: "lab/security.sql", content }]);
+  it("holds the observed missing explanation and unrelated short comments", () => {
+    expect(check("CREATE POLICY own_row ON employees;")).toBe(true);
+    expect(check("-- unrelated comment\nSELECT 1;")).toBe(true);
   });
-  it("does not claim a requirement is met merely because a comment exists", () => {
-    for (const content of ["-- unrelated comment\nSELECT 1;", "/* note */ SELECT 1;", "# MySQL comment\nSELECT 1;"]) {
-      expect(missingSqlCommentRequiresReview(instructions, [{ path: "lab/security.sql", content }])).toBe(false);
-    }
+  it("ignores comment-like text in SQL strings, identifiers and dollar quotes", () => {
+    for (const sql of ["SELECT '-- one. two. three. four. five.';", 'SELECT "/* one. two. three. four. five. */";', "SELECT $$-- one. two. three. four. five.$$;", "SELECT [-- fake];"]) expect(check(sql)).toBe(true);
   });
-  it("recognizes a spelled-out sentence count", () => {
-    expect(missingSqlCommentRequiresReview("In a comment of at least five sentences, explain row-level security.", [{ path: "security.sql", content: "SELECT 1;" }])).toBe(true);
+  it("allows five sentences in common SQL comment forms", () => {
+    for (const sql of ["-- One. Two. Three. Four. Five.\nSELECT 1;", "/* One. Two. Three. Four. Five. */ SELECT 1;", "-- One. Two.\n-- Three. Four. Five.\nSELECT 1;"]) expect(check(sql)).toBe(false);
   });
-  it("does not infer absence from other file types, no files, or an unstated requirement", () => {
-    expect(missingSqlCommentRequiresReview(instructions, [])).toBe(false);
-    expect(missingSqlCommentRequiresReview(instructions, [{ path: "lab/answer.txt", content: "Explanation" }])).toBe(false);
-    expect(missingSqlCommentRequiresReview("Explain row-level security.", [{ path: "lab/security.sql", content: "SELECT 1;" }])).toBe(false);
+  it("holds malformed lexical input instead of guessing", () => {
+    expect(check("SELECT 'unterminated -- One. Two. Three. Four. Five.")).toBe(true);
+    expect(check("/* One. Two. Three. Four. Five.")).toBe(true);
+    expect(check("# One. Two. Three. Four. Five.\nSELECT 1;")).toBe(true);
+  });
+  it("recognizes a spelled-out count, and does not infer unstated or mixed-file requirements", () => {
+    expect(review("In a comment of at least five sentences, explain row-level security.", [{ path: "security.sql", content: "SELECT 1;" }])).toBe(true);
+    expect(review(instructions, [])).toBe(false);
+    expect(review(instructions, [{ path: "answer.txt", content: "Explanation" }])).toBe(false);
+    expect(review("Explain row-level security.", [{ path: "security.sql", content: "SELECT 1;" }])).toBe(false);
   });
 });

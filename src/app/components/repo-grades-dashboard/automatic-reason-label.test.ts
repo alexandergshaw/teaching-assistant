@@ -14,7 +14,7 @@ it.each([
   ["grading-input-truncated", "grading model's input limit"],
   ["grading-source-rate-limited", "GitHub rate-limited the worker"],
   ["unsupported-submission", "files the repository grader cannot read"],
-  ["comment-evidence-unverified", "requires a written SQL comment"],
+  ["comment-evidence-unverified", "SQL comment explanation could not be verified"],
 ])("explains %s with a specific message", (reason, expected) => {
   expect(automaticReasonLabel(reason)).toContain(expected);
 });
@@ -32,3 +32,4 @@ it.each(["Private assignment path and instructions", "constructor", "__proto__",
     expect(automaticReasonLabel(reason)).toBe("The worker did not provide a recognized reason.");
   },
 );
+

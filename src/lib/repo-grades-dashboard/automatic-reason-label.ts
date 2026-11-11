@@ -71,7 +71,7 @@ const REASON_LABELS: Readonly<Record<string, string>> = {
   ungraded: "The queued submission is no longer eligible at its recorded commit.",
   unknown: "The worker could not confirm the outcome. Check grading history before retrying.",
   "unsupported-submission": "The submission contains files the repository grader cannot read.",
-  "comment-evidence-unverified": "The assignment requires a written SQL comment, but no SQL comment was found. Review the submission before grading.",
+  "comment-evidence-unverified": "The required SQL comment explanation could not be verified. Review the submission before grading.",
   "unsupported-target-branch": "Background grading does not check merge targets. Remove the merge target in the saved grading settings or grade manually.",
   "worker-interrupted": "The worker stopped before it could confirm the outcome.",
 };

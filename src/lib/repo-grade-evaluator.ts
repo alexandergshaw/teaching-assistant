@@ -243,7 +243,7 @@ export async function evaluateRepoGrade(
   if (sourceCommit && !digestTruncated && digest.inventory?.enumerationComplete
     && missingSqlCommentRequiresReview(effectiveInstructions, gradableFiles)) {
     execution?.markKnownFailure();
-    return { error: "This assignment requires a written SQL comment, but no SQL comment was found in the submitted files. Review the submission before grading.",
+    return { error: "The required SQL comment explanation could not be verified in the submitted files. Review the submission before grading.",
       partial: true, sourceCommit, reason: "comment-evidence-unverified" };
   }
 

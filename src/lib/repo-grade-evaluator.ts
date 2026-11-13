@@ -32,6 +32,7 @@ export type RepoGradePartialReason =
 export type RepoGradeResponse =
   | {
       run: GradingRun;
+      unexaminedArtifacts?: Array<{ path: string; reason: "optional-binary-unexamined" }>;
       rubric: string;
       fullName: string;
       sourceCommit?: string;
@@ -298,7 +299,7 @@ export async function evaluateRepoGrade(
     entry.gradedRepo = digest.fullName;
     entry.gradedRef = sourceCommit;
   }
-  const provenance = sourceCommit ? { sourceCommit } : {};
+  const provenance = { ...(sourceCommit ? { sourceCommit } : {}), ...(digest.unexaminedOptionalArtifacts?.length ? { unexaminedArtifacts: digest.unexaminedOptionalArtifacts.map((path) => ({ path, reason: "optional-binary-unexamined" as const })) } : {}) };
   const recordUnexaminedArtifacts = (run: { results: GradeResult[] }) => {
     if (!digest.unexaminedOptionalArtifacts?.length) return;
     const notice = `Unexamined optional binary files: ${digest.unexaminedOptionalArtifacts.join(", ")}. These files were not executed or assessed; the grade covers the source files.`;

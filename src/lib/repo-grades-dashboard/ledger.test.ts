@@ -172,6 +172,19 @@ describe("repository grading ledger RPC boundary", () => {
     });
   });
 
+  it("settles bounded unexamined artifact provenance atomically with the grade", async () => {
+    rpc.mockResolvedValue({ data: true, error: null });
+    const result = {
+      score: 85, feedback: "Source reviewed; binary unexamined.",
+      sections: { strengths: "", improvements: "", resubmitNotice: "", rawScore: "85/100" },
+      rubric: [], unexaminedArtifacts: [{ path: "assignments/module_12/TestUtils.class", reason: "optional-binary-unexamined" as const }],
+    };
+    await expect(settleRepoGrade({ mode: "automatic", generation: 42, token }, { outcome: "succeeded", inputsComplete: true, result })).resolves.toBe(true);
+    expect(rpc.mock.calls[0][1].p_unexamined_artifacts).toEqual(result.unexaminedArtifacts);
+    rpc.mockClear();
+    await expect(settleRepoGrade({ mode: "automatic", generation: 42, token }, { outcome: "succeeded", inputsComplete: true, result: { ...result, unexaminedArtifacts: [{ ...result.unexaminedArtifacts[0], path: "../secret" }] } })).rejects.toThrow("Invalid unexamined artifact provenance");
+    expect(rpc).not.toHaveBeenCalled();
+  });
   it("refuses an oversized result before sending any content to storage", async () => {
     await expect(settleRepoGrade({ mode: "automatic", generation: 42, token }, {
       outcome: "succeeded", inputsComplete: true,

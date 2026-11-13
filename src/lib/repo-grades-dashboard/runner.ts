@@ -212,6 +212,7 @@ function classifyEvaluation(
   const result: RepoGradeResultRecord = {
     score: (fraction.earned / fraction.possible) * 100,
     feedback: grade.overallComment,
+    ...(response.unexaminedArtifacts?.length ? { unexaminedArtifacts: response.unexaminedArtifacts } : {}),
     sections: {
       strengths: grade.strengths, improvements: grade.improvements,
       resubmitNotice: grade.resubmitNotice, rawScore: grade.totalScore,

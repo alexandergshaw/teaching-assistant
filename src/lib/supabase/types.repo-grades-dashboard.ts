@@ -24,10 +24,13 @@ export type RepoGradeFeedbackSections = {
 
 export type RepoGradeFeedbackField = keyof RepoGradeFeedbackSections | "overall" | "rubric";
 
+export type RepoGradeUnexaminedArtifact = { path: string; reason: "optional-binary-unexamined" };
+
 export type RepoGradeResultRecord = {
   score: number;
   feedback: string;
   sections: RepoGradeFeedbackSections;
+  unexaminedArtifacts?: RepoGradeUnexaminedArtifact[];
   rubric: Array<{ area: string; score: string; comment: string }>;
 };
 
@@ -48,6 +51,7 @@ export type RepoGradeHistoryRow = {
   /** A legacy result has overall feedback but no original sections. */
   feedback_sections?: RepoGradeFeedbackSections | null;
   feedback_retention?: RepoGradeFeedbackField | null;
+  unexamined_artifacts?: RepoGradeUnexaminedArtifact[] | null;
 };
 
 export type RepoGradeClaimStatus =

@@ -152,6 +152,7 @@ export async function settleRepoGrade(
     if (!Number.isFinite(result.score) || result.score < 0 || result.score > 100) {
       throw new Error("Invalid repository evaluation score");
     }
+    if (result.unexaminedArtifacts && !validUnexaminedArtifacts(result.unexaminedArtifacts)) throw new Error("Invalid unexamined artifact provenance");
     const field = unretainedRepoGradeFeedbackField(result.feedback, result.sections, result.rubric);
     if (field) throw new Error(`Repository evaluation feedback cannot be retained (${field})`);
   }
@@ -164,6 +165,7 @@ export async function settleRepoGrade(
     p_inputs_complete: "inputsComplete" in settlement && settlement.inputsComplete,
     p_score: result?.score ?? null,
     p_feedback: result?.feedback ?? null,
+    ...(result?.unexaminedArtifacts?.length ? { p_unexamined_artifacts: result.unexaminedArtifacts } : {}),
     p_rubric: result?.rubric.map(({ area, score, comment }) => ({ area, score, comment })) ?? null,
     ...(claim.mode !== "manual" && {
       p_feedback_sections: result ? {
@@ -214,6 +216,14 @@ function validDate(value: unknown): value is string {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value) && Number.isFinite(Date.parse(value));
 }
 
+function validUnexaminedArtifacts(value: unknown): boolean {
+  return Array.isArray(value) && value.length > 0 && value.length <= 40
+    && new TextEncoder().encode(JSON.stringify(value)).byteLength <= 16384
+    && value.every((item) => isRecord(item) && Object.keys(item).length === 2
+      && validText(item.path, 4096, 1) && !/[\x00-\x1f\x7f\\]/.test(item.path)
+      && !item.path.split("/").some((part) => !part || part === "." || part === "..")
+      && item.reason === "optional-binary-unexamined");
+}
 function validHistoryRow(row: unknown): row is RepoGradeHistoryRow {
   if (!isRecord(row) || !validGeneration(row.generation) || !HISTORY_STATUSES.has(row.status)) return false;
   if (!validText(row.repo, 200) || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(row.repo)
@@ -223,6 +233,7 @@ function validHistoryRow(row: unknown): row is RepoGradeHistoryRow {
     || !validDate(row.claimed_at)
     || (row.settled_at !== null && !validDate(row.settled_at))
     || (row.reconciled_at !== null && !validDate(row.reconciled_at))) return false;
+  if (row.unexamined_artifacts != null && (row.score === null || !validUnexaminedArtifacts(row.unexamined_artifacts))) return false;
   if (row.feedback_retention != null
     && (row.status !== "partial" || row.score !== null || !isRepoGradeFeedbackField(row.feedback_retention))) return false;
   if (row.score === null) return row.status !== "succeeded" && row.feedback === null

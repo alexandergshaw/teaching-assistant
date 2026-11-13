@@ -277,6 +277,7 @@ export async function readRepoGradeHistoryAction(courseId: string, expectedAccou
         score: row.score,
         feedback: row.feedback,
         feedback_sections: row.feedback_sections ?? null,
+        unexamined_artifacts: row.unexamined_artifacts ?? null,
         feedback_retention: row.feedback_retention ?? null,
         rubric: row.rubric,
       })),

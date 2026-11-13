@@ -83,6 +83,10 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
         {!cell?.saved && scanStatus && scanStatus !== "ungraded" && <RepoGradeStatusChip status={scanStatus} />}
       </Box>
     </div>
+    {scored?.unexamined_artifacts?.length ? <Alert severity="warning" role="status">
+      Unexamined optional binary files: {scored.unexamined_artifacts.map((item) => item.path).join(", ")}.
+      These files were not executed or assessed; the grade covers the source files.
+    </Alert> : null}
     <RepoGradeRubricScores areas={scored?.rubric ?? []} criterionOrder={criterionOrder}
       placeholderOnly={provenNoSubmission || (!scored && cell?.saved?.latest.status === "no-submission")}
       label={`Saved rubric scores: ${repo.name} / ${folder || "Repository root"}`} />

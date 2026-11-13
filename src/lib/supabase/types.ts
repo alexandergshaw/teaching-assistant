@@ -643,7 +643,7 @@ export interface Database {
       repo_grade_automatic_targets: {
         Row: {
           id: number; run_id: string; course_id: string; repo: string; folder: string;
-          source_ref: string; state: string; reason: string | null; readme_example: unknown;
+          source_ref: string; source_sha: string; state: string; reason: string | null; readme_example: unknown;
         };
         Insert: never;
         Update: never;

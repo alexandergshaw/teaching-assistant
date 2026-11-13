@@ -102,7 +102,7 @@ describe("class repository results wiring", () => {
     expect(props).toContain("gradebookRows={gradebookRows}");
     expect(index.indexOf("<RepoGradesDashboard")).toBeLessThan(index.indexOf("<RepoGradesStickyHeader"));
     expect(index).toContain("Grading profiles and saved data");
-    expect(index).toMatch(/buildRepoGradeMatrix\(\s*buildRepoGradesDashboard\(cellEdits, scan\),\s*cellEdits, saved.results, columnsWithMapping, assignments, roster, effectiveStudentRepos/);
+    expect(index).toMatch(/buildRepoGradeMatrix\(\s*buildRepoGradesDashboard\(cellEdits, scan, targetBranch\),\s*cellEdits, saved.results, columnsWithMapping, assignments, roster, effectiveStudentRepos/);
   });
 
   it("rejects an outer guard that hides the dashboard until a folder is selected", () => {
@@ -123,7 +123,7 @@ describe("class repository results wiring", () => {
 
   it("exposes per-course profiles to the owner independently of scan success", () => {
     expect(dashboard).toContain("if (!ownerId) return null");
-    expect(dashboard).toContain("<RepoGradeProfileSettings courseId={courseId} columns={gradeColumns} />");
+    expect(dashboard).toContain("<RepoGradeProfileSettings courseId={courseId} organization={organization} columns={gradeColumns} />");
   });
 
   it("declares student row headers and assignment column headers in the working gradebook", () => {

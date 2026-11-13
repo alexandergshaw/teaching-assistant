@@ -137,6 +137,17 @@ export async function beginRepoGradeDispatch(claim: RepoGradeClaim): Promise<num
   return response;
 }
 
+/** Recheck the targeted queue lease and pause state at each dispatch. */
+export async function checkRepoGradeTargetDispatch(claim: RepoGradeClaim, target: { runId: string; lease: string }): Promise<boolean> {
+  const owner = await requireAppOwner();
+  const response = await ledgerRpc("repo_grade_check_target_dispatch", {
+    p_user_id: owner.id, p_generation: claim.generation, p_token: claim.token,
+    p_run_id: target.runId, p_lease: target.lease,
+  });
+  if (typeof response !== "boolean") throw new Error("Invalid targeted dispatch authorization response");
+  return response;
+}
+
 export function settleRepoGrade(
   claim: RepoGradeClaim & { mode: "manual" }, settlement: RepoGradeManualSettlement,
 ): Promise<boolean>;

@@ -10,8 +10,9 @@ import RepoGradeStatusChip from "./RepoGradeStatusChip";
 import type { RepoGradeColumn } from "./repoGradesRows";
 import styles from "./repo-grades-dashboard.module.css";
 
-export default function RepoGradesDashboard({ courseId, gradeColumns }: {
+export default function RepoGradesDashboard({ courseId, organization, gradeColumns }: {
   courseId: string;
+  organization: string;
   gradeColumns: readonly RepoGradeColumn[];
 }) {
   const { user, accessDecision } = useSupabase();
@@ -20,7 +21,7 @@ export default function RepoGradesDashboard({ courseId, gradeColumns }: {
 
   return (
     <section aria-label="Automatic repository evaluations">
-      <RepoGradeProfileSettings courseId={courseId} columns={gradeColumns} />
+      <RepoGradeProfileSettings courseId={courseId} organization={organization} columns={gradeColumns} />
     </section>
   );
 }

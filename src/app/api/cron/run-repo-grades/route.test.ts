@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   claim: vi.fn(), finish: vi.fn(), getUserById: vi.fn(), resolve: vi.fn(), runAsOwner: vi.fn(), worker: vi.fn(),
-  mode: vi.fn(), enabled: vi.fn(), enqueueDue: vi.fn(), promote: vi.fn(),
+  mode: vi.fn(), enabled: vi.fn(), enqueueDue: vi.fn(), promote: vi.fn(), factory: vi.fn(),
 }));
 vi.mock("@/lib/repo-grades-dashboard/admission-mode", () => ({
   repoGradeAdmissionMode: mocks.mode, repoGradeDurableStartupAvailable: mocks.enabled,
@@ -11,7 +11,7 @@ vi.mock("@/lib/repo-grades-dashboard/automatic-store", () => ({
   claimAutomaticRepoGrade: mocks.claim, finishAutomaticRepoGrade: mocks.finish, enqueueDueAutomaticRepoGrades: mocks.enqueueDue,
   promoteTargetedAutomaticRepoGrade: mocks.promote,
 }));
-vi.mock("@/lib/repo-grades-dashboard/automatic-worker", () => ({ createAutomaticRepoGradeWorker: () => mocks.worker }));
+vi.mock("@/lib/repo-grades-dashboard/automatic-worker", () => ({ createAutomaticRepoGradeWorker: mocks.factory }));
 vi.mock("@/lib/supabase/owner-context", () => ({
   resolveImpersonationIdentity: mocks.resolve, runAsOwner: mocks.runAsOwner,
 }));
@@ -31,6 +31,7 @@ describe("durable repository grading worker route", () => {
     vi.resetAllMocks();
     vi.stubEnv("CRON_SECRET", "server-only-test-secret");
     mocks.mode.mockReturnValue("coordinated");
+    mocks.factory.mockReturnValue(mocks.worker);
     mocks.enabled.mockReturnValue(true);
     mocks.enqueueDue.mockResolvedValue({ accepted: 0, failed: 0 });
     mocks.promote.mockResolvedValue(false);
@@ -61,6 +62,7 @@ describe("durable repository grading worker route", () => {
   });
 
   it("uses the stored account and fences settlement with the same random lease", async () => {
+    const started = Date.now();
     const response = await GET(request("Bearer server-only-test-secret"));
     expect(await response.json()).toEqual({ status: "ok", handled: 1, scheduled: { accepted: 0, failed: 0 } });
     expect(mocks.getUserById).toHaveBeenCalledWith(accountId);
@@ -68,6 +70,10 @@ describe("durable repository grading worker route", () => {
     const [lease] = mocks.claim.mock.calls[0];
     expect(mocks.worker).toHaveBeenCalledWith(work, lease);
     expect(mocks.finish).toHaveBeenCalledWith(work, lease, { state: "scanned", targets: [] });
+    const [mode, options] = mocks.factory.mock.calls[0];
+    expect(mode).toBe("coordinated");
+    expect(options.deadlineMs).toBeGreaterThanOrEqual(started + 270_000);
+    expect(options.deadlineMs).toBeLessThanOrEqual(Date.now() + 270_000);
   });
 
   it("processes queued work even when scheduled wakeup failed", async () => {

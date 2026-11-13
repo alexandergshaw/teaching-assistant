@@ -10,7 +10,7 @@ export function buildUnverifiedExecutionDraft(result: RepoGradeResultRecord): Re
   ];
   if (!expected.some((areas) => JSON.stringify([...areas].sort()) === JSON.stringify(names))) return null;
   return { ...result, score: null, reviewReason: "execution-unverified", unexaminedArtifacts: result.unexaminedArtifacts,
-    feedback: `Review-only draft. Test execution was not verified. Unexamined binary files: ${result.unexaminedArtifacts.map((item) => item.path).join(", ")}.`,
+    feedback: `Review-only draft. Test execution was not verified. Unexamined binary files: ${result.unexaminedArtifacts.map((item) => item.path).join(", ")}.${result.sourceExecutionSummary ? `\n\n${result.sourceExecutionSummary}` : ""}`,
     sections: { strengths: "", improvements: "Instructor review is required; test execution was not verified.", resubmitNotice: "", rawScore: "Not calculated" },
     rubric: result.rubric.map((area) => /Code Organization and Testing Practice|Code Structure and Style/i.test(area.area)
       ? { ...area, score: "Unverified", comment: "Execution was not verified; instructor review is required." }

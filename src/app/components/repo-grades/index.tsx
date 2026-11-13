@@ -591,7 +591,7 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
           <RepoGradeReservationRecovery />
       {(course && cellDraft || trendsEntry) && <Box component="section">
           <Typography variant="subtitle2">Grading profiles and saved data</Typography>
-          {course && cellDraft && <RepoGradesDashboard key={course.id} courseId={course.id} gradeColumns={columnsWithMapping} />}
+          {course && cellDraft && <RepoGradesDashboard key={course.id} courseId={course.id} organization={course.githubOrg ?? ""} gradeColumns={columnsWithMapping} />}
           {trendsEntry && <div>
             <p className={pageStyles.fieldHint}>{repoRunTrendsLabel(trendsEntry)}</p>
             <ClassTrendsPanel entry={trendsEntry} defaultExpanded

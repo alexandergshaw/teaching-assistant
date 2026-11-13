@@ -22,8 +22,9 @@ const PROFILE_ERROR = {
   "request-failed": "The request could not be completed. Check your connection and try again.",
 };
 
-export default function RepoGradeProfileSettings({ courseId, columns }: {
+export default function RepoGradeProfileSettings({ courseId, organization, columns }: {
   courseId: string;
+  organization: string;
   columns: readonly RepoGradeColumn[];
 }) {
   const id = useId();
@@ -58,7 +59,7 @@ export default function RepoGradeProfileSettings({ courseId, columns }: {
       {load && !result && <p role="status">Loading profile for {load.folder}.</p>}
       {result && !profileReady && <p role="alert">{PROFILE_ERROR[result.status]}</p>}
       {load && profileReady && <div key={load.request}>
-        <ProfileForm courseId={courseId} folder={load.folder}
+        <ProfileForm courseId={courseId} organization={organization} folder={load.folder}
           initialProfile={result.status === "loaded" ? result.profile : null}
           reload={() => void openFolder(load.folder)} />
         <RepoGradePreparationPolicySettings courseId={courseId} folder={load.folder} />
@@ -69,8 +70,9 @@ export default function RepoGradeProfileSettings({ courseId, columns }: {
 
 type SaveStatus = Awaited<ReturnType<typeof saveRepoGradeProfile>>["status"] | "saving" | null;
 
-function ProfileForm({ courseId, folder, initialProfile, reload }: {
+export function ProfileForm({ courseId, organization, folder, initialProfile, reload }: {
   courseId: string;
+  organization: string;
   folder: string;
   initialProfile: SavedProfile | null;
   reload: () => void;
@@ -84,6 +86,8 @@ function ProfileForm({ courseId, folder, initialProfile, reload }: {
   const [generateRubric, setGenerateRubric] = useState(initialProfile?.rubricPolicy === "generate");
   const savingProfile = status === "saving";
   const existingEmbeddedGenerator = baseline?.provider === "embedded" && baseline.rubricPolicy === "generate";
+  const targetedExecution = organization.trim().toLowerCase() === "intro-to-computer-science-fall-2026" && folder === "assignments/module_12";
+  const invalidExecutionProvider = targetedExecution && draft.runCode && draft.provider !== "gemini";
 
   function updateDraft(changes: Partial<ProfileDraft>) {
     setDraft((current) => ({ ...current, ...changes }));
@@ -92,7 +96,7 @@ function ProfileForm({ courseId, folder, initialProfile, reload }: {
 
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (saving.current || status === "conflict") return;
+    if (saving.current || status === "conflict" || invalidExecutionProvider) return;
     if (!generateRubric && !draft.rubric.trim()) {
       setRubricError(true);
       return;
@@ -144,8 +148,10 @@ function ProfileForm({ courseId, folder, initialProfile, reload }: {
             }} />}
         <FormControlLabel control={<Checkbox checked={draft.applyNamingDeduction} disabled={savingProfile}
           onChange={(event) => updateDraft({ applyNamingDeduction: event.currentTarget.checked })} />} label="Apply naming deductions" />
-        <p>Automatic code execution is unavailable.</p>
-        {baseline?.runCode && (
+        <Typography component="p" variant="body2">Automatic code execution is unavailable. {targetedExecution && "For this assignment, targeted regrades can run source tests in an isolated sandbox and save an unscored review draft. This requires Gemini. With this option on, automatic checks for this folder do not run."}</Typography>
+        {targetedExecution ? <FormControlLabel control={<Checkbox checked={draft.runCode} disabled={savingProfile || (draft.provider !== "gemini" && !draft.runCode)}
+          onChange={(event) => updateDraft({ runCode: event.currentTarget.checked })} />}
+          label="Run source tests for targeted regrades (review only)" /> : baseline?.runCode && (
           <FormControlLabel control={<Checkbox checked={draft.runCode} disabled={savingProfile}
             onChange={(event) => updateDraft({ runCode: event.currentTarget.checked })} />}
             label="Keep saved code execution opt-in. Clear it to use automatic grading." />
@@ -162,8 +168,9 @@ function ProfileForm({ courseId, folder, initialProfile, reload }: {
         )}
       </fieldset>
       {saveError && <p role="alert">{saveError}</p>}
+      {invalidExecutionProvider && <Typography role="alert" color="error" variant="body2">Choose Gemini or clear source test execution before saving.</Typography>}
       <div>
-        <Button type="submit" variant="contained" disabled={savingProfile || status === "conflict"}>Save folder profile</Button>
+        <Button type="submit" variant="contained" disabled={savingProfile || status === "conflict" || invalidExecutionProvider}>Save folder profile</Button>
         {status === "conflict" && <Button type="button" onClick={reload}>Reload saved profile and discard edits</Button>}
       </div>
     </form>

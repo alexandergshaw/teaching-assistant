@@ -71,13 +71,15 @@ export async function planRepoGradeCourse(
 }
 
 type PinnedInput = {
-  repo: string; folder: string; sourceCommit: string; profile: RepoGradeProfile; rubric: string; runCode: boolean;
+  repo: string; folder: string; sourceCommit: string; profile: RepoGradeProfile; rubric: string; runCode: boolean; targetedModule12?: boolean;
+  executionDeadlineMs?: number;
   preparedReadme?: PreparedRepoGradeReadme;
   beforeDispatch?: LlmExecutionPolicy["beforeDispatch"];
 };
 type PinnedEvaluation = RepoGradeResponse | { knownFailure: true };
 
 type AutomaticRuntime = {
+  deadlineMs?: number;
   startupBatchId?: string;
   targetedRun?: { runId: string; lease: string };
   changedRefreshRun?: { runId: string; lease: string };
@@ -96,6 +98,8 @@ type AutomaticRuntime = {
 };
 
 const PINNED_EVALUATION_BUDGET_MS = 45_000;
+const MODULE12_EVALUATION_BUDGET_MS = 160_000;
+const MODULE12_MINIMUM_BUDGET_MS = 150_000;
 
 /** Only the admitted runner invokes the real evaluator. The injected loader
  * must supply a previously prepared cohort, including its exact receipt. */
@@ -104,12 +108,16 @@ async function evaluatePinnedRepoGrade(input: PinnedInput): Promise<PinnedEvalua
   const [owner, name, extra] = repo.split("/");
   // The sandbox has its own timeout and result contract. A persisted opt-in
   // requires a coordinated execution policy before automatic dispatch.
-  if (runCode || !owner || !name || extra !== undefined || repo.trim() !== repo
+  if ((runCode && !input.targetedModule12) || !owner || !name || extra !== undefined || repo.trim() !== repo
     || !validateGithubOwnerRepo(owner, name) || !isGithubCommitSha(sourceCommit)) return { knownFailure: true };
 
   const callSink = createGradeCallSink();
-  const deadlineMs = Date.now() + PINNED_EVALUATION_BUDGET_MS;
-  const signal = AbortSignal.timeout(PINNED_EVALUATION_BUDGET_MS);
+  const budgetMs = runCode && input.targetedModule12
+    ? Math.min(MODULE12_EVALUATION_BUDGET_MS, (input.executionDeadlineMs ?? 0) - Date.now())
+    : PINNED_EVALUATION_BUDGET_MS;
+  if (budgetMs < (runCode ? MODULE12_MINIMUM_BUDGET_MS : 1)) return { knownFailure: true };
+  const deadlineMs = Date.now() + budgetMs;
+  const signal = AbortSignal.timeout(budgetMs);
   let dispatched = false;
   try {
     const response = await evaluateRepoGrade(
@@ -117,9 +125,15 @@ async function evaluatePinnedRepoGrade(input: PinnedInput): Promise<PinnedEvalua
       profile.useReadmeInstructions, runCode, profile.applyNamingDeduction, sourceCommit,
       {
         automaticGrader: profile,
+        targetedModule12: input.targetedModule12,
         preparedReadme,
         modelExecution: {
-          deadlineMs, signal, beforeDispatch,
+          deadlineMs, signal, beforeDispatch: beforeDispatch && (async (dispatchSignal) => {
+            await beforeDispatch(dispatchSignal);
+            // Sandbox and model dispatch both make later transport failures
+            // uncertain; do not classify them as a known pre-dispatch failure.
+            dispatched = true;
+          }),
           ...(profile.provider === "gemini" && {
             pinnedGemini: { model: profile.model, onDispatch: () => { dispatched = true; } },
           }),
@@ -213,7 +227,8 @@ function classifyEvaluation(
   const result: RepoGradeResultRecord = {
     score: (fraction.earned / fraction.possible) * 100,
     feedback: grade.overallComment,
-    ...(response.unexaminedArtifacts?.length ? { unexaminedArtifacts: response.unexaminedArtifacts, reviewReason: response.reviewReason } : {}),
+    ...(response.sourceExecutionSummary ? { sourceExecutionSummary: response.sourceExecutionSummary } : {}),
+    ...(response.unexaminedArtifacts?.length ? { unexaminedArtifacts: response.unexaminedArtifacts, ...(response.reviewReason && { reviewReason: response.reviewReason }) } : {}),
     sections: {
       strengths: grade.strengths, improvements: grade.improvements,
       resubmitNotice: grade.resubmitNotice, rawScore: grade.totalScore,
@@ -288,6 +303,11 @@ export async function runRepoGradeTarget(
   if (profile.sourceRef !== plannedRef) return { status: "configuration-changed" };
   const receipt = restoreRepoGradeRubric(profile, prepared.receipt);
   if (!receipt) return { status: "profile-unavailable" };
+  // A slow isolated run needs a bounded host deadline and settlement reserve.
+  // Refuse before admission rather than start work that the host will kill.
+  if (profile.runCode && runtime.targetedRun && folder === "assignments/module_12"
+    && source.repo.toLowerCase().startsWith("intro-to-computer-science-fall-2026/")
+    && (!runtime.deadlineMs || runtime.deadlineMs - Date.now() < MODULE12_MINIMUM_BUDGET_MS + 15_000)) return { status: "runtime-unavailable" };
 
   let unsettled: UnsettledEvaluation | undefined;
   const admission = await runWithRepoGradeAdmission({
@@ -304,6 +324,9 @@ export async function runRepoGradeTarget(
     const evaluation = classifyEvaluation(await evaluatePinned({
       repo: source.repo, folder, sourceCommit: source.sourceCommit, profile, rubric: receipt.rubric,
       runCode: profile.runCode === true, beforeDispatch, preparedReadme: prepared.preparedReadme,
+      executionDeadlineMs: runtime.deadlineMs,
+      targetedModule12: !!runtime.targetedRun && folder === "assignments/module_12"
+        && source.repo.toLowerCase().startsWith("intro-to-computer-science-fall-2026/"),
     }), source.sourceCommit, source.repo, profile, receipt.rubric, prepared.preparedReadme);
     const { settlement, ...value } = evaluation;
     // Settlement can fail after the evaluator has already returned. Keep the

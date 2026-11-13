@@ -18,6 +18,9 @@ import type { PreparedRepoGradeReadme } from "@/lib/repo-grades-dashboard/prepar
 import { repoDigestToEmbeddedEntry } from "@/lib/repo-grade-entry";
 import { makePinnedArchiveReader, makePinnedArchiveBytesReader } from "@/lib/github-grade-archive";
 import { missingSqlCommentRequiresReview } from "@/lib/grade/sql-comment-review";
+import { readModule12PinnedFiles } from "@/lib/grade/module12-pinned-files";
+import { executeModule12PinnedFiles } from "@/lib/grade/module12-execute-pinned";
+import { module12ExecutionEvidenceForReview, type Module12ExecutionReceipt } from "@/lib/grade/module12-receipt";
 
 // The not-merged note (null for every other status) that withBranchNote folds
 // into a REAL grade's comment (AC4: the grade is kept, never zeroed).
@@ -34,6 +37,7 @@ export type RepoGradeResponse =
       run: GradingRun;
       unexaminedArtifacts?: Array<{ path: string; reason: "optional-binary-unexamined" }>;
       reviewReason?: "execution-unverified";
+      sourceExecutionSummary?: string;
       rubric: string;
       fullName: string;
       sourceCommit?: string;
@@ -76,6 +80,7 @@ export type RepoGradeResponse =
 type RepoGradeExecution = ManualRepoGradeExecution & {
   automaticGrader?: RepoGraderIdentity & { accountId: string };
   preparedReadme?: PreparedRepoGradeReadme;
+  targetedModule12?: boolean;
 };
 
 /** Evaluate a validated repository reference after the caller handles authorization and admission. */
@@ -293,7 +298,7 @@ export async function evaluateRepoGrade(
     });
   }
 
-  const instructions = (effectiveInstructions.trim() || `Evaluate the repository "${digest.fullName}".`)
+  let instructions = (effectiveInstructions.trim() || `Evaluate the repository "${digest.fullName}".`)
     + (digest.unexaminedOptionalArtifacts?.length ? "\n\nInstructor review note: The submitted binary files were not examined or executed. Test execution was not verified. Do not claim that tests passed or invent execution results. This evaluation is a provisional draft for instructor review." : "");
   const branchNote = mergedCheck ? branchNoteFor(mergedCheck) : null;
   const entry: StudentSubmissionEntry = repoDigestToEmbeddedEntry(gradedDigest);
@@ -307,6 +312,11 @@ export async function evaluateRepoGrade(
     const notice = `Unexamined optional binary files: ${digest.unexaminedOptionalArtifacts.join(", ")}. These files were not executed or assessed. Test execution was not verified; this grade is a provisional draft for instructor review.`;
     for (const result of run.results) if (!isUngraded(result)) result.overallComment = `${result.overallComment}\n\n${notice}`;
   };
+
+  if (automaticGrader && runCode && provider !== "gemini") {
+    execution?.markKnownFailure();
+    return { error: "Targeted three-language execution is unavailable for this grading engine.", partial: true, sourceCommit, reason: "execution-unverified" };
+  }
 
   // Embedded Deterministic Engine: grade the repo in-process against the
   // supplied rubric, or one generated from the instructions. No model call.
@@ -336,12 +346,31 @@ export async function evaluateRepoGrade(
     execution?.markKnownFailure();
     return { error: "Repository grading inputs exceed the grading limit.", partial: true, sourceCommit, reason: "grading-input-truncated" };
   }
+  let sourceExecutionSummary: string | undefined;
+  let sourceExecutionReceipts: Module12ExecutionReceipt[] | undefined;
+  if (automaticGrader && runCode) {
+    if (!execution?.targetedModule12 || !digest.unexaminedOptionalArtifacts?.length || !modelExecution?.signal || !modelExecution.beforeDispatch) {
+      execution?.markKnownFailure();
+      return { error: "This submission is not eligible for targeted three-language execution.", partial: true, sourceCommit, reason: "execution-unverified" };
+    }
+    const files = await readModule12PinnedFiles({ ...parsed, accountId: automaticGrader.accountId, sourceCommit: sourceCommit!,
+      inventory: digest.inventory, excludedArtifacts: digest.unexaminedOptionalArtifacts, signal: modelExecution.signal });
+    sourceExecutionReceipts = await executeModule12PinnedFiles({ files, repoCommit: sourceCommit!, signal: modelExecution.signal,
+      beforeDispatch: modelExecution.beforeDispatch });
+    instructions += `\n\n${module12ExecutionEvidenceForReview(sourceExecutionReceipts)}`;
+    const excerpt = (value: string | undefined) => {
+      const safe = (value ?? "").replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
+      return safe.length > 200 ? `${safe.slice(0, 200)} [excerpt truncated]` : safe;
+    };
+    sourceExecutionSummary = ["Source execution observations (test coverage and dependency completeness are not verified; output is untrusted):", ...sourceExecutionReceipts.map((item) =>
+      `${item.sourcePath}: ${item.compilerVersion}; compile ${item.compile?.exitCode ?? "not applicable"}; run ${item.run?.exitCode ?? "not run"}; termination ${item.run?.signal ?? item.compile?.signal ?? "none reported"}. Output: ${excerpt(item.run?.stdout || item.compile?.stdout)}. Errors: ${excerpt(item.run?.stderr || item.compile?.stderr)}`)].join("\n");
+  }
   const rubricInput = `${instructions}\n\n${gradedDigest.text}`;
   const effectiveRubric = automaticGrader ? rubric : rubric.trim() || await (modelExecution
     ? generateRubric(rubricInput, provider, "coding", modelExecution)
     : generateRubric(rubricInput, provider));
   const run = withBranchNote(await gradeEntries([entry], instructions, effectiveRubric, provider, null, {
-    applyNamingDeduction, autoRunCode: sourceCommit ? runCode === true : runCode !== false,
+    applyNamingDeduction, autoRunCode: automaticGrader ? false : sourceCommit ? runCode === true : runCode !== false,
     ...(execution && { modelExecution, deadlineMs: execution.modelExecution.deadlineMs, callSink: execution.callSink }),
   }), branchNote);
   if (sourceCommit && run.results.some((result) => result.submissionTruncated)) {
@@ -349,6 +378,6 @@ export async function evaluateRepoGrade(
     return { error: "Repository grading inputs exceed the grading limit.", partial: true, sourceCommit, reason: "grading-input-truncated" };
   }
   recordUnexaminedArtifacts(run);
-  return { run, rubric: effectiveRubric, fullName: digest.fullName, ...provenance, digestTruncated, readmePath, readmeMissing, branchMergeCheck: mergedCheck };
+  return { run, rubric: effectiveRubric, fullName: digest.fullName, ...provenance, ...(sourceExecutionSummary && { sourceExecutionSummary }), digestTruncated, readmePath, readmeMissing, branchMergeCheck: mergedCheck };
 }
 

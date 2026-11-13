@@ -9,9 +9,12 @@ export const maxDuration = 300;
 
 // Leave time for the final bounded scan, rubric preparation and evaluation.
 const CLAIM_WINDOW_MS = 85_000;
+// Reserve 30 seconds for settlement and platform shutdown after evaluation.
+const EVALUATION_DEADLINE_MS = 270_000;
 const MAX_CLAIMS_PER_TICK = 32;
 
 export async function GET(request: Request) {
+  const evaluationDeadlineMs = Date.now() + EVALUATION_DEADLINE_MS;
   const secret = process.env.CRON_SECRET;
   if (!secret) return Response.json({ status: "misconfigured" }, { status: 500 });
   const actual = Buffer.from(request.headers.get("authorization") ?? "");
@@ -25,7 +28,7 @@ export async function GET(request: Request) {
     return Response.json({ status: "disabled" });
   }
   const deadline = performance.now() + CLAIM_WINDOW_MS;
-  const worker = createAutomaticRepoGradeWorker(mode);
+  const worker = createAutomaticRepoGradeWorker(mode, { deadlineMs: evaluationDeadlineMs });
   const supabase = createServiceClient();
   let handled = 0;
   let scheduled = { accepted: 0, failed: 0 };

@@ -28,7 +28,7 @@ describe("durable repository grading discovery", () => {
     mocks.plan.mockResolvedValue({ discovery: { status: "scanned", repos: [] }, folderSources: new Map() });
     mocks.history.mockImplementation(async (_owner, _course, targets: RepoGradeStartupTarget[]) =>
       new Map(targets.map((target) => [repoGradeStartupKey(target), "succeeded"])));
-    const worker = createAutomaticRepoGradeWorker("coordinated");
+    const worker = createAutomaticRepoGradeWorker("coordinated", { deadlineMs: 123456 });
     await expect(worker(work, "lease")).resolves.toEqual({ state: "already-processed" });
     expect(mocks.evaluate).not.toHaveBeenCalled();
     mocks.history.mockImplementation(async (_owner, _course, targets: RepoGradeStartupTarget[]) =>
@@ -36,7 +36,7 @@ describe("durable repository grading discovery", () => {
     mocks.evaluate.mockResolvedValue({ status: "succeeded" });
     await expect(worker(work, "lease")).resolves.toEqual({ state: "succeeded" });
     expect(mocks.evaluate).toHaveBeenCalledWith(expect.anything(), expect.anything(),
-      expect.objectContaining({ changedRefreshRun: { runId: "run", lease: "lease" } }));
+      expect.objectContaining({ changedRefreshRun: { runId: "run", lease: "lease" }, deadlineMs: 123456 }));
     mocks.evaluate.mockClear();
     await expect(worker({ ...work, sha: "b".repeat(40) }, "lease")).resolves.toEqual({ state: "blocked", reason: "changed-source-mismatch" });
     expect(mocks.evaluate).not.toHaveBeenCalled();

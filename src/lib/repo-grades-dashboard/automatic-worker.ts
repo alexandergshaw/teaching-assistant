@@ -15,7 +15,7 @@ import { PreparationGithubThrottle } from "./preparation-github-throttle";
 
 export type AutomaticRepoGradeMode = "coordinated" | "embedded-only";
 
-export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
+export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode, options?: { deadlineMs: number }) {
   // Legacy and partial courses still share a scan within one tick, as before.
   const legacyPlans = new Map<string, Awaited<ReturnType<typeof planRepoGradeCourse>>>();
   return async (work: AutomaticRepoGradeWork, lease: string): Promise<AutomaticRepoGradeCompletion> => {
@@ -159,6 +159,7 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
     let preparationThrottle: PreparationGithubThrottle | undefined;
     let evidenceContinue: PreparationEvidenceContinue | undefined;
     const outcome = await runRepoGradeTarget(plan, target, {
+      ...(options && { deadlineMs: options.deadlineMs }),
       ...(targeted && { targetedRun: { runId, lease } }),
       ...(refresh && { changedRefreshRun: { runId, lease } }),
       ...(!targeted && prior === "recoverable-partial" && { recoveryRun: { runId, lease } }),
@@ -167,6 +168,8 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
       loadPreparedProfile: (scope) => mode === "embedded-only"
         ? prepareEmbeddedRepoGradeStartupProfile(scope, expectedRef)
         : prepareRepoGradeStartupProfile(scope, plan.discovery, expectedRef, target, plan.courseConfig, plan.courseKindBasis, {
+          allowTargetedModule12Execution: !!targeted && target.folder === "assignments/module_12"
+            && target.repo.toLowerCase().startsWith("intro-to-computer-science-fall-2026/"),
           observeProfileFailure: (reason, example) => { profileFailure = reason; readmeExample = example; },
           resolveEvidence: createAutomaticRepoGradeEvidenceResolver(
             snapshot?.basis ?? plan.snapshotBasis ?? "legacy",

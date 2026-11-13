@@ -5,7 +5,7 @@ import { LlmOutcomeUnknownError, type LlmExecutionPolicy } from "@/lib/llm";
 import { SandboxExecutionRefusedError } from "@/lib/code-runner";
 import { createGradeCallSink, type GradeCallSink } from "@/lib/grade/grade-item-diagnostic";
 import { BoundedRubricRefusalError } from "@/lib/grade/rubric";
-import { beginRepoGradeDispatch, claimRepoGrade, settleRepoGrade } from "./ledger";
+import { beginRepoGradeDispatch, checkRepoGradeTargetDispatch, claimRepoGrade, settleRepoGrade } from "./ledger";
 import type { RepoGradeAutomaticSettlement, RepoGradeClaim, RepoGradeClaimRequest, RepoGradeManualSettlement } from "./state";
 import { repoGradeAdmissionMode } from "./admission-mode";
 
@@ -74,6 +74,12 @@ export async function runWithRepoGradeAdmission<T>(
       if (!evaluating || remainingMs === null || performance.now() - dispatchRequestedAt >= remainingMs) {
         throw new Error("Repository grading dispatch was denied.");
       }
+      if ("targetedRun" in request && request.targetedRun
+        && !await Promise.race([checkRepoGradeTargetDispatch(claim, request.targetedRun), interrupted.promise])) {
+        throw new Error("Targeted repository grading was paused or its lease expired.");
+      }
+      signal.throwIfAborted();
+      if (!evaluating || performance.now() - dispatchRequestedAt >= remainingMs) throw new Error("Repository grading dispatch was denied.");
       dispatchAllowed = true;
     } finally {
       signal.removeEventListener("abort", abort);

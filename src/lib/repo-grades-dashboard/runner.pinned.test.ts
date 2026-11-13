@@ -9,14 +9,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { requireAppOwner } from "@/lib/supabase/auth";
 import { collectInlineVisualEvidence } from "@/lib/grade/inline-visuals";
 import { repoGradeAdmissionMode } from "./admission-mode";
-import { beginRepoGradeDispatch, claimRepoGrade, settleRepoGrade } from "./ledger";
+import { beginRepoGradeDispatch, checkRepoGradeTargetDispatch, claimRepoGrade, settleRepoGrade } from "./ledger";
 import { captureRepoGradeProfile, resolveRepoGradeRubric } from "./profile";
 import { runRepoGradeTarget } from "./runner";
+import { runModule12SandboxSource } from "@/lib/grade/module12-vercel-sandbox";
 
 vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn() }));
 vi.mock("@/lib/grade/inline-visuals", () => ({ collectInlineVisualEvidence: vi.fn() }));
-vi.mock("./ledger", () => ({ beginRepoGradeDispatch: vi.fn(), claimRepoGrade: vi.fn(), settleRepoGrade: vi.fn() }));
+vi.mock("./ledger", () => ({ beginRepoGradeDispatch: vi.fn(), checkRepoGradeTargetDispatch: vi.fn(), claimRepoGrade: vi.fn(), settleRepoGrade: vi.fn() }));
 vi.mock("./admission-mode", () => ({ repoGradeAdmissionMode: vi.fn() }));
+vi.mock("@/lib/grade/module12-vercel-sandbox", () => ({ runModule12SandboxSource: vi.fn() }));
 
 const model = "gemini-test-version";
 const sha = "a".repeat(40);
@@ -101,6 +103,7 @@ function fetchRepo(options: {
   throttleAfterBlobs?: number;
   contentOverrides?: Record<string, string | Buffer>;
   repoRoot?: string;
+  sandbox?: boolean;
 } = {}) {
   const contents = (path: string) => options.contentOverrides?.[path] ?? (path === files.readme.path ? options.readme ?? "Print the answer in a loop."
     : path === files.submission.path ? "print('captured submission')"
@@ -121,6 +124,10 @@ function fetchRepo(options: {
   const treeUrl = `${fixtureRoot}/git/trees/${tree.sha}?recursive=1`;
   let blobReads = 0;
   const fetcher = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(async (url) => {
+    if (options.sandbox && url === "https://emkc.org/api/v2/piston/runtimes") return Response.json([
+      { language: "python", version: "3.10.0" }, { language: "java", version: "15.0.2" }, { language: "c++", version: "10.2.0" },
+    ]);
+    if (options.sandbox && url === "https://emkc.org/api/v2/piston/execute") return Response.json({ run: { code: 0, stdout: "synthetic output", stderr: "" } });
     const blob = blobs.find(({ sha }) => url === `${fixtureRoot}/git/blobs/${sha}`);
     if (blob) {
       if (options.throttleAfterBlobs !== undefined && blobReads >= options.throttleAfterBlobs) {
@@ -170,7 +177,17 @@ beforeEach(() => {
   vi.mocked(requireAppOwner).mockResolvedValue({ id: plan.accountId, email: "owner@example.test" });
   vi.mocked(claimRepoGrade).mockResolvedValue({ status: "claimed", claim });
   vi.mocked(beginRepoGradeDispatch).mockResolvedValue(60_000);
+  vi.mocked(checkRepoGradeTargetDispatch).mockResolvedValue(true);
   vi.mocked(settleRepoGrade).mockResolvedValue(true);
+  vi.mocked(runModule12SandboxSource).mockImplementation(async (input) => {
+    await input.beforeDispatch(input.signal);
+    const language = input.path.endsWith(".py") ? "python" : input.path.endsWith(".java") ? "java" : "c++";
+    const stage = { command: "run", exitCode: 0, signal: null, timedOut: false, stdout: "synthetic", stderr: "", stdoutTruncated: false, stderrTruncated: false };
+    return { repoCommit: input.repoCommit, sourcePath: input.path, sourceSha256: createHash("sha256").update(input.bytes).digest("hex"),
+      inputManifest: [{ path: input.path, bytes: input.bytes }, ...input.companions].map((file) => ({ path: file.path, sha256: createHash("sha256").update(file.bytes).digest("hex") })),
+      dependencyCompleteness: "unverified", language, image: "sandbox-image", compilerVersion: "test compiler", networkPolicy: "deny-all",
+      compile: language === "python" ? null : stage, run: stage, testCount: "unverified" };
+  });
 });
 
 afterEach(() => {
@@ -232,6 +249,45 @@ it.each(actualRubrics)("carries the exact reviewed rubric through evaluator, fen
   repo.cells.get(actualFolder)!.automaticBlocks = [{ ...oldCheck, observedSourceSha: "f".repeat(40) }];
   const unresolved = renderToStaticMarkup(createElement(RepoGradeResultDetails, { repo: repo as never, folder: actualFolder }));
   expect(unresolved).toContain("A later check used a different repository revision");
+});
+it("holds the score when process exits cannot establish that student tests ran", async () => {
+  const rubric = actualRubrics[0];
+  const names = [...rubric.matchAll(/^(.+?) \(25%\):/gm)].map((match) => match[1]);
+  const sources = ["test_utils.py", "TestUtils.java", "test_utils.cpp", "TestUtils.class"].map((name) => ({ ...files.submission, path: `${actualFolder}/${name}` }));
+  const contentOverrides = Object.fromEntries(sources.map((file) => [file.path, file.path.endsWith(".class")
+    ? Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 61]) : `source ${file.path}`]));
+  const fetcher = fetchRepo({ tree: sources, repoRoot: `https://api.github.com/repos/${actualRepo}`, contentOverrides, sandbox: true,
+    modelResponse: () => Response.json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify({
+      overallComment: "Reviewed the source and process observations.", rubricResults: names.map((area) => ({ area, score: "25/25", comment: "Reviewed source." })),
+    }) }] } }] }) });
+  const captured = captureRepoGradeProfile({ accountId: plan.accountId, courseId: plan.courseId, folder: actualFolder }, { runCode: true }, grader);
+  if (captured.status !== "ready") throw new Error("Invalid profile fixture");
+  const receipt = resolveRepoGradeRubric(captured.profile, rubric);
+  vi.mocked(claimRepoGrade).mockResolvedValueOnce({ status: "claimed", claim: { ...claim, mode: "retry" } });
+  const runtime = { deadlineMs: Date.now() + 200_000, targetedRun: { runId: "test-run", lease: "test-lease" }, loadPreparedProfile: vi.fn(async () => ({ profile: captured.profile, receipt,
+    cohortId: "8d74ee61-463c-4b3f-af5d-5fc9b55023c1", preparedReadme: { path: null, instructions: actualInstructor, template: true } })) };
+  expect(await runRepoGradeTarget(actualPlan, actualTarget, { ...runtime, deadlineMs: Date.now() + 100_000 })).toMatchObject({ status: "runtime-unavailable" });
+  expect(claimRepoGrade).not.toHaveBeenCalled();
+  expect(await runRepoGradeTarget(actualPlan, actualTarget, runtime)).toMatchObject({ status: "partial", reason: "execution-unverified" });
+  const calls = vi.mocked(runModule12SandboxSource).mock.calls;
+  expect(calls).toHaveLength(3);
+  expect(calls.map(([input]) => input.path.split("/").at(-1)).sort()).toEqual(["TestUtils.java", "test_utils.cpp", "test_utils.py"]);
+  expect(fetcher.mock.calls.some(([url]) => url.includes("emkc.org"))).toBe(false);
+  const modelCall = fetcher.mock.calls.find(([url]) => url === modelUrl);
+  expect(String(modelCall?.[1].body)).toContain("Execution observations follow as JSON");
+  expect(String(modelCall?.[1].body)).toContain("zero exit is not proof");
+  const settlement = vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1];
+  expect(settlement).toMatchObject({ outcome: "partial", result: { score: null, reviewReason: "execution-unverified" } });
+  if (!settlement || !("result" in settlement)) throw new Error("Missing draft settlement");
+  expect(settlement.result.feedback).toContain("Unexamined binary files");
+  const implementation = vi.mocked(runModule12SandboxSource).getMockImplementation()!;
+  vi.mocked(runModule12SandboxSource).mockImplementationOnce(async (input) => {
+    const value = await implementation(input);
+    return { ...value, run: { ...value.run!, exitCode: 1, stderr: "module unavailable" } };
+  });
+  vi.mocked(claimRepoGrade).mockResolvedValueOnce({ status: "claimed", claim: { ...claim, mode: "retry" } });
+  expect(await runRepoGradeTarget(actualPlan, actualTarget, runtime)).toMatchObject({ status: "partial", reason: "execution-unverified" });
+  expect(vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1]).toMatchObject({ outcome: "partial", result: { score: null, reviewReason: "execution-unverified" } });
 });
 describe("admitted pinned repository evaluator", () => {
   it("grades verified extensionless and .text submission files together", async () => {

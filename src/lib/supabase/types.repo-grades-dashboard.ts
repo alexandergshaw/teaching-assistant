@@ -27,6 +27,7 @@ export type RepoGradeFeedbackField = keyof RepoGradeFeedbackSections | "overall"
 export type RepoGradeUnexaminedArtifact = { path: string; reason: "optional-binary-unexamined" };
 
 export type RepoGradeResultRecord = {
+  sourceExecutionSummary?: string;
   score: number;
   feedback: string;
   sections: RepoGradeFeedbackSections;

@@ -31,7 +31,7 @@ function attempt(generation: number, repo: string, folder: string, score: number
     status: score === null ? "failed" : "succeeded",
     claimedAt: "2026-11-06T12:00:00.000Z", settledAt: null,
     feedback: score === null ? null : `Feedback for ${repo}/${folder}`,
-    feedback_sections: null, feedback_retention: null, rubric: null,
+    feedback_sections: null, unexamined_artifacts: null, feedback_retention: null, rubric: null,
   };
 }
 

@@ -19,7 +19,7 @@ it("exports bounded history metrics for success, unavailable storage, and reject
         generation: 42, repo: "private/repo", folder: "private-folder", sourceRef: "private-branch",
         commit: "a".repeat(40), profileFingerprint: "b".repeat(64), status: "succeeded",
         claimedAt: at, settledAt: at, score: 42, feedback: "private-feedback",
-        rubric: null, feedback_retention: null, feedback_sections: null,
+        rubric: null, feedback_retention: null, feedback_sections: null, unexamined_artifacts: null,
       }],
     })
     .mockResolvedValueOnce({ status: "storage-unavailable" })

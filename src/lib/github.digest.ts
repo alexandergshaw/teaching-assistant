@@ -359,7 +359,10 @@ export async function ingestRepo(
           const body = bytes.get(entry.path);
           if (body && classifyModule12Artifact(entry.path, body, paths, opts.module12OptionalArtifacts.trustedInstructions)) optionalArtifacts.push(entry.path);
         }
-      } catch { signal?.throwIfAborted(); }
+      } catch (error) {
+        signal?.throwIfAborted();
+        if (error instanceof GithubGradeSourceRateLimitError) throw error;
+      }
     }
   }
   const selectedTree = scopedTree.filter((entry) => !optionalArtifacts.includes(entry.path));

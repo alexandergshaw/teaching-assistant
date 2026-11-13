@@ -641,7 +641,7 @@ export default function RepoGradesGrid({
                           checked={selectedGradeCells.has(gradeSelectionKey(repo.name, folder))}
                           onChange={() => onToggleGradeCells([{ repo: repo.name, folder }])}
                           slotProps={{ input: { "aria-label": `Select ${repo.name} for ${label}` } }} />
-                        <RepoGradeResultDetails repo={repo} folder={folder}
+                        <RepoGradeResultDetails courseId={targetCourseId} repo={repo} folder={folder}
                           scanStatus={cell?.status} criterionOrder={rubricOrders.get(folder) ?? []} />
                       </div>
                     );
@@ -696,3 +696,4 @@ function RepoGradebookIdentity({ repo, row, linked, selectedFolder, selected, on
     </div>
   );
 }
+

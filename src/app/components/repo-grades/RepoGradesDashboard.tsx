@@ -4,6 +4,7 @@ import { isOwnerDecision } from "@/lib/access";
 import type { FeedbackBoxesEdit } from "../grading-results/gradingResultsHelpers";
 import { hasUnresolvedStaleNoSubmission, unorderedNoSubmissionContext, newerVerifiedNoSubmission, noSubmissionMatchesScan, savedResultIsEarlierThanObservedPin, type RepoGradeMatrix, type RepoGradeSavedAttempt, type RepoGradeSavedResult } from "./repoGradesDashboardModel";
 import { FeedbackDisclosure, RepoResultCopy, RepoResultFeedback } from "./RepoDashboardFeedback";
+import RepoGradeInstructorReview from "./RepoGradeInstructorReview";
 import RepoGradeProfileSettings from "./RepoGradeProfileSettings";
 import RepoGradeRubricScores from "./RepoGradeRubricScores";
 import RepoGradeStatusChip from "./RepoGradeStatusChip";
@@ -53,11 +54,12 @@ export function RepoGradeAutomaticBlockNotice({ discoveryExplanation, pastRunSta
   );
 }
 
-export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrder = [] }: {
+export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrder = [], courseId }: {
   repo: RepoGradeMatrix["rows"][number]["repos"][number];
   folder: string;
   scanStatus?: "ungraded" | "missing-folder" | "scan-error";
   criterionOrder?: readonly string[];
+  courseId?: string;
 }) {
   const cell = repo.cells.get(folder);
   const rawNoSubmission = cell?.automaticBlocks?.find((item) => item.noSubmission && !item.noSubmissionStale);
@@ -89,6 +91,7 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
       Unscored provisional draft: test execution was not verified. Unexamined optional binary files: {draft.unexamined_artifacts?.map((item) => item.path).join(", ")}.
       These files were not executed or assessed. Instructor review is required.
     </Alert>}
+    {draft && courseId && <RepoGradeInstructorReview key={draft.generation} courseId={courseId} generation={draft.generation} sourceSha={draft.commit} areas={(draft.rubric ?? []).map(item => item.area)} />}
     {draft && <FeedbackDisclosure compact title="Review-only draft" label={`Review-only draft: ${repo.name} / ${folder}`}>
       <RepoResultFeedback repo={repo.name} folder={folder} source="review-only draft"
         feedback={{ overall: draft.feedback ?? "", strengths: draft.feedback_sections?.strengths ?? "", improvements: draft.feedback_sections?.improvements ?? "", resubmitNotice: draft.feedback_sections?.resubmitNotice ?? "" }} rubric={draft.rubric ?? []} />
@@ -181,3 +184,4 @@ function SavedAttemptSource({ attempt, label }: { attempt: RepoGradeSavedAttempt
     </p>
   );
 }
+

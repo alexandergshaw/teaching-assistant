@@ -1,3 +1,8 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { addRepoGradeSavedPage } from "@/app/components/repo-grades/repoGradesDashboardModel";
+import { RepoGradeResultDetails } from "@/app/components/repo-grades/RepoGradesDashboard";
+import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import JSZip from "jszip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -94,7 +99,8 @@ function fetchRepo(options: {
   omitFromArchive?: string;
   oversizedArchive?: boolean;
   throttleAfterBlobs?: number;
-  contentOverrides?: Record<string, string>;
+  contentOverrides?: Record<string, string | Buffer>;
+  repoRoot?: string;
 } = {}) {
   const contents = (path: string) => options.contentOverrides?.[path] ?? (path === files.readme.path ? options.readme ?? "Print the answer in a loop."
     : path === files.submission.path ? "print('captured submission')"
@@ -109,23 +115,27 @@ function fetchRepo(options: {
     return { ...file, size, sha: createHash("sha1").update(`blob ${size}\0`).update(text).digest("hex") };
   });
   const tree = gitTree(blobs);
-  const treeUrl = `${root}/git/trees/${tree.sha}?recursive=1`;
+  const fixtureRoot = options.repoRoot ?? root;
+  const fixtureCommit = `${fixtureRoot}/git/commits/${sha}`;
+  const fixtureZipball = `${fixtureRoot}/zipball/${sha}`;
+  const treeUrl = `${fixtureRoot}/git/trees/${tree.sha}?recursive=1`;
   let blobReads = 0;
   const fetcher = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(async (url) => {
-    const blob = blobs.find(({ sha }) => url === `${root}/git/blobs/${sha}`);
+    const blob = blobs.find(({ sha }) => url === `${fixtureRoot}/git/blobs/${sha}`);
     if (blob) {
       if (options.throttleAfterBlobs !== undefined && blobReads >= options.throttleAfterBlobs) {
         return new Response(null, { status: 429, headers: { "Retry-After": "60" } });
       }
       blobReads += 1;
-      return new Response(contents(blob.path));
+      const body = contents(blob.path);
+      return new Response(typeof body === "string" ? body : new Uint8Array(body));
     }
     switch (url) {
-      case commitUrl:
+      case fixtureCommit:
         return options.failTree ? new Response(null, { status: 403 }) : Response.json({ sha, tree: { sha: tree.sha } });
       case treeUrl:
         return Response.json(tree);
-      case zipballUrl:
+      case fixtureZipball:
         return new Response(null, { status: 302, headers: { Location: downloadUrl } });
       case downloadUrl: {
         if (options.oversizedArchive) return new Response(null, { headers: { "Content-Length": String(12 * 1024 * 1024 + 1) } });
@@ -169,6 +179,54 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+const actualInstructor = readFileSync(new URL("./fixtures/module12-instructor.txt", import.meta.url), "utf8");
+const actualRubrics = JSON.parse(readFileSync(new URL("./fixtures/module12-rubrics.json", import.meta.url), "utf8")) as string[];
+const actualRepo = "intro-to-computer-science-fall-2026/info-2350-fixture";
+const actualFolder = "assignments/module_12";
+const actualTarget = { repo: actualRepo, folder: actualFolder, sourceRef: "main", sha };
+const actualPlan = { ...plan, courseConfig: { ...plan.courseConfig, github_org: "intro-to-computer-science-fall-2026" }, discovery: { ...plan.discovery,
+  repos: [{ status: "ready" as const, repo: actualRepo, sourceRef: "main", sourceCommit: sha, folders: [actualFolder] }] } };
+
+it.each(actualRubrics)("carries the exact reviewed rubric through evaluator, fenced draft, history model and rendered disclosure", async (rubric) => {
+  expect(createHash("sha256").update(actualInstructor).digest("hex")).toBe("1319a54338639a2cd0db9aea4222b37be276a7195111a8c977a4aeec2077412f");
+  expect(["5d6383288a2eb5698251e17261879c39a5f43a9f0b01a0bf0e8496c7a0095717", "fc065dfc81f80f127d60f8fdfa47d84f0e1c18afdcfff095f78c8904fb74285f"])
+    .toContain(createHash("sha256").update(rubric).digest("hex"));
+  const names = [...rubric.matchAll(/^(.+?) \(25%\):/gm)].map((match) => match[1]);
+  expect(names).toHaveLength(4);
+  const sources = ["test_utils.py", "TestUtils.java", "test_utils.cpp", "TestUtils.class"].map((name) => ({ ...files.submission, path: `${actualFolder}/${name}` }));
+  const contentOverrides = Object.fromEntries(sources.map((file) => [file.path, file.path.endsWith(".class")
+    ? Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 61]) : `source ${file.path}`]));
+  const fetcher = fetchRepo({ tree: sources, repoRoot: `https://api.github.com/repos/${actualRepo}`, contentOverrides,
+    modelResponse: () => Response.json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify({
+      overallComment: "All tests passed in execution.", rubricResults: names.map((area) => ({ area, score: "25/25", comment: "Execution passed." })),
+    }) }] } }] }) });
+  const captured = captureRepoGradeProfile({ accountId: plan.accountId, courseId: plan.courseId, folder: actualFolder }, {}, grader);
+  if (captured.status !== "ready") throw new Error("Invalid profile fixture");
+  const receipt = resolveRepoGradeRubric(captured.profile, rubric);
+  const runtime = { loadPreparedProfile: vi.fn(async () => ({ profile: captured.profile, receipt,
+    cohortId: "8d74ee61-463c-4b3f-af5d-5fc9b55023c1", preparedReadme: { path: null, instructions: actualInstructor, template: true } })) };
+  expect((await runRepoGradeTarget(actualPlan, actualTarget, runtime)).status).toBe("partial");
+  expect(fetcher.mock.calls.some(([url]) => url === modelUrl)).toBe(true);
+  const settlement = vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1];
+  expect(settlement).toMatchObject({ outcome: "partial", inputsComplete: true, result: { score: null, reviewReason: "execution-unverified",
+    unexaminedArtifacts: [{ path: `${actualFolder}/TestUtils.class`, reason: "optional-binary-unexamined" }] } });
+  if (!settlement || !("result" in settlement)) throw new Error("Missing draft settlement");
+  const result = settlement.result;
+  expect(JSON.stringify(result)).not.toMatch(/All tests passed|Execution passed/i);
+  expect(result.rubric.some((area) => area.score === "Unverified")).toBe(true);
+  const attempts = new Map();
+  addRepoGradeSavedPage(attempts, [{ generation: 7, repo: actualRepo, folder: actualFolder, sourceRef: "main", commit: sha,
+    profileFingerprint: "b".repeat(64), status: "partial", claimedAt: "2026-11-13T10:00:00Z", settledAt: "2026-11-13T10:01:00Z",
+    score: null, feedback: result.feedback, feedback_sections: result.sections, rubric: result.rubric,
+    unexamined_artifacts: result.unexaminedArtifacts ?? null, review_reason: result.reviewReason ?? null, feedback_retention: null }]);
+  const saved = [...attempts.values()][0];
+  const repo = { name: actualRepo, cells: new Map([[actualFolder, { saved, browser: undefined, local: null, retained: [], automaticBlocks: [] }]]) };
+  const html = renderToStaticMarkup(createElement(RepoGradeResultDetails, { repo: repo as never, folder: actualFolder }));
+  expect(html).toContain("Unscored provisional draft");
+  expect(html).toContain("TestUtils.class");
+  expect(html).not.toContain("Submission unknown");
+  expect(html).not.toContain("All tests passed in execution");
+});
 describe("admitted pinned repository evaluator", () => {
   it("grades verified extensionless and .text submission files together", async () => {
     const schema = { ...files.submission, path: "lab/schema" };

@@ -1,0 +1,591 @@
+# Module 12 – Unit Testing Suite
+
+**Topic:** Software Testing and Quality Assurance
+
+---
+
+## Overview
+
+Writing code that *seems* to work is not the same as writing code that *is correct*. How do you know your `is_palindrome` function works for strings with spaces? What happens to your `find_max` function when given an empty list? Manual testing — running the program and eyeballing the output — is unreliable and does not scale. **Automated testing** is the professional solution.
+
+A **unit test** is a small, automated check that verifies a single, specific behavior of a single function. You write hundreds or thousands of them, and you run them all with one command. If any test fails, you know immediately *what* broke and *where*. This is how large software teams make thousands of changes per day without constantly breaking each other's code.
+
+**Test-Driven Development (TDD)** takes this a step further: write the tests *before* writing the function. A failing test describes exactly what the function should do. Then you write just enough code to make the test pass. This discipline leads to cleaner, more focused functions and better test coverage.
+
+---
+
+## Assignment Instructions and Required Deliverables
+
+> This section defines what you must submit. Later worked examples are reference material; they are not additional assignment requirements.
+
+You will write a set of **unit tests** for a module of utility functions. The functions to test are provided below — your job is to implement them and then write a thorough test suite.
+
+### Functions to Implement
+
+| Function | Description |
+|----------|-------------|
+| `is_palindrome(s)` | Returns `true` if the string `s` is a palindrome (reads the same forwards and backwards, ignoring case and spaces). |
+| `count_vowels(s)` | Returns the number of vowel characters (`a e i o u`, case-insensitive) in `s`. |
+| `celsius_to_fahrenheit(c)` | Converts a Celsius value to Fahrenheit using `F = (c × 9/5) + 32`. |
+| `find_max(nums)` | Returns the largest value in a list/array of numbers. Raises an error (or returns a sentinel) if the list is empty. |
+| `reverse_words(s)` | Returns a string with the words of `s` in reversed order (for example, `"Hello World"` becomes `"World Hello"`). |
+
+### Tests to Write
+
+For each function, write tests that cover:
+1. **Normal / expected input** – typical, valid values.
+2. **Edge cases** – empty strings, empty lists, single-character strings, single-element lists, strings with all vowels, etc.
+3. **Invalid / unexpected input** – negative values where applicable, the empty-list case for `find_max`, etc.
+
+You must write **at least 3 tests per function** (15 tests minimum across the whole suite).
+
+You must submit **three separate files**, one per language:
+
+| File | Language |
+|------|----------|
+| `test_utils.py` | Python |
+| `TestUtils.java` | Java |
+| `test_utils.cpp` | C++ |
+
+---
+
+## Instructions
+
+1. Create your branch and open a Codespace (see the repository `README.md`).
+2. Navigate to the `module_12` folder and create the three files.
+3. In each file, implement the five functions **and** the unit tests for those functions.
+4. Run the tests to verify they pass.
+5. Commit and push your work.
+
+---
+
+
+## Reference Examples: Building and Running the Python, Java, and C++ Programs
+
+The graded assignment asks you to implement utility functions and write at least 15 tests. The examples below use **different** practice functions, but they demonstrate the same testing techniques: writing small functions, checking normal cases, checking edge cases, checking exceptions, and printing a clear success message only after all tests pass.
+
+Before running any example, navigate into this module folder:
+
+```bash
+cd assignments/module_12
+```
+
+---
+
+### Python
+
+Python includes the `unittest` module in the standard library, so this example can run automated tests without installing anything. Because Python is interpreted, you run the test file directly with the Python test runner.
+
+**1. Write the file.** Create `practice_utils_demo.py` with this complete example:
+
+```python
+import unittest  # Provides TestCase and the command-line test runner.
+
+
+def has_passing_grade(score):  # Function under test: returns True for 70 or higher.
+    return score >= 70  # A single comparison produces a boolean result.
+
+
+def count_short_words(sentence, max_length):  # Counts words up to max_length.
+    if sentence is None:  # Validate unexpected None input.
+        raise ValueError("sentence cannot be None")
+    if sentence.strip() == "":  # Empty or spaces-only string has zero words.
+        return 0
+
+    words = sentence.strip().split()  # Split on any amount of whitespace.
+    count = 0  # Accumulator starts at zero.
+    for word in words:  # Visit each word.
+        if len(word) <= max_length:  # Count words short enough for the limit.
+            count += 1  # Add one to the accumulator.
+    return count  # Send the final count back to the caller.
+
+
+def average_score(scores):  # Computes mean of a list of numbers.
+    if len(scores) == 0:  # Empty list would cause division by zero.
+        raise ValueError("scores cannot be empty")
+
+    total = 0  # Sum accumulator.
+    for score in scores:  # Visit each score in the list.
+        total += score  # Add the current score to total.
+    return total / len(scores)  # Python division produces a decimal result.
+
+
+class PracticeUtilsDemoTest(unittest.TestCase):  # Groups related unit tests.
+    def test_has_passing_grade(self):  # Test a boolean-returning function.
+        self.assertTrue(has_passing_grade(70), "70 should be passing")  # Boundary case.
+        self.assertTrue(has_passing_grade(100), "100 should be passing")  # Normal high score.
+        self.assertFalse(has_passing_grade(69), "69 should not be passing")  # Just below boundary.
+
+    def test_count_short_words(self):  # Tests for string processing.
+        self.assertEqual(2, count_short_words("CS is fun", 2), "Two words have length 2 or less")
+        self.assertEqual(0, count_short_words("", 3), "Empty sentence has zero words")
+        with self.assertRaises(ValueError, msg="None sentence should raise ValueError"):
+            count_short_words(None, 3)
+
+    def test_average_score(self):  # Tests for numeric lists.
+        self.assertAlmostEqual(90.0, average_score([80, 90, 100]), places=6,
+                               msg="Average of 80, 90, 100 should be 90.0")
+        self.assertAlmostEqual(42.0, average_score([42]), places=6,
+                               msg="Single-item average should equal that item")
+        with self.assertRaises(ValueError, msg="Empty score list should raise ValueError"):
+            average_score([])
+
+
+if __name__ == "__main__":  # Allows `python3 practice_utils_demo.py` too.
+    unittest.main()
+```
+
+**2. Run it.** Python is interpreted, so there is no separate compile step. Run the unittest runner:
+
+```bash
+python3 -m unittest practice_utils_demo.py
+```
+
+**3. Expected output.** If every test passes, the output is similar to:
+
+```text
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.000s
+
+OK
+```
+
+If a test fails, `unittest` prints the failing test method name and the assertion message that tells you which expectation was wrong.
+
+**How to test that it works:**
+- Run the test file normally; it should print dots and `OK`.
+- Temporarily change `return score >= 70` to `return score > 70`, then run again. The boundary test for 70 should fail. Change it back afterward.
+- Add one new test before adding new function behavior. This is the Test-Driven Development habit.
+- Make sure every test method can run independently and does not rely on another test changing shared data.
+
+**Common Python errors and fixes:**
+- `ModuleNotFoundError: No module named 'unittest'`: check that you typed `unittest` correctly; it is part of Python's standard library.
+- `Ran 0 tests`: test method names must start with `test_`, and the class should inherit from `unittest.TestCase`.
+- `AssertionError` or `FAIL`: read the failing test name and message, then fix the function or the expected value.
+- Decimal tests fail even when numbers look the same: use `assertAlmostEqual` for floating-point results.
+- Empty-list tests fail: check `len(scores) == 0` before dividing by `len(scores)`.
+
+---
+
+### Java
+
+JUnit is common in professional Java projects, but it may not be installed in a beginner Codespace. The example below uses plain Java helper methods that throw `AssertionError` when a test fails, so it compiles with only `javac`.
+
+> **Important:** The public class is `PracticeUtilsDemo`, so the file must be named `PracticeUtilsDemo.java`.
+
+**1. Write the file.** Create `PracticeUtilsDemo.java` with this complete example:
+
+```java
+import java.util.Arrays; // Provides Arrays.asList for making small test lists.
+import java.util.List; // Provides the List type used by averageScore.
+
+public class PracticeUtilsDemo { // File name must be PracticeUtilsDemo.java.
+    public static void main(String[] args) { // Tests start running here.
+        testHasPassingGrade(); // Test a boolean-returning function.
+        testCountShortWords(); // Test a string/list-processing function.
+        testAverageScore(); // Test numeric results and exception behavior.
+        System.out.println("All practice Java tests passed."); // Print only if no assertion failed.
+    }
+
+    public static boolean hasPassingGrade(int score) { // Function under test: returns true for 70 or higher.
+        return score >= 70; // A single comparison produces a boolean result.
+    }
+
+    public static int countShortWords(String sentence, int maxLength) { // Counts words up to maxLength.
+        if (sentence == null) { // Validate unexpected null input.
+            throw new IllegalArgumentException("sentence cannot be null");
+        }
+        if (sentence.trim().isEmpty()) { // Empty or spaces-only string has zero words.
+            return 0;
+        }
+
+        String[] words = sentence.trim().split("\\s+"); // Split on one or more whitespace characters.
+        int count = 0; // Accumulator starts at zero.
+        for (String word : words) { // Enhanced for loop visits each word.
+            if (word.length() <= maxLength) { // Count words short enough for the limit.
+                count++; // Add one to the accumulator.
+            }
+        }
+        return count; // Send the final count back to the caller.
+    }
+
+    public static double averageScore(List<Integer> scores) { // Computes mean of a list of integers.
+        if (scores.isEmpty()) { // Empty list would cause division by zero.
+            throw new IllegalArgumentException("scores cannot be empty");
+        }
+
+        int total = 0; // Sum accumulator.
+        for (int score : scores) { // Visit each integer in the list.
+            total += score; // Add the current score to total.
+        }
+        return (double) total / scores.size(); // Cast to double so Java does decimal division.
+    }
+
+    private static void testHasPassingGrade() { // Group related tests in one helper.
+        assertTrue(hasPassingGrade(70), "70 should be passing"); // Boundary case.
+        assertTrue(hasPassingGrade(100), "100 should be passing"); // Normal high score.
+        assertFalse(hasPassingGrade(69), "69 should not be passing"); // Just below boundary.
+    }
+
+    private static void testCountShortWords() { // Tests for string processing.
+        assertEquals(2, countShortWords("CS is fun", 2), "Two words have length 2 or less");
+        assertEquals(0, countShortWords("", 3), "Empty sentence has zero words");
+        assertThrows(IllegalArgumentException.class, () -> countShortWords(null, 3),
+                "Null sentence should throw IllegalArgumentException");
+    }
+
+    private static void testAverageScore() { // Tests for numeric lists.
+        assertDoubleEquals(90.0, averageScore(Arrays.asList(80, 90, 100)),
+                "Average of 80, 90, 100 should be 90.0");
+        assertDoubleEquals(42.0, averageScore(Arrays.asList(42)),
+                "Single-item average should equal that item");
+        assertThrows(IllegalArgumentException.class, () -> averageScore(Arrays.asList()),
+                "Empty score list should throw IllegalArgumentException");
+    }
+
+    private static void assertTrue(boolean condition, String message) { // Custom assertion helper.
+        if (!condition) { // If expected true was false, the test failed.
+            throw new AssertionError(message); // Stop the program with a useful message.
+        }
+    }
+
+    private static void assertFalse(boolean condition, String message) { // Opposite of assertTrue.
+        if (condition) { // If expected false was true, the test failed.
+            throw new AssertionError(message);
+        }
+    }
+
+    private static void assertEquals(int expected, int actual, String message) { // Compares integers.
+        if (expected != actual) { // Exact integer comparison.
+            throw new AssertionError(message + " Expected " + expected + ", got " + actual + ".");
+        }
+    }
+
+    private static void assertDoubleEquals(double expected, double actual, String message) { // Compares doubles.
+        double tolerance = 0.000001; // Decimal arithmetic can have tiny rounding differences.
+        if (Math.abs(expected - actual) > tolerance) { // Difference must be very small.
+            throw new AssertionError(message + " Expected " + expected + ", got " + actual + ".");
+        }
+    }
+
+    private static void assertThrows(Class<? extends Exception> expectedType,
+                                     Runnable code,
+                                     String message) { // Checks that code throws an exception.
+        try { // Run the code that should fail.
+            code.run();
+        } catch (Exception e) { // If an exception happened, check its type.
+            if (expectedType.isInstance(e)) { // Correct exception type means the test passed.
+                return;
+            }
+            throw new AssertionError(message + " Wrong exception type: " + e.getClass().getName());
+        }
+        throw new AssertionError(message + " No exception was thrown."); // Code did not fail as expected.
+    }
+}
+```
+
+**2. Compile it.** Run:
+
+```bash
+javac PracticeUtilsDemo.java
+```
+
+**3. Run it.** Run:
+
+```bash
+java PracticeUtilsDemo
+```
+
+**4. Expected output.** If every test passes, the output is:
+
+```text
+All practice Java tests passed.
+```
+
+If a test fails, Java prints an `AssertionError` message that tells you which expectation was wrong.
+
+**How to test that it works:**
+- Run the program normally; it should print the success message.
+- Temporarily change `return score >= 70;` to `return score > 70;`, recompile, and run. The boundary test for 70 should fail. Change it back afterward.
+- Add one new test before adding new function behavior. This is the Test-Driven Development habit.
+- Make sure every test can run independently and does not rely on another test changing shared data.
+
+**Common Java errors and fixes:**
+- `cannot find symbol Arrays`: add `import java.util.Arrays;`.
+- `incompatible types: possible lossy conversion from double to int`: use `double` for decimal averages.
+- A failing test only says `AssertionError` with no details: include a clear message in each assertion helper call.
+- Decimal tests fail even when numbers look the same: compare doubles using a small tolerance, not `==`.
+- `IllegalArgumentException` is never thrown for an empty list: check `scores.isEmpty()` before dividing by `scores.size()`.
+
+---
+
+### C++
+
+C++ has a simple built-in assertion tool in `<cassert>`, but plain `assert(condition)` does not print very friendly messages. The example below uses small helper functions that throw `std::runtime_error` with clear messages.
+
+**1. Write the file.** Create `practice_utils_demo.cpp` with this complete example:
+
+```cpp
+#include <cmath>      // Provides std::abs for comparing doubles.
+#include <iostream>   // Provides std::cout for the success message.
+#include <stdexcept>  // Provides std::invalid_argument and std::runtime_error.
+#include <string>     // Provides std::string.
+#include <vector>     // Provides std::vector for lists of scores and words.
+
+bool hasPassingGrade(int score); // Function prototypes let tests call functions defined later.
+int countShortWords(const std::vector<std::string>& words, int maxLength);
+double averageScore(const std::vector<int>& scores);
+void testHasPassingGrade();
+void testCountShortWords();
+void testAverageScore();
+void check(bool condition, const std::string& message);
+void checkDouble(double expected, double actual, const std::string& message);
+
+int main() { // Test runner starts here.
+    testHasPassingGrade(); // Run boolean tests.
+    testCountShortWords(); // Run vector/string tests.
+    testAverageScore(); // Run numeric and exception tests.
+    std::cout << "All practice C++ tests passed." << std::endl; // Only prints if no test threw.
+    return 0; // Successful test run.
+}
+
+bool hasPassingGrade(int score) { // Returns true if score is at least 70.
+    return score >= 70; // Boundary rule is easy to test.
+}
+
+int countShortWords(const std::vector<std::string>& words, int maxLength) { // Counts short strings.
+    int count = 0; // Accumulator starts at zero.
+    for (const std::string& word : words) { // const reference avoids copying each word.
+        if (static_cast<int>(word.length()) <= maxLength) { // Cast length so comparison types match.
+            count++; // Increase count for each matching word.
+        }
+    }
+    return count; // Return final total.
+}
+
+double averageScore(const std::vector<int>& scores) { // Computes average of integer scores.
+    if (scores.empty()) { // Empty vector cannot be averaged.
+        throw std::invalid_argument("scores cannot be empty");
+    }
+
+    int total = 0; // Sum accumulator.
+    for (int score : scores) { // Visit every score.
+        total += score; // Add current score.
+    }
+    return static_cast<double>(total) / scores.size(); // Cast to double for decimal division.
+}
+
+void testHasPassingGrade() { // Tests for hasPassingGrade.
+    check(hasPassingGrade(70), "70 should be passing"); // Boundary case.
+    check(hasPassingGrade(100), "100 should be passing"); // Normal passing score.
+    check(!hasPassingGrade(69), "69 should not be passing"); // Just below boundary.
+}
+
+void testCountShortWords() { // Tests for countShortWords.
+    check(countShortWords({"CS", "is", "challenging"}, 2) == 2,
+          "Two words should have length 2 or less");
+    check(countShortWords({}, 3) == 0, "Empty vector should have zero short words");
+    check(countShortWords({"a", "to", "code"}, 10) == 3,
+          "All words should count when maxLength is large");
+}
+
+void testAverageScore() { // Tests for averageScore.
+    checkDouble(90.0, averageScore({80, 90, 100}), "Average should be 90.0");
+    checkDouble(42.0, averageScore({42}), "Single-item average should equal that item");
+
+    bool threw = false; // Tracks whether the exception happened.
+    try { // Empty vector should throw.
+        averageScore({});
+    } catch (const std::invalid_argument&) { // Correct exception type.
+        threw = true;
+    }
+    check(threw, "Empty score vector should throw std::invalid_argument");
+}
+
+void check(bool condition, const std::string& message) { // Simple assertion helper.
+    if (!condition) { // A false condition means test failure.
+        throw std::runtime_error(message); // Stop with a readable message.
+    }
+}
+
+void checkDouble(double expected, double actual, const std::string& message) { // Double assertion helper.
+    const double tolerance = 0.000001; // Allows tiny floating-point differences.
+    if (std::abs(expected - actual) > tolerance) { // Compare by distance, not exact equality.
+        throw std::runtime_error(message);
+    }
+}
+```
+
+**2. Compile it.** Run:
+
+```bash
+g++ -Wall practice_utils_demo.cpp -o practice_utils_demo
+```
+
+**3. Run it.** Run:
+
+```bash
+./practice_utils_demo
+```
+
+**4. Expected output.** If every test passes, the output is:
+
+```text
+All practice C++ tests passed.
+```
+
+**How to test that it works:**
+- Run the program and confirm the success message appears.
+- Temporarily break a function, such as changing `score >= 70` to `score > 70`, then recompile and confirm a test fails. Change it back afterward.
+- Add tests for normal cases, edge cases, and invalid cases before considering a function complete.
+- If you use plain `assert`, remember that compiling with `-DNDEBUG` disables asserts; the helper approach above always runs.
+
+**Common C++ errors and fixes:**
+- `error: 'vector' in namespace 'std' does not name a template type`: add `#include <vector>`.
+- `error: 'runtime_error' is not a member of 'std'`: add `#include <stdexcept>`.
+- Average of `80, 90, 100` prints `90` but other averages truncate: cast the total to `double` before division.
+- Comparing doubles with `==` fails unexpectedly: compare with a small tolerance using `std::abs`.
+- Exception test never passes: make sure the function throws before it divides or accesses an empty vector.
+
+---
+## Concepts to Know
+
+### What is a Unit Test?
+A **unit test** is an automated check for one specific behavior of one specific function. "Unit" refers to the smallest testable piece of code — typically a single function or method.
+
+A good unit test has three parts, often called **Arrange–Act–Assert**:
+1. **Arrange** — set up the inputs and any necessary state
+2. **Act** — call the function you are testing
+3. **Assert** — check that the result matches what you expected
+
+```python
+def test_celsius_to_fahrenheit_boiling():
+    # Arrange
+    celsius = 100
+    # Act
+    result = celsius_to_fahrenheit(celsius)
+    # Assert
+    assert result == 212.0, f"Expected 212.0, got {result}"
+```
+
+### Assertions
+An **assertion** is a statement that says "this must be true right now." If the condition is false, the test fails immediately with an error message. Most testing frameworks provide assertion helpers:
+
+**Python (`unittest`):**
+```python
+self.assertEqual(actual, expected)    # exact equality
+self.assertTrue(condition)             # must be True
+self.assertFalse(condition)            # must be False
+self.assertRaises(ExceptionType, fn)  # function must raise this exception
+```
+
+**Java (JUnit 5):**
+```java
+assertEquals(expected, actual);
+assertTrue(condition);
+assertThrows(ExceptionClass.class, () -> fn());
+```
+
+**C++ (plain `assert`):**
+```cpp
+assert(condition);   // program aborts if condition is false
+```
+
+### Test Naming
+Test names should be descriptive enough that a failing test tells you exactly what is broken:
+
+- Good: `test_palindrome_ignores_case` is immediately clear about what is being tested
+- Avoid: `test1` tells you nothing
+
+### Edge Cases
+**Edge cases** are inputs at the boundary of what a function is supposed to handle:
+- Empty string `""` for `is_palindrome`
+- A single character `"a"` — is it a palindrome? (yes, trivially)
+- `[]` for `find_max` — what should happen? (raise an error or return a sentinel)
+- A string with all vowels for `count_vowels`
+
+Edge cases are where bugs hide. A function that works for typical inputs often fails on edge cases.
+
+### Test Independence
+Each test should be **independent** — it should not depend on the result of another test, and it should not change shared state that other tests rely on. This means tests can run in any order and each should produce the same result.
+
+### Code Coverage
+**Code coverage** measures the percentage of your code that is executed by your tests. A function with five branches (five `if` paths) needs at least five tests to achieve full branch coverage. Higher coverage means fewer untested code paths where bugs could hide.
+
+### Test Frameworks
+Each language has standardized test frameworks:
+
+- **Python**: `unittest` (built into the standard library) or `pytest` (popular third-party tool)
+- **Java**: `JUnit 5` — annotate test methods with `@Test`
+- **C++**: `assert()` from `<cassert>` is the simplest option; Google Test is a popular framework
+
+---
+
+## Hints
+
+- Start by writing **one function** and **one test** for it, run the test, then expand from there. Do not try to write everything at once.
+- Name your tests descriptively: `test_palindrome_ignores_case`, `test_count_vowels_empty_string`, etc. A clear name tells the reader what the test checks.
+- In **Python**, create a class that inherits from `unittest.TestCase`. Each test method must start with `test_`. Use `self.assertEqual(actual, expected)`, `self.assertTrue(...)`, `self.assertRaises(...)`.
+- In **Java** with JUnit 5, annotate test methods with `@Test`. Use `assertEquals(expected, actual)`, `assertTrue(...)`, `assertThrows(...)`.
+- In **C++** with plain `assert`, call `assert(condition)` — the program aborts with an error if the condition is false. Print a message before each logical group of tests so you can see progress.
+- Think about **what can go wrong**: what if someone passes an empty string to `is_palindrome`? What if `find_max` receives an empty list? Your tests should document the expected behavior in these cases.
+
+
+Additional beginner guidance for Java and C++:
+- In **Java**, if JUnit is available, `@Test`, `assertEquals`, `assertTrue`, and `assertThrows` are standard. If JUnit is not available, a plain `main` method with helper assertions is acceptable for this course module.
+- In **Java**, compare decimal results with a tolerance when needed, especially for temperature conversions. Tiny floating-point rounding differences should not fail a correct test.
+- In **C++**, include `<vector>`, `<string>`, `<stdexcept>`, and either `<cassert>` or your own assertion helpers. Throw `std::invalid_argument` for invalid inputs such as an empty vector in `find_max`.
+- In **C++**, group tests by function and print a final success message only after every assertion has passed. A program that crashes before the success message is telling you which test area needs attention.
+
+---
+
+## Reference Example – What a Few Tests Might Look Like (Conceptually)
+
+```
+test: is_palindrome("racecar") returns true
+test: is_palindrome("hello") returns false
+test: is_palindrome("A man a plan a canal Panama") returns true (ignoring spaces and case)
+
+test: count_vowels("hello") returns 2
+test: count_vowels("") returns 0
+test: count_vowels("AEIOU") returns 5
+
+test: find_max([3, 1, 4, 1, 5]) returns 5
+test: find_max([42]) returns 42
+test: find_max([]) raises an error or exception
+```
+
+---
+
+## Frequently Asked Questions
+
+**Q: Should the functions and tests be in the same file?**  
+A: Yes — for simplicity, define the utility functions and the test class/functions all in the same file.
+
+**Q: What if JUnit is not available in the Codespace?**  
+A: Check by running `javac TestUtils.java` — if JUnit annotations are not found, you can write tests as a simple Java program that uses `assert` statements or manual `if`/`throw` checks and verify by running the program.
+
+**Q: Does the order of my tests matter?**  
+A: Tests should be independent — no test should depend on the result of another. Run them in any order and they should all pass.
+
+---
+
+## Official Documentation
+
+| Topic | Resource |
+|-------|----------|
+| Python `unittest` module | [docs.python.org – unittest](https://docs.python.org/3/library/unittest.html) |
+| Python `assert` statement | [docs.python.org – assert](https://docs.python.org/3/reference/simple_stmts.html#assert) |
+| JUnit 5 User Guide | [junit.org – JUnit 5 User Guide](https://junit.org/junit5/docs/current/user-guide/) |
+| JUnit 5 Annotations (`@Test`, etc.) | [junit.org – Annotations](https://junit.org/junit5/docs/current/user-guide/#writing-tests-annotations) |
+| C++ `<cassert>` | [cppreference.com – cassert](https://en.cppreference.com/w/cpp/header/cassert) |
+
+---
+
+## Submission Checklist
+
+- [ ] `test_utils.py` implements all five functions and at least 15 tests (≥3 per function). Tests pass when run.
+- [ ] `TestUtils.java` implements all five functions and at least 15 tests (≥3 per function). Tests pass when run.
+- [ ] `test_utils.cpp` implements all five functions and at least 15 tests (≥3 per function). Tests pass when run.
+- [ ] All three files are committed and pushed to your branch.

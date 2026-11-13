@@ -120,7 +120,7 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
     {scanStatus === "scan-error" && <Typography component="p" variant="caption" color="text.secondary">
       Check that GitHub access and the selected branch are available, then refresh the repository scan.
     </Typography>}
-    {!scanStatus && !provenNoSubmission && !cell?.saved?.scored && cell?.saved?.latest.status !== "no-submission" &&
+    {!scanStatus && !draft && !provenNoSubmission && !cell?.saved?.scored && cell?.saved?.latest.status !== "no-submission" &&
       <Typography variant="caption" color="text.secondary">Submission unknown</Typography>}
     {scored && feedback && <RepoResultCopy key={scored.generation} repo={repo.name} folder={folder}
       source="saved" feedback={feedback} rubric={scored.rubric ?? []} distinguishSource={false} />}

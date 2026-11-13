@@ -273,6 +273,14 @@ describe("repository grading ledger RPC boundary", () => {
     await expect(readRepoGradeHistory("course", 43)).resolves.toEqual([
       structured, { ...row, generation: 41, feedback_sections: null }, { ...partial, generation: 40 },
     ]);
+    const draft = { ...structured, status: "partial", score: null, feedback: "Execution was not verified.",
+      feedback_sections: { strengths: "", improvements: "Review required", resubmitNotice: "", rawScore: "Not calculated" },
+      rubric: [{ area: "Execution", score: "Unverified", comment: "Review required" }],
+      unexamined_artifacts: [{ path: "lab/TestUtils.class", reason: "optional-binary-unexamined" }], review_reason: "execution-unverified" };
+    rpc.mockResolvedValueOnce({ data: [draft], error: null });
+    await expect(readRepoGradeHistory("course", 43)).resolves.toEqual([draft]);
+    rpc.mockResolvedValueOnce({ data: [{ ...draft, unexamined_artifacts: [{ path: "../bad", reason: "optional-binary-unexamined" }] }], error: null });
+    await expect(readRepoGradeHistory("course", 43)).rejects.toThrow("Invalid repository grading history response");
     rpc.mockResolvedValueOnce({ data: [{ ...structured, feedback_retention: "strengths" }], error: null });
     await expect(readRepoGradeHistory("course", 43)).rejects.toThrow("Invalid repository grading history response");
     for (const data of [[row, row], [{ ...row, claimed_at: "invalid" }], [{ ...row, score: null }], [{ ...row, generation: 43 }]]) {

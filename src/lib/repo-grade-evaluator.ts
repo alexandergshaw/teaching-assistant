@@ -27,7 +27,7 @@ function branchNoteFor(check: BranchMergeCheck): string | null {
 
 export type RepoGradePartialReason =
   | "tree-truncated" | "file-fetch-failed" | "digest-truncated" | "grading-input-truncated"
-  | "unsupported-submission" | "grading-source-rate-limited" | "comment-evidence-unverified";
+  | "unsupported-submission" | "grading-source-rate-limited" | "comment-evidence-unverified" | "execution-unverified";
 
 export type RepoGradeResponse =
   | {

@@ -2,7 +2,7 @@ import { useSupabase } from "@/context/SupabaseProvider";
 import { Alert, Box, Button, Chip, Stack, Typography } from "@mui/material";
 import { isOwnerDecision } from "@/lib/access";
 import type { FeedbackBoxesEdit } from "../grading-results/gradingResultsHelpers";
-import { unorderedNoSubmissionContext, newerVerifiedNoSubmission, noSubmissionMatchesScan, savedResultIsEarlierThanObservedPin, type RepoGradeMatrix, type RepoGradeSavedAttempt, type RepoGradeSavedResult } from "./repoGradesDashboardModel";
+import { hasUnresolvedStaleNoSubmission, unorderedNoSubmissionContext, newerVerifiedNoSubmission, noSubmissionMatchesScan, savedResultIsEarlierThanObservedPin, type RepoGradeMatrix, type RepoGradeSavedAttempt, type RepoGradeSavedResult } from "./repoGradesDashboardModel";
 import { FeedbackDisclosure, RepoResultCopy, RepoResultFeedback } from "./RepoDashboardFeedback";
 import RepoGradeProfileSettings from "./RepoGradeProfileSettings";
 import RepoGradeRubricScores from "./RepoGradeRubricScores";
@@ -104,7 +104,7 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
     {ambiguousNoSubmission && <Typography component="p" variant="caption" color="text.secondary">
       A repository check found no submission; its order relative to the saved {ambiguousNoSubmission === "score" ? "grade" : "attempt"} could not be verified.
     </Typography>}
-    {staleNoSubmission && <Typography component="p" variant="caption" color="text.secondary">
+    {hasUnresolvedStaleNoSubmission(cell?.saved, cell?.automaticBlocks) && <Typography component="p" variant="caption" color="text.secondary">
       An earlier check found no submission. A later check used a different repository revision; check its grading status.
     </Typography>}
     {cell?.automaticBlocks?.filter((item) => !item.noSubmission).map(({ sourceRef, explanation, runStartedAt, partial }) => (

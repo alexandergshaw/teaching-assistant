@@ -205,7 +205,7 @@ it.each(actualRubrics)("carries the exact reviewed rubric through evaluator, fen
   const receipt = resolveRepoGradeRubric(captured.profile, rubric);
   const runtime = { loadPreparedProfile: vi.fn(async () => ({ profile: captured.profile, receipt,
     cohortId: "8d74ee61-463c-4b3f-af5d-5fc9b55023c1", preparedReadme: { path: null, instructions: actualInstructor, template: true } })) };
-  expect((await runRepoGradeTarget(actualPlan, actualTarget, runtime)).status).toBe("partial");
+  expect(await runRepoGradeTarget(actualPlan, actualTarget, runtime)).toMatchObject({ status: "partial", reason: "execution-unverified" });
   expect(fetcher.mock.calls.some(([url]) => url === modelUrl)).toBe(true);
   const settlement = vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1];
   expect(settlement).toMatchObject({ outcome: "partial", inputsComplete: true, result: { score: null, reviewReason: "execution-unverified",
@@ -220,12 +220,18 @@ it.each(actualRubrics)("carries the exact reviewed rubric through evaluator, fen
     score: null, feedback: result.feedback, feedback_sections: result.sections, rubric: result.rubric,
     unexamined_artifacts: result.unexaminedArtifacts ?? null, review_reason: result.reviewReason ?? null, feedback_retention: null }]);
   const saved = [...attempts.values()][0];
-  const repo = { name: actualRepo, cells: new Map([[actualFolder, { saved, browser: undefined, local: null, retained: [], automaticBlocks: [] }]]) };
+  const oldCheck = { repo: actualRepo, folder: actualFolder, sourceRef: "main", explanation: "", noSubmissionStale: true as const,
+    observedSourceSha: sha, observedRunStartedAt: "2026-11-13T10:00:00Z" };
+  const repo = { name: actualRepo, cells: new Map([[actualFolder, { saved, browser: undefined, local: null, retained: [], automaticBlocks: [oldCheck] }]]) };
   const html = renderToStaticMarkup(createElement(RepoGradeResultDetails, { repo: repo as never, folder: actualFolder }));
   expect(html).toContain("Unscored provisional draft");
   expect(html).toContain("TestUtils.class");
   expect(html).not.toContain("Submission unknown");
+  expect(html).not.toContain("A later check used a different repository revision");
   expect(html).not.toContain("All tests passed in execution");
+  repo.cells.get(actualFolder)!.automaticBlocks = [{ ...oldCheck, observedSourceSha: "f".repeat(40) }];
+  const unresolved = renderToStaticMarkup(createElement(RepoGradeResultDetails, { repo: repo as never, folder: actualFolder }));
+  expect(unresolved).toContain("A later check used a different repository revision");
 });
 describe("admitted pinned repository evaluator", () => {
   it("grades verified extensionless and .text submission files together", async () => {

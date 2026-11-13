@@ -230,7 +230,7 @@ function classifyEvaluation(
   if (result.reviewReason === "execution-unverified" && result.unexaminedArtifacts?.length) {
     const draft = buildUnverifiedExecutionDraft(result);
     if (!draft) return { status: "partial", reason: "unsupported-submission", settlement: { outcome: "partial" } };
-    return { status: "partial", settlement: { outcome: "partial", inputsComplete: true, result: draft } };
+    return { status: "partial", reason: "execution-unverified", settlement: { outcome: "partial", inputsComplete: true, result: draft } };
   }
   return {
     status: "succeeded",

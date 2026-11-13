@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { OrgRepoTreesResult } from "@/lib/repo-grade-tree-scan";
 import { defaultRepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
 import {
-  unorderedNoSubmissionContext, addRepoGradeSavedPage, buildRepoGradeMatrix, buildRepoGradesDashboard, mergeIncompleteRepoGradeResults, newerVerifiedNoSubmission, noSubmissionMatchesScan, savedResultIsEarlierThanObservedPin, updateRepoGradesCourseEdits, visibleRepoGradebookRows,
+  hasUnresolvedStaleNoSubmission, unorderedNoSubmissionContext, addRepoGradeSavedPage, buildRepoGradeMatrix, buildRepoGradesDashboard, mergeIncompleteRepoGradeResults, newerVerifiedNoSubmission, noSubmissionMatchesScan, savedResultIsEarlierThanObservedPin, updateRepoGradesCourseEdits, visibleRepoGradebookRows,
   type RepoGradeSavedAttempt, type RepoGradeSavedResult,
 } from "./repoGradesDashboardModel";
 import { ALL_FOLDERS } from "./repoGradesFolderSelection";
@@ -36,6 +36,18 @@ function attempt(generation: number, repo: string, folder: string, score: number
 }
 
 describe("class repository results", () => {
+  it("only clears the old-empty warning after a matching observed revision has a settled result", () => {
+    const latest = { ...attempt(2, "org/a", "lab", null), status: "partial" as const, settledAt: "2026-11-07T16:00:00Z" };
+    const block = { repo: "org/a", folder: "lab", sourceRef: "main", explanation: "", noSubmissionStale: true as const,
+      observedSourceSha: latest.commit, observedRunStartedAt: "2026-11-07T15:00:00Z" };
+    const saved = { latest, scored: null };
+    expect(hasUnresolvedStaleNoSubmission(saved, [block])).toBe(false);
+    for (const change of [{ observedSourceSha: "b".repeat(40) }, { sourceRef: "other" }, { observedRunStartedAt: "" }, { observedRunStartedAt: "2026-11-08T15:00:00Z" }])
+      expect(hasUnresolvedStaleNoSubmission(saved, [{ ...block, ...change }])).toBe(true);
+    for (const status of ["claimed", "unknown", "failed", "no-submission"] as const)
+      expect(hasUnresolvedStaleNoSubmission({ ...saved, latest: { ...latest, status } }, [block])).toBe(true);
+    expect(hasUnresolvedStaleNoSubmission(undefined, [block])).toBe(true);
+  });
   it("identifies whether an unordered no-submission check relates to a score or an attempt", () => {
     const empty = { ...attempt(1, "org/a", "lab", null), status: "no-submission" as const };
     const score = attempt(2, "org/a", "lab", 90);

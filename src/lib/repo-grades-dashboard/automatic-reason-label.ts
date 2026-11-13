@@ -71,12 +71,14 @@ const REASON_LABELS: Readonly<Record<string, string>> = {
   ungraded: "The queued submission is no longer eligible at its recorded commit.",
   unknown: "The worker could not confirm the outcome. Check grading history before retrying.",
   "unsupported-submission": "The submission contains files the repository grader cannot read.",
+  "execution-unverified": "Test execution was not verified. Review the unscored draft and unexamined files before grading.",
   "comment-evidence-unverified": "A required comment explanation could not be verified. Review the assignment and submission before grading.",
   "unsupported-target-branch": "Background grading does not check merge targets. Remove the merge target in the saved grading settings or grade manually.",
   "worker-interrupted": "The worker stopped before it could confirm the outcome.",
 };
 
 export function automaticReasonLabel(reason: string | null): string {
-  return reason !== null && Object.hasOwn(REASON_LABELS, reason) ? REASON_LABELS[reason] : "The worker did not provide a recognized reason.";
+  if (reason === null) return "The worker did not provide details. Check the latest saved result.";
+  return Object.hasOwn(REASON_LABELS, reason) ? REASON_LABELS[reason] : "The worker did not provide a recognized reason.";
 }
 

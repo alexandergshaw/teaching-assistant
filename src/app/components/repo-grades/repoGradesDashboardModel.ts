@@ -161,6 +161,25 @@ export function savedResultIsEarlierThanObservedPin(
   });
 }
 
+/** A completed receipt for the observed ref and pin resolves the instruction
+ * to check its grading status. Keep uncertainty when identity or order is unknown. */
+export function hasUnresolvedStaleNoSubmission(
+  saved: RepoGradeSavedResult | undefined, blocks: readonly AutomaticRepoGradeBlock[] | undefined,
+): boolean {
+  return !!blocks?.some((block) => {
+    if (!block.noSubmissionStale) return false;
+    const latest = saved?.latest;
+    const observed = Date.parse(block.observedRunStartedAt ?? "");
+    const settled = Date.parse(latest?.settledAt ?? "");
+    return !latest || (latest.status !== "succeeded" && latest.status !== "partial")
+      || !/^[0-9a-f]{40}$/i.test(latest.commit ?? "")
+      || !/^[0-9a-f]{40}$/i.test(block.observedSourceSha ?? "")
+      || latest.commit.toLowerCase() !== block.observedSourceSha!.toLowerCase()
+      || latest.sourceRef !== block.sourceRef
+      || !Number.isFinite(observed) || !Number.isFinite(settled) || settled < observed;
+  });
+}
+
 // GitHub repositories are case-insensitive. Assignment folder names are exact.
 function savedResultKey(repo: string, folder: string): string {
   return JSON.stringify([repo.toLowerCase(), folder]);

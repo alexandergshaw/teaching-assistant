@@ -15,6 +15,7 @@ it.each([
   ["grading-source-rate-limited", "GitHub rate-limited the worker"],
   ["unsupported-submission", "files the repository grader cannot read"],
   ["comment-evidence-unverified", "comment explanation could not be verified"],
+  ["execution-unverified", "Test execution was not verified"],
 ])("explains %s with a specific message", (reason, expected) => {
   expect(automaticReasonLabel(reason)).toContain(expected);
 });
@@ -27,10 +28,13 @@ it.each(["conflicting-instructions", "missing-instruction-evidence", "readme-tar
   },
 );
 
-it.each(["Private assignment path and instructions", "constructor", "__proto__", null])(
+it.each(["Private assignment path and instructions", "constructor", "__proto__"])(
   "does not display an unrecognized stored reason", (reason) => {
     expect(automaticReasonLabel(reason)).toBe("The worker did not provide a recognized reason.");
   },
 );
+it("directs existing reasonless attempts to their saved result", () => {
+  expect(automaticReasonLabel(null)).toBe("The worker did not provide details. Check the latest saved result.");
+});
 
 

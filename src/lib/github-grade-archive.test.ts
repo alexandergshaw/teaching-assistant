@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import JSZip from "jszip";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { indexGradeArchive, verifyGradeArchiveFiles } from "./github-grade-archive-zip";
+import { indexGradeArchive, verifyGradeArchiveBytes, verifyGradeArchiveFiles } from "./github-grade-archive-zip";
 import { confirmedGradeSourceCooldown, makePinnedArchiveReader } from "./github-grade-archive";
 import { GithubGradeSourceRateLimitError } from "./github-http-error";
 
@@ -47,6 +47,13 @@ describe("pinned grading archive integrity", () => {
     await expect(verifyGradeArchiveFiles(archive, [blob("lab/a.py", expected, treeMode)], signal())).rejects.toThrow();
   });
 
+  it("verifies raw binary bytes against the pinned Git blob without accepting substituted content", async () => {
+    const binary = Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 61]);
+    const archive = indexGradeArchive(await zip([["lab/TestUtils.class", binary]]));
+    expect((await verifyGradeArchiveBytes(archive, [blob("lab/TestUtils.class", binary)], signal())).get("lab/TestUtils.class")).toEqual(binary);
+    await expect(verifyGradeArchiveBytes(archive, [blob("lab/TestUtils.class", Buffer.alloc(binary.length))], signal())).rejects.toThrow();
+    await expect(verifyGradeArchiveFiles(archive, [blob("lab/TestUtils.class", binary)], signal())).rejects.toThrow();
+  });
   it("refuses traversal and duplicate ZIP paths before extracting any member", async () => {
     const badPath = await zip([["../outside.py", "no"]]);
     expect(() => indexGradeArchive(badPath)).toThrow();

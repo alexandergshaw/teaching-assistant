@@ -3,11 +3,20 @@
  * that the instruction text came from the instructor's trusted template. */
 export function classifyModule12Artifact(
   path: string, bytes: Uint8Array, sourcePaths: readonly string[], trustedInstructions: string,
-): { sourcePath: string; format: "java-class" | "elf" | "pe" } | null {
+): { sourcePath: string; format: "java-class" | "elf" | "pe" | "python-bytecode" } | null {
   const required = ["test_utils.py", "TestUtils.java", "test_utils.cpp"];
   if (!/Module 12\s*[–-]\s*Unit Testing Suite/i.test(trustedInstructions)
     || !/three separate files/i.test(trustedInstructions)
     || !required.every((name) => trustedInstructions.includes(name))) return null;
+  if (/^assignments\/module_12\/__pycache__\/test_utils\.cpython-\d{2,3}\.pyc$/.test(path)) {
+    const sourcePath = "assignments/module_12/test_utils.py";
+    // CPython bytecode header identifies a candidate for disclosure, not its
+    // correctness or equivalence to the source.
+    if (bytes.length < 16 || bytes[2] !== 13 || bytes[3] !== 10
+      || ![0, 1, 3].includes(bytes[4]) || bytes[5] !== 0 || bytes[6] !== 0 || bytes[7] !== 0
+      || !sourcePaths.includes(sourcePath)) return null;
+    return { sourcePath, format: "python-bytecode" };
+  }
   const slash = path.lastIndexOf("/");
   const dir = slash < 0 ? "" : path.slice(0, slash + 1);
   const base = path.slice(slash + 1);

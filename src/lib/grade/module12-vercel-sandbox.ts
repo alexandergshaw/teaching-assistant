@@ -15,7 +15,10 @@ export async function runModule12SandboxSource(input: {
   const basename = input.path.split("/").at(-1) as keyof typeof choices;
   const choice = choices[basename];
   if (!choice || input.path !== `assignments/module_12/${basename}` || !/^[a-f0-9]{40}$/.test(input.repoCommit)
-    || input.bytes.byteLength === 0 || input.bytes.byteLength > 100_000) throw new Error("Invalid pinned source");
+    || input.bytes.byteLength === 0 || input.bytes.byteLength > 100_000) {
+    console.error("Repository sandbox intake failed", { phase: "sandbox-input", reason: "invalid-source" });
+    throw new Error("Invalid pinned source");
+  }
   const all = [{ path: input.path, bytes: input.bytes }, ...input.companions];
   const paths = new Set<string>();
   let total = 0;
@@ -23,10 +26,16 @@ export async function runModule12SandboxSource(input: {
     const relative = file.path.startsWith("assignments/module_12/") ? file.path.slice("assignments/module_12/".length) : "";
     if (!relative || relative.length > 512 || relative.split("/").some((part) => !part || part === "." || part === ".." || !/^[a-zA-Z0-9_. -]+$/.test(part))
       || paths.has(relative.toLowerCase()) || file.bytes.byteLength > 1_000_000 || file.bytes.includes(0)
-      || /(?:^|\/)(?:test_utils|.*\.(?:class|exe|o|so|dll))$/i.test(relative)) throw new Error("Invalid or opaque pinned inventory; review required");
+      || /(?:^|\/)(?:test_utils|.*\.(?:class|exe|o|so|dll))$/i.test(relative)) {
+      console.error("Repository sandbox intake failed", { phase: "sandbox-input", reason: "invalid-inventory" });
+      throw new Error("Invalid or opaque pinned inventory; review required");
+    }
     paths.add(relative.toLowerCase()); total += file.bytes.byteLength;
   }
-  if (all.length > 100 || total > 5_000_000) throw new Error("Pinned inventory exceeds execution limits");
+  if (all.length > 100 || total > 5_000_000) {
+    console.error("Repository sandbox intake failed", { phase: "sandbox-input", reason: "inventory-limit" });
+    throw new Error("Pinned inventory exceeds execution limits");
+  }
   input.signal.throwIfAborted();
   await input.beforeDispatch(input.signal);
   const sandbox = await Sandbox.create({ image: "vercel/sandbox/universal@sha256:9b2669397f26336812ec6835c2f67db6a546074cbabb05db93bf5e669f71ec5d", persistent: false, resources: { vcpus: 1 }, timeout: 180_000, signal: input.signal }).catch((error: unknown) => {

@@ -253,9 +253,10 @@ it.each(actualRubrics)("carries the exact reviewed rubric through evaluator, fen
 it("holds the score when process exits cannot establish that student tests ran", async () => {
   const rubric = actualRubrics[0];
   const names = [...rubric.matchAll(/^(.+?) \(25%\):/gm)].map((match) => match[1]);
-  const sources = ["test_utils.py", "TestUtils.java", "test_utils.cpp", "TestUtils.class"].map((name) => ({ ...files.submission, path: `${actualFolder}/${name}` }));
+  const sources = ["test_utils.py", "TestUtils.java", "test_utils.cpp", "TestUtils.class", "__pycache__/test_utils.cpython-314.pyc"].map((name) => ({ ...files.submission, path: `${actualFolder}/${name}` }));
   const contentOverrides = Object.fromEntries(sources.map((file) => [file.path, file.path.endsWith(".class")
-    ? Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 61]) : `source ${file.path}`]));
+    ? Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 61]) : file.path.endsWith(".pyc")
+      ? Buffer.from([0xf3, 0x0d, 13, 10, 0, 0, 0, 0, ...Array(8).fill(0)]) : `source ${file.path}`]));
   const fetcher = fetchRepo({ tree: sources, repoRoot: `https://api.github.com/repos/${actualRepo}`, contentOverrides, sandbox: true,
     modelResponse: () => Response.json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify({
       overallComment: "Reviewed the source and process observations.", rubricResults: names.map((area) => ({ area, score: "25/25", comment: "Reviewed source." })),
@@ -272,6 +273,7 @@ it("holds the score when process exits cannot establish that student tests ran",
   const calls = vi.mocked(runModule12SandboxSource).mock.calls;
   expect(calls).toHaveLength(3);
   expect(calls.map(([input]) => input.path.split("/").at(-1)).sort()).toEqual(["TestUtils.java", "test_utils.cpp", "test_utils.py"]);
+  expect(calls.every(([input]) => input.companions.every((file) => !file.path.endsWith(".pyc")))).toBe(true);
   expect(fetcher.mock.calls.some(([url]) => url.includes("emkc.org"))).toBe(false);
   const modelCall = fetcher.mock.calls.find(([url]) => url === modelUrl);
   expect(String(modelCall?.[1].body)).toContain("Execution observations follow as JSON");
@@ -280,6 +282,7 @@ it("holds the score when process exits cannot establish that student tests ran",
   expect(settlement).toMatchObject({ outcome: "partial", result: { score: null, reviewReason: "execution-unverified" } });
   if (!settlement || !("result" in settlement)) throw new Error("Missing draft settlement");
   expect(settlement.result.feedback).toContain("Unexamined binary files");
+  expect(settlement.result.feedback).toContain("__pycache__/test_utils.cpython-314.pyc");
   const implementation = vi.mocked(runModule12SandboxSource).getMockImplementation()!;
   vi.mocked(runModule12SandboxSource).mockImplementationOnce(async (input) => {
     const value = await implementation(input);

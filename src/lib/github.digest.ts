@@ -353,7 +353,8 @@ export async function ingestRepo(
       "fc065dfc81f80f127d60f8fdfa47d84f0e1c18afdcfff095f78c8904fb74285f"]
       .includes(createHash("sha256").update(opts.module12OptionalArtifacts.trustedRubric).digest("hex"))) {
     const possible = scopedTree.filter((entry) => entry.type === "blob"
-      && ["TestUtils.class", "test_utils.exe", "test_utils"].includes(entry.path.split("/").pop() ?? ""));
+      && (["TestUtils.class", "test_utils.exe", "test_utils"].includes(entry.path.split("/").pop() ?? "")
+        || /^assignments\/module_12\/__pycache__\/test_utils\.cpython-\d{2,3}\.pyc$/.test(entry.path)));
     if (possible.length) {
       try {
         const bytes = await opts.module12OptionalArtifacts.readBytes(possible, signal);

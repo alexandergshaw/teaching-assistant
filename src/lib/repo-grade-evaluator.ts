@@ -18,7 +18,7 @@ import type { PreparedRepoGradeReadme } from "@/lib/repo-grades-dashboard/prepar
 import { repoDigestToEmbeddedEntry } from "@/lib/repo-grade-entry";
 import { makePinnedArchiveReader, makePinnedArchiveBytesReader } from "@/lib/github-grade-archive";
 import { missingSqlCommentRequiresReview } from "@/lib/grade/sql-comment-review";
-import { readModule12PinnedFiles } from "@/lib/grade/module12-pinned-files";
+import { Module12PinnedFileError, readModule12PinnedFiles } from "@/lib/grade/module12-pinned-files";
 import { executeModule12PinnedFiles } from "@/lib/grade/module12-execute-pinned";
 import { module12ExecutionEvidenceForReview, type Module12ExecutionReceipt } from "@/lib/grade/module12-receipt";
 
@@ -354,7 +354,10 @@ export async function evaluateRepoGrade(
       return { error: "This submission is not eligible for targeted three-language execution.", partial: true, sourceCommit, reason: "execution-unverified" };
     }
     const files = await readModule12PinnedFiles({ ...parsed, accountId: automaticGrader.accountId, sourceCommit: sourceCommit!,
-      inventory: digest.inventory, excludedArtifacts: digest.unexaminedOptionalArtifacts, signal: modelExecution.signal });
+      inventory: digest.inventory, excludedArtifacts: digest.unexaminedOptionalArtifacts, signal: modelExecution.signal }).catch((error: unknown) => {
+      console.error("Repository sandbox intake failed", { phase: "pinned-source", reason: error instanceof Module12PinnedFileError ? error.code : "source-read-unavailable" });
+      throw error;
+    });
     sourceExecutionReceipts = await executeModule12PinnedFiles({ files, repoCommit: sourceCommit!, signal: modelExecution.signal,
       beforeDispatch: modelExecution.beforeDispatch });
     instructions += `\n\n${module12ExecutionEvidenceForReview(sourceExecutionReceipts)}`;

@@ -43,7 +43,7 @@ export type RepoGradeClaim = {
 
 export type RepoGradeManualSettlement = { outcome: "succeeded" | "failed" | "unknown" };
 export type RepoGradeAutomaticSettlement =
-  | { outcome: "succeeded"; inputsComplete: true; result: RepoGradeResultRecord, RepoGradeReviewDraft }
+  | { outcome: "succeeded"; inputsComplete: true; result: RepoGradeResultRecord }
   | { outcome: "no-submission"; inputsComplete: true }
   | { outcome: "partial"; feedbackRetention?: RepoGradeFeedbackField }
   | { outcome: "partial"; inputsComplete: true; result: RepoGradeReviewDraft }

@@ -33,6 +33,7 @@ export type RepoGradeResponse =
   | {
       run: GradingRun;
       unexaminedArtifacts?: Array<{ path: string; reason: "optional-binary-unexamined" }>;
+      reviewReason?: "execution-unverified";
       rubric: string;
       fullName: string;
       sourceCommit?: string;
@@ -100,7 +101,7 @@ export async function evaluateRepoGrade(
       pathPrefix, sourceCommit, ...(signal && { signal }),
       ...(excludeInstructionReadme && { excludeInstructionReadme: true }),
       ...(automaticGrader && { treeCacheAccountId: automaticGrader.accountId, readPinnedFiles: makePinnedArchiveReader({ ...parsed, accountId: automaticGrader.accountId, sha: sourceCommit }) }),
-      ...(automaticGrader && execution?.preparedReadme?.template === true && { module12OptionalArtifacts: { trustedInstructions: execution.preparedReadme.instructions, readBytes: makePinnedArchiveBytesReader({ ...parsed, accountId: automaticGrader.accountId, sha: sourceCommit }) } }),
+      ...(automaticGrader && execution?.preparedReadme?.template === true && { module12OptionalArtifacts: { trustedInstructions: execution.preparedReadme.instructions, trustedRubric: rubric, readBytes: makePinnedArchiveBytesReader({ ...parsed, accountId: automaticGrader.accountId, sha: sourceCommit }) } }),
     })
     : await ingestRepo(parsed.owner, parsed.repo, { pathPrefix, ...(excludeInstructionReadme && { excludeInstructionReadme: true }) }, targetBranch);
   if (sourceCommit && digest.truncated) {
@@ -292,17 +293,18 @@ export async function evaluateRepoGrade(
     });
   }
 
-  const instructions = effectiveInstructions.trim() || `Evaluate the repository "${digest.fullName}".`;
+  const instructions = (effectiveInstructions.trim() || `Evaluate the repository "${digest.fullName}".`)
+    + (digest.unexaminedOptionalArtifacts?.length ? "\n\nInstructor review note: The submitted binary files were not examined or executed. Test execution was not verified. Do not claim that tests passed or invent execution results. This evaluation is a provisional draft for instructor review." : "");
   const branchNote = mergedCheck ? branchNoteFor(mergedCheck) : null;
   const entry: StudentSubmissionEntry = repoDigestToEmbeddedEntry(gradedDigest);
   if (sourceCommit) {
     entry.gradedRepo = digest.fullName;
     entry.gradedRef = sourceCommit;
   }
-  const provenance = { ...(sourceCommit ? { sourceCommit } : {}), ...(digest.unexaminedOptionalArtifacts?.length ? { unexaminedArtifacts: digest.unexaminedOptionalArtifacts.map((path) => ({ path, reason: "optional-binary-unexamined" as const })) } : {}) };
+  const provenance = { ...(sourceCommit ? { sourceCommit } : {}), ...(digest.unexaminedOptionalArtifacts?.length ? { unexaminedArtifacts: digest.unexaminedOptionalArtifacts.map((path) => ({ path, reason: "optional-binary-unexamined" as const })), reviewReason: "execution-unverified" as const } : {}) };
   const recordUnexaminedArtifacts = (run: { results: GradeResult[] }) => {
     if (!digest.unexaminedOptionalArtifacts?.length) return;
-    const notice = `Unexamined optional binary files: ${digest.unexaminedOptionalArtifacts.join(", ")}. These files were not executed or assessed; the grade covers the source files.`;
+    const notice = `Unexamined optional binary files: ${digest.unexaminedOptionalArtifacts.join(", ")}. These files were not executed or assessed. Test execution was not verified; this grade is a provisional draft for instructor review.`;
     for (const result of run.results) if (!isUngraded(result)) result.overallComment = `${result.overallComment}\n\n${notice}`;
   };
 

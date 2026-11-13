@@ -310,7 +310,7 @@ export async function ingestRepo(
     maxFiles?: number; maxBytes?: number; perFileBytes?: number; maxBlobBytes?: number;
     pathPrefix?: string; sourceCommit?: string; signal?: AbortSignal; treeCacheAccountId?: string;
     excludeInstructionReadme?: boolean;
-    module12OptionalArtifacts?: { trustedInstructions: string; readBytes: (files: readonly RepoTreeEntry[], signal?: AbortSignal) => Promise<ReadonlyMap<string, Buffer>> };
+    module12OptionalArtifacts?: { trustedInstructions: string; trustedRubric: string; readBytes: (files: readonly RepoTreeEntry[], signal?: AbortSignal) => Promise<ReadonlyMap<string, Buffer>> };
     readPinnedFiles?: (files: readonly RepoTreeEntry[], signal?: AbortSignal) => Promise<ReadonlyMap<string, string>>;
   } = {},
   ref?: string
@@ -347,8 +347,11 @@ export async function ingestRepo(
   const optionalArtifacts: string[] = [];
   if (sourceCommit !== undefined && owner === "intro-to-computer-science-fall-2026"
     && folder === "assignments/module_12" && opts.module12OptionalArtifacts
-    && createHash("sha256").update(opts.module12OptionalArtifacts.trustedInstructions.trim()).digest("hex")
-      === "a3b8baa7998ddc1ee15717e0485fff7a13d07f12acd0db0c2b74593b754ffecf") {
+    && createHash("sha256").update(opts.module12OptionalArtifacts.trustedInstructions).digest("hex")
+      === "1319a54338639a2cd0db9aea4222b37be276a7195111a8c977a4aeec2077412f"
+    && ["5d6383288a2eb5698251e17261879c39a5f43a9f0b01a0bf0e8496c7a0095717",
+      "fc065dfc81f80f127d60f8fdfa47d84f0e1c18afdcfff095f78c8904fb74285f"]
+      .includes(createHash("sha256").update(opts.module12OptionalArtifacts.trustedRubric).digest("hex"))) {
     const possible = scopedTree.filter((entry) => entry.type === "blob"
       && ["TestUtils.class", "test_utils.exe", "test_utils"].includes(entry.path.split("/").pop() ?? ""));
     if (possible.length) {

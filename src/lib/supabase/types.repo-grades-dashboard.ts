@@ -31,7 +31,12 @@ export type RepoGradeResultRecord = {
   feedback: string;
   sections: RepoGradeFeedbackSections;
   unexaminedArtifacts?: RepoGradeUnexaminedArtifact[];
+  reviewReason?: "execution-unverified";
   rubric: Array<{ area: string; score: string; comment: string }>;
+};
+
+export type RepoGradeReviewDraft = Omit<RepoGradeResultRecord, "score" | "reviewReason" | "unexaminedArtifacts"> & {
+  score: null; reviewReason: "execution-unverified"; unexaminedArtifacts: RepoGradeUnexaminedArtifact[];
 };
 
 export type RepoGradeHistoryRow = {
@@ -52,6 +57,7 @@ export type RepoGradeHistoryRow = {
   feedback_sections?: RepoGradeFeedbackSections | null;
   feedback_retention?: RepoGradeFeedbackField | null;
   unexamined_artifacts?: RepoGradeUnexaminedArtifact[] | null;
+  review_reason?: "execution-unverified" | null;
 };
 
 export type RepoGradeClaimStatus =

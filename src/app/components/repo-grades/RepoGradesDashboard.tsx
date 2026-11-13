@@ -70,6 +70,7 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
   const earlierScore = savedResultIsEarlierThanObservedPin(cell?.saved, cell?.automaticBlocks);
   const ambiguousNoSubmission = unorderedNoSubmissionContext(cell?.saved, cell?.automaticBlocks, provenNoSubmission, !!staleNoSubmission);
   const scored = provenNoSubmission ? null : cell?.saved?.scored;
+  const draft = cell?.saved?.draft && cell.saved.draft.generation === cell.saved.latest.generation ? cell.saved.draft : null;
   const sections = scored?.feedback_sections;
   const feedback = scored && {
     overall: scored.feedback ?? "", strengths: sections?.strengths ?? "",
@@ -83,10 +84,14 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
         {!cell?.saved && scanStatus && scanStatus !== "ungraded" && <RepoGradeStatusChip status={scanStatus} />}
       </Box>
     </div>
-    {scored?.unexamined_artifacts?.length ? <Alert severity="warning" role="status">
-      Unexamined optional binary files: {scored.unexamined_artifacts.map((item) => item.path).join(", ")}.
-      These files were not executed or assessed; the grade covers the source files.
-    </Alert> : null}
+    {draft && <Alert severity="warning" role="status">
+      Unscored provisional draft: test execution was not verified. Unexamined optional binary files: {draft.unexamined_artifacts?.map((item) => item.path).join(", ")}.
+      These files were not executed or assessed. Instructor review is required.
+    </Alert>}
+    {draft && <FeedbackDisclosure compact title="Review-only draft" label={`Review-only draft: ${repo.name} / ${folder}`}>
+      <RepoResultFeedback repo={repo.name} folder={folder} source="review-only draft"
+        feedback={{ overall: draft.feedback ?? "", strengths: draft.feedback_sections?.strengths ?? "", improvements: draft.feedback_sections?.improvements ?? "", resubmitNotice: draft.feedback_sections?.resubmitNotice ?? "" }} rubric={draft.rubric ?? []} />
+    </FeedbackDisclosure>}
     <RepoGradeRubricScores areas={scored?.rubric ?? []} criterionOrder={criterionOrder}
       placeholderOnly={provenNoSubmission || (!scored && cell?.saved?.latest.status === "no-submission")}
       label={`Saved rubric scores: ${repo.name} / ${folder || "Repository root"}`} />
@@ -138,7 +143,7 @@ function SavedMatrixResult({ result, repo, folder, feedback, showSource, part, e
       {part === "score" && <>{earlierPin ? <Chip size="small" label={latest.status === "no-submission" ? "Earlier no-submission check" : "Earlier or unconfirmed grade"} />
         : <RepoGradeStatusChip status={latest.status === "claimed" ? "running" : latest.status}
           source={scored && scored.generation !== latest.generation ? "Latest saved" : showSource ? "Saved" : undefined} />}
-      {scored && (
+      {scored && scored.score !== null && (
         <>
           <Typography component="p" variant="body2">
             <strong>{earlierPin || scored.generation !== latest.generation ? "Earlier saved score "
@@ -151,7 +156,7 @@ function SavedMatrixResult({ result, repo, folder, feedback, showSource, part, e
       {part === "details" && <FeedbackDisclosure compact title="Saved evaluation details" label={`Saved evaluation details: ${repo} / ${folder || "Repository root"}`}>
         <SavedAttemptSource attempt={latest} label="Latest attempt" />
         {latest.feedback_retention && <p>Latest feedback exceeded the storage limit.</p>}
-        {scored && (
+        {scored && scored.score !== null && (
           <>
             {scored.generation !== latest.generation && <SavedAttemptSource attempt={scored} label="Scored attempt" />}
             {sections && <p>Original score {sections.rawScore}</p>}

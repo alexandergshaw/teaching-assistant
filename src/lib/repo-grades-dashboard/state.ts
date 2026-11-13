@@ -1,4 +1,4 @@
-import type { RepoGradeCourseConfig, RepoGradeFeedbackField, RepoGradeResultRecord } from "@/lib/supabase/types.repo-grades-dashboard";
+import type { RepoGradeCourseConfig, RepoGradeFeedbackField, RepoGradeResultRecord, RepoGradeReviewDraft } from "@/lib/supabase/types.repo-grades-dashboard";
 import type { RepoGradeRubricReceipt } from "./profile";
 import type { RepoGradeTargetEvidence } from "./preparation-input";
 
@@ -43,9 +43,10 @@ export type RepoGradeClaim = {
 
 export type RepoGradeManualSettlement = { outcome: "succeeded" | "failed" | "unknown" };
 export type RepoGradeAutomaticSettlement =
-  | { outcome: "succeeded"; inputsComplete: true; result: RepoGradeResultRecord }
+  | { outcome: "succeeded"; inputsComplete: true; result: RepoGradeResultRecord, RepoGradeReviewDraft }
   | { outcome: "no-submission"; inputsComplete: true }
   | { outcome: "partial"; feedbackRetention?: RepoGradeFeedbackField }
+  | { outcome: "partial"; inputsComplete: true; result: RepoGradeReviewDraft }
   | { outcome: "failed" | "unknown" };
 
 // Mirrors the durable bounds. PostgreSQL text cannot represent NUL or

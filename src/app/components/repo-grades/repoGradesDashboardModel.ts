@@ -102,6 +102,7 @@ export type RepoGradeSavedAttempt = Extract<
 export type RepoGradeSavedResult = {
   latest: RepoGradeSavedAttempt;
   scored: RepoGradeSavedAttempt | null;
+  draft?: RepoGradeSavedAttempt | null;
 };
 
 export type RepoGradeSavedResults = ReadonlyMap<string, RepoGradeSavedResult>;
@@ -173,7 +174,8 @@ export function addRepoGradeSavedPage(
     const existing = results.get(key);
     const latest = existing?.latest ?? attempt;
     const scored = existing?.scored ?? (attempt.score === null ? null : attempt);
-    if (!existing || existing.scored !== scored) results.set(key, { latest, scored });
+    const draft = existing?.draft ?? (attempt.review_reason ? attempt : null);
+    if (!existing || existing.scored !== scored || existing.draft !== draft) results.set(key, { latest, scored, ...(draft ? { draft } : {}) });
   }
 }
 
@@ -189,7 +191,8 @@ export function mergeIncompleteRepoGradeResults(
     }
     const latest = current.latest.generation >= old.latest.generation ? current.latest : old.latest;
     const scored = (current.scored?.generation ?? 0) >= (old.scored?.generation ?? 0) ? current.scored : old.scored;
-    combined.set(key, { latest, scored });
+    const draft = (current.draft?.generation ?? 0) >= (old.draft?.generation ?? 0) ? current.draft : old.draft;
+    combined.set(key, { latest, scored, ...(draft ? { draft } : {}) });
   }
   return combined;
 }

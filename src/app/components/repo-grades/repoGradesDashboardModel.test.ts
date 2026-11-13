@@ -31,7 +31,7 @@ function attempt(generation: number, repo: string, folder: string, score: number
     status: score === null ? "failed" : "succeeded",
     claimedAt: "2026-11-06T12:00:00.000Z", settledAt: null,
     feedback: score === null ? null : `Feedback for ${repo}/${folder}`,
-    feedback_sections: null, unexamined_artifacts: null, feedback_retention: null, rubric: null,
+    feedback_sections: null, unexamined_artifacts: null, review_reason: null, feedback_retention: null, rubric: null,
   };
 }
 
@@ -54,6 +54,17 @@ describe("class repository results", () => {
     expect(unorderedNoSubmissionContext({ latest: empty, scored: score }, evidence, true, false)).toBeNull();
     expect(unorderedNoSubmissionContext({ latest: empty, scored: score }, evidence, false, true)).toBeNull();
     expect(unorderedNoSubmissionContext({ latest: empty, scored: score }, [], false, false)).toBeNull();
+  });
+  it("retains an unscored review draft alongside an older numeric score across pages", () => {
+    const old = attempt(1, "org/a", "lab", 80);
+    const draft = { ...attempt(2, "org/a", "lab", null), status: "partial" as const, review_reason: "execution-unverified" as const,
+      unexamined_artifacts: [{ path: "lab/test_utils", reason: "optional-binary-unexamined" as const }] };
+    const pages = new Map();
+    addRepoGradeSavedPage(pages, [draft]); addRepoGradeSavedPage(pages, [old]);
+    expect([...pages.values()][0]).toMatchObject({ latest: draft, scored: old, draft });
+    const reverse = new Map(); addRepoGradeSavedPage(reverse, [old]);
+    const latest = new Map(); addRepoGradeSavedPage(latest, [draft]);
+    expect([...mergeIncompleteRepoGradeResults(reverse, latest).values()][0]).toMatchObject({ latest: draft, scored: old, draft });
   });
   it("does not treat an old empty check as current after the scanned branch changes", () => {
     const oldCommit = "a".repeat(40), newCommit = "b".repeat(40);

@@ -149,10 +149,11 @@ export async function settleRepoGrade(
   const owner = await requireAppOwner();
   const result = "result" in settlement ? settlement.result : null;
   if (result) {
-    if (!Number.isFinite(result.score) || result.score < 0 || result.score > 100) {
+    if (result.score !== null && (!Number.isFinite(result.score) || result.score < 0 || result.score > 100)) {
       throw new Error("Invalid repository evaluation score");
     }
     if (result.unexaminedArtifacts && !validUnexaminedArtifacts(result.unexaminedArtifacts)) throw new Error("Invalid unexamined artifact provenance");
+    if ((result.unexaminedArtifacts?.length || result.reviewReason) && (settlement.outcome !== "partial" || result.reviewReason !== "execution-unverified" || !result.unexaminedArtifacts?.length)) throw new Error("Invalid review-only evaluation");
     const field = unretainedRepoGradeFeedbackField(result.feedback, result.sections, result.rubric);
     if (field) throw new Error(`Repository evaluation feedback cannot be retained (${field})`);
   }
@@ -165,7 +166,7 @@ export async function settleRepoGrade(
     p_inputs_complete: "inputsComplete" in settlement && settlement.inputsComplete,
     p_score: result?.score ?? null,
     p_feedback: result?.feedback ?? null,
-    ...(result?.unexaminedArtifacts?.length ? { p_unexamined_artifacts: result.unexaminedArtifacts } : {}),
+    ...(result?.unexaminedArtifacts?.length ? { p_unexamined_artifacts: result.unexaminedArtifacts, p_review_reason: result.reviewReason } : {}),
     p_rubric: result?.rubric.map(({ area, score, comment }) => ({ area, score, comment })) ?? null,
     ...(claim.mode !== "manual" && {
       p_feedback_sections: result ? {
@@ -233,9 +234,12 @@ function validHistoryRow(row: unknown): row is RepoGradeHistoryRow {
     || !validDate(row.claimed_at)
     || (row.settled_at !== null && !validDate(row.settled_at))
     || (row.reconciled_at !== null && !validDate(row.reconciled_at))) return false;
-  if (row.unexamined_artifacts != null && (row.score === null || !validUnexaminedArtifacts(row.unexamined_artifacts))) return false;
+  if (row.unexamined_artifacts != null && (row.score !== null || row.status !== "partial" || row.review_reason !== "execution-unverified" || !validUnexaminedArtifacts(row.unexamined_artifacts))) return false;
+  if (row.review_reason != null && (row.review_reason !== "execution-unverified" || row.unexamined_artifacts == null)) return false;
   if (row.feedback_retention != null
     && (row.status !== "partial" || row.score !== null || !isRepoGradeFeedbackField(row.feedback_retention))) return false;
+  if (row.score === null && row.review_reason === "execution-unverified")
+    return row.status === "partial" && !unretainedRepoGradeFeedbackField(row.feedback, row.feedback_sections, row.rubric);
   if (row.score === null) return row.status !== "succeeded" && row.feedback === null
     && row.rubric === null && row.feedback_sections == null;
   if ((row.status !== "succeeded" && row.status !== "partial") || typeof row.score !== "number"

@@ -212,7 +212,7 @@ function classifyEvaluation(
   const result: RepoGradeResultRecord = {
     score: (fraction.earned / fraction.possible) * 100,
     feedback: grade.overallComment,
-    ...(response.unexaminedArtifacts?.length ? { unexaminedArtifacts: response.unexaminedArtifacts } : {}),
+    ...(response.unexaminedArtifacts?.length ? { unexaminedArtifacts: response.unexaminedArtifacts, reviewReason: response.reviewReason } : {}),
     sections: {
       strengths: grade.strengths, improvements: grade.improvements,
       resubmitNotice: grade.resubmitNotice, rawScore: grade.totalScore,
@@ -225,6 +225,25 @@ function classifyEvaluation(
       status: "partial", feedbackRetention, unretainedResult: result,
       settlement: { outcome: "partial", feedbackRetention },
     };
+  }
+  if (result.reviewReason === "execution-unverified" && result.unexaminedArtifacts?.length) {
+    const names = result.rubric.map((area) => area.area.trim()).sort();
+    const expected = [
+      ["Function Implementation", "Test Coverage Quantity", "Test Case Quality", "Code Organization and Testing Practice"],
+      ["Function Implementation", "Test Suite Completeness", "Test Coverage (Normal/Edge/Invalid)", "Code Structure and Style"],
+    ];
+    if (!expected.some((areas) => JSON.stringify([...areas].sort()) === JSON.stringify(names))) {
+      return { status: "partial", reason: "unsupported-submission", settlement: { outcome: "partial" } };
+    }
+    const draft = { ...result, score: null, reviewReason: "execution-unverified" as const,
+      unexaminedArtifacts: result.unexaminedArtifacts,
+      feedback: `Review-only draft. Test execution was not verified. Unexamined binary files: ${result.unexaminedArtifacts.map((item) => item.path).join(", ")}.`,
+      sections: { strengths: "", improvements: "Instructor review is required; test execution was not verified.", resubmitNotice: "", rawScore: "Not calculated" },
+      rubric: result.rubric.map((area) => /Code Organization and Testing Practice|Code Structure and Style/i.test(area.area)
+        ? { ...area, score: "Unverified", comment: "Execution was not verified; instructor review is required." }
+        : { ...area, comment: "" }),
+    };
+    return { status: "partial", settlement: { outcome: "partial", inputsComplete: true, result: draft } };
   }
   return {
     status: "succeeded",

@@ -171,12 +171,17 @@ export function hasUnresolvedStaleNoSubmission(
     const latest = saved?.latest;
     const observed = Date.parse(block.observedRunStartedAt ?? "");
     const settled = Date.parse(latest?.settledAt ?? "");
+    const matchingPriorAttempt = blocks.some((item) => item.priorAttempt && item.sourceRef === block.observedSourceRef
+      && item.sourceSha?.toLowerCase() === block.observedSourceSha?.toLowerCase()
+      && Number.isFinite(Date.parse(item.runStartedAt ?? ""))
+      && Date.parse(item.runStartedAt!) === observed);
     return !latest || (latest.status !== "succeeded" && latest.status !== "partial")
       || !/^[0-9a-f]{40}$/i.test(latest.commit ?? "")
       || !/^[0-9a-f]{40}$/i.test(block.observedSourceSha ?? "")
       || latest.commit.toLowerCase() !== block.observedSourceSha!.toLowerCase()
-      || latest.sourceRef !== block.sourceRef
-      || !Number.isFinite(observed) || !Number.isFinite(settled) || settled < observed;
+      || latest.sourceRef !== (block.observedSourceRef ?? block.sourceRef)
+      || !Number.isFinite(observed) || !Number.isFinite(settled)
+      || (settled < observed && !matchingPriorAttempt);
   });
 }
 

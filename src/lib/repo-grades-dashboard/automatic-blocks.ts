@@ -14,6 +14,8 @@ export type AutomaticRepoGradeBlock = {
   noSubmissionStale?: true;
   noSubmissionExplicit?: true;
   observedSourceSha?: string;
+  observedSourceRef?: string;
+  priorAttempt?: true;
   observedState?: string;
   observedRunStartedAt?: string;
   runStartedAt?: string;

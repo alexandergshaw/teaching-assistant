@@ -51,7 +51,7 @@ export async function readRepoGradeAutomaticBlocksAction(
     // The worker stages at most 1,000 targets per course. Treat a lower API
     // row cap as unavailable instead of silently hiding some target reasons.
     const { data, count, error } = await client.from("repo_grade_automatic_targets")
-      .select("repo,folder,source_ref,state,reason,readme_example", { count: "exact" })
+      .select("repo,folder,source_ref,source_sha,state,reason,readme_example", { count: "exact" })
       .eq("run_id", run.data.id).eq("course_id", courseId)
       .in("state", AUTOMATIC_GRADE_DETAIL_STATES).order("id").limit(1000).retry(false);
     if (error || !data || data.length !== count) return unavailable;
@@ -71,8 +71,10 @@ export async function readRepoGradeAutomaticBlocksAction(
         startedAt,
         discoveryExplanation: runCourse.state === "partial" ? automaticReasonLabel(runCourse.reason) : null,
       },
-      targets: [...data.filter(({ state }) => state !== "no-submission").map(({ repo, folder, source_ref, state, reason, readme_example }) => ({
+      targets: [...data.filter(({ state }) => state !== "no-submission").map(({ repo, folder, source_ref, source_sha, state, reason, readme_example }) => ({
         repo, folder, sourceRef: source_ref,
+        ...(state === "partial" && reason === "prior-attempt" && typeof source_sha === "string" && /^[0-9a-f]{40}$/i.test(source_sha)
+          ? { priorAttempt: true as const, sourceSha: source_sha } : {}),
         explanation: automaticReasonLabel(state === "embedded-profile-required" ? state : reason)
           + readmeExampleLabel(reason, readme_example),
         ...(state === "partial" && { partial: true as const }),
@@ -80,7 +82,7 @@ export async function readRepoGradeAutomaticBlocksAction(
       })), ...emptyResult.targets.map(({ repo, folder, source_ref, source_sha, run_started_at, observed_source_ref,
         observed_source_sha, observed_state, observed_run_started_at, reason }) => ({
         repo, folder, sourceRef: source_ref, sourceSha: source_sha, explanation: "No submission.",
-        observedSourceSha: observed_source_sha, observedState: observed_state, observedRunStartedAt: observed_run_started_at,
+        observedSourceSha: observed_source_sha, observedSourceRef: observed_source_ref, observedState: observed_state, observedRunStartedAt: observed_run_started_at,
         ...((observed_source_sha !== source_sha || observed_source_ref !== source_ref) && { noSubmissionStale: true as const }),
         ...(reason === "verified-empty-explicit" && { noSubmissionExplicit: true as const }),
         noSubmission: true as const, runStartedAt: run_started_at,

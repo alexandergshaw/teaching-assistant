@@ -90,6 +90,14 @@ describe("automatic gradebook blockers", () => {
     ] });
   });
 
+  it("retains the exact pin only for a verified prior-attempt target", async () => {
+    query({ data: runRecord }); query({ data: { id: course } });
+    query({ data: [{ repo: "school/one", folder: "Lab", source_ref: "main", source_sha: "a".repeat(40), state: "partial", reason: "prior-attempt" }], count: 1 });
+    expect(await readRepoGradeAutomaticBlocksAction(owner, course)).toMatchObject({ targets: [
+      { repo: "school/one", priorAttempt: true, sourceSha: "a".repeat(40), runStartedAt: startedAt },
+    ] });
+  });
+
   it("keeps an older cell's no-submission after a newer targeted run touched a different cell", async () => {
     const newerRun = { ...runRecord, created_at: "2026-11-07T15:00:00.000Z" };
     query({ data: newerRun });

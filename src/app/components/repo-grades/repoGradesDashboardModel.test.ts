@@ -47,6 +47,13 @@ describe("class repository results", () => {
     for (const status of ["claimed", "unknown", "failed", "no-submission"] as const)
       expect(hasUnresolvedStaleNoSubmission({ ...saved, latest: { ...latest, status } }, [block])).toBe(true);
     expect(hasUnresolvedStaleNoSubmission(undefined, [block])).toBe(true);
+    const later = { ...block, observedSourceRef: "main", observedRunStartedAt: "2026-11-08T15:00:00Z" };
+    const skipped = { repo: "org/a", folder: "lab", sourceRef: "main", sourceSha: latest.commit,
+      explanation: "", partial: true as const, priorAttempt: true as const, runStartedAt: later.observedRunStartedAt };
+    expect(hasUnresolvedStaleNoSubmission(saved, [later, skipped])).toBe(false);
+    expect(hasUnresolvedStaleNoSubmission(saved, [later, { ...skipped, sourceSha: "f".repeat(40) }])).toBe(true);
+    expect(hasUnresolvedStaleNoSubmission(saved, [later, { ...skipped, runStartedAt: "2026-11-08T16:00:00Z" }])).toBe(true);
+    expect(hasUnresolvedStaleNoSubmission(saved, [later, { ...skipped, priorAttempt: undefined }])).toBe(true);
   });
   it("identifies whether an unordered no-submission check relates to a score or an attempt", () => {
     const empty = { ...attempt(1, "org/a", "lab", null), status: "no-submission" as const };

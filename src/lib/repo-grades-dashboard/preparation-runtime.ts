@@ -45,7 +45,6 @@ export type RepoGradeProfilePreparationFailure = RepoGradePreparationEvidenceFai
   | "rubric-generator-unavailable" | "grader-configuration-changed" | "gemini-key-unavailable"
   | "pinned-target-missing" | "rubric-freeze-unavailable" | "rubric-generation-unavailable";
 type PreparationOptions = {
-  allowTargetedModule12Execution?: boolean;
   observePreparation?: (metric: RepoGradePreparationDiagnostic) => void;
   observeProfileFailure?: (reason: RepoGradeProfilePreparationFailure, example?: RepoGradeReadmeExample) => void;
   retry?: RepoGradePreparationRetry;
@@ -174,7 +173,7 @@ export async function prepareRepoGradeStartupProfile(
   const invalidProfile = profile.accountId !== accountId ? "invalid-scope"
     : profile.sourceRef !== expectedSourceRef ? "source-configuration-changed"
     : profile.targetBranch ? "unsupported-target-branch"
-    : profile.runCode && !options.allowTargetedModule12Execution ? "automatic-execution-unsupported" : null;
+    : profile.runCode ? "automatic-execution-unsupported" : null;
   if (invalidProfile) {
     observeProfileFailure?.(invalidProfile);
     return null;

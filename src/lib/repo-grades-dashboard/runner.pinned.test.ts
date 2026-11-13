@@ -260,7 +260,7 @@ it("holds the score when process exits cannot establish that student tests ran",
     modelResponse: () => Response.json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify({
       overallComment: "Reviewed the source and process observations.", rubricResults: names.map((area) => ({ area, score: "25/25", comment: "Reviewed source." })),
     }) }] } }] }) });
-  const captured = captureRepoGradeProfile({ accountId: plan.accountId, courseId: plan.courseId, folder: actualFolder }, { runCode: true }, grader);
+  const captured = captureRepoGradeProfile({ accountId: plan.accountId, courseId: plan.courseId, folder: actualFolder }, { runCode: false }, grader);
   if (captured.status !== "ready") throw new Error("Invalid profile fixture");
   const receipt = resolveRepoGradeRubric(captured.profile, rubric);
   vi.mocked(claimRepoGrade).mockResolvedValueOnce({ status: "claimed", claim: { ...claim, mode: "retry" } });

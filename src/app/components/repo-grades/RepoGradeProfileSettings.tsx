@@ -87,7 +87,6 @@ export function ProfileForm({ courseId, organization, folder, initialProfile, re
   const savingProfile = status === "saving";
   const existingEmbeddedGenerator = baseline?.provider === "embedded" && baseline.rubricPolicy === "generate";
   const targetedExecution = organization.trim().toLowerCase() === "intro-to-computer-science-fall-2026" && folder === "assignments/module_12";
-  const invalidExecutionProvider = targetedExecution && draft.runCode && draft.provider !== "gemini";
 
   function updateDraft(changes: Partial<ProfileDraft>) {
     setDraft((current) => ({ ...current, ...changes }));
@@ -96,7 +95,7 @@ export function ProfileForm({ courseId, organization, folder, initialProfile, re
 
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (saving.current || status === "conflict" || invalidExecutionProvider) return;
+    if (saving.current || status === "conflict") return;
     if (!generateRubric && !draft.rubric.trim()) {
       setRubricError(true);
       return;
@@ -148,10 +147,8 @@ export function ProfileForm({ courseId, organization, folder, initialProfile, re
             }} />}
         <FormControlLabel control={<Checkbox checked={draft.applyNamingDeduction} disabled={savingProfile}
           onChange={(event) => updateDraft({ applyNamingDeduction: event.currentTarget.checked })} />} label="Apply naming deductions" />
-        <Typography component="p" variant="body2">Automatic code execution is unavailable. {targetedExecution && "For this assignment, targeted regrades can run source tests in an isolated sandbox and save an unscored review draft. This requires Gemini. With this option on, automatic checks for this folder do not run."}</Typography>
-        {targetedExecution ? <FormControlLabel control={<Checkbox checked={draft.runCode} disabled={savingProfile || (draft.provider !== "gemini" && !draft.runCode)}
-          onChange={(event) => updateDraft({ runCode: event.currentTarget.checked })} />}
-          label="Run source tests for targeted regrades (review only)" /> : baseline?.runCode && (
+        <Typography component="p" variant="body2">Automatic code execution is unavailable. {targetedExecution && "For this assignment, explicit targeted regrades with Gemini run source tests in an isolated sandbox and save an unscored review draft. Clear any saved code execution opt-in to enable grading."}</Typography>
+        {baseline?.runCode && (
           <FormControlLabel control={<Checkbox checked={draft.runCode} disabled={savingProfile}
             onChange={(event) => updateDraft({ runCode: event.currentTarget.checked })} />}
             label="Keep saved code execution opt-in. Clear it to use automatic grading." />
@@ -168,9 +165,8 @@ export function ProfileForm({ courseId, organization, folder, initialProfile, re
         )}
       </fieldset>
       {saveError && <p role="alert">{saveError}</p>}
-      {invalidExecutionProvider && <Typography role="alert" color="error" variant="body2">Choose Gemini or clear source test execution before saving.</Typography>}
       <div>
-        <Button type="submit" variant="contained" disabled={savingProfile || status === "conflict" || invalidExecutionProvider}>Save folder profile</Button>
+        <Button type="submit" variant="contained" disabled={savingProfile || status === "conflict"}>Save folder profile</Button>
         {status === "conflict" && <Button type="button" onClick={reload}>Reload saved profile and discard edits</Button>}
       </div>
     </form>

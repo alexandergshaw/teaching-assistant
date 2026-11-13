@@ -168,8 +168,6 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode, opt
       loadPreparedProfile: (scope) => mode === "embedded-only"
         ? prepareEmbeddedRepoGradeStartupProfile(scope, expectedRef)
         : prepareRepoGradeStartupProfile(scope, plan.discovery, expectedRef, target, plan.courseConfig, plan.courseKindBasis, {
-          allowTargetedModule12Execution: !!targeted && target.folder === "assignments/module_12"
-            && target.repo.toLowerCase().startsWith("intro-to-computer-science-fall-2026/"),
           observeProfileFailure: (reason, example) => { profileFailure = reason; readmeExample = example; },
           resolveEvidence: createAutomaticRepoGradeEvidenceResolver(
             snapshot?.basis ?? plan.snapshotBasis ?? "legacy",

@@ -1,3 +1,15 @@
+- id: 'REPO-GRADE-MODULE12-SOURCE-ONLY'
+  state: 'unscoped'
+  kind: 'bug'
+  area: 'grading-setup-interaction-cost'
+  title: 'Allow targeted module 12 source-only submissions to produce an unscored execution review.'
+  owns: ['src/lib/repo-grade-evaluator.ts', 'src/lib/repo-grades-dashboard/review-draft.ts', 'src/lib/repo-grades-dashboard/ledger.ts']
+  verify: null
+  blocked_by: []
+  instrument: 'Exercise targeted grading with all three source files and no optional binaries. Preserve complete source evidence and execution uncertainty, and save a review draft without requiring an omitted-artifact record. Verify isolated execution, saved history, and live browser behavior.'
+  from: '2026-11-13 targeted WNCC module 12 execution review; the four incident submissions have optional binaries but source-only submissions do not.'
+  note: 'The current eligibility gate and draft ledger require at least one unexamined optional binary. Do not remove the gate until the no-omission draft settlement contract is independently verified; otherwise an unverified execution could become a numeric score.'
+  question: null
 - id: 'REPO-GRADE-REQUIREMENT-EVIDENCE'
   state: 'actionable'
   kind: 'bug'

@@ -303,10 +303,11 @@ export async function runRepoGradeTarget(
   if (profile.sourceRef !== plannedRef) return { status: "configuration-changed" };
   const receipt = restoreRepoGradeRubric(profile, prepared.receipt);
   if (!receipt) return { status: "profile-unavailable" };
+  const targetedModule12 = !!runtime.targetedRun && folder === "assignments/module_12"
+    && source.repo.toLowerCase().startsWith("intro-to-computer-science-fall-2026/") && profile.provider === "gemini";
   // A slow isolated run needs a bounded host deadline and settlement reserve.
   // Refuse before admission rather than start work that the host will kill.
-  if (profile.runCode && runtime.targetedRun && folder === "assignments/module_12"
-    && source.repo.toLowerCase().startsWith("intro-to-computer-science-fall-2026/")
+  if (targetedModule12
     && (!runtime.deadlineMs || runtime.deadlineMs - Date.now() < MODULE12_MINIMUM_BUDGET_MS + 15_000)) return { status: "runtime-unavailable" };
 
   let unsettled: UnsettledEvaluation | undefined;
@@ -323,10 +324,9 @@ export async function runRepoGradeTarget(
     const evaluatePinned = runtime.evaluatePinned ?? evaluatePinnedRepoGrade;
     const evaluation = classifyEvaluation(await evaluatePinned({
       repo: source.repo, folder, sourceCommit: source.sourceCommit, profile, rubric: receipt.rubric,
-      runCode: profile.runCode === true, beforeDispatch, preparedReadme: prepared.preparedReadme,
+      runCode: targetedModule12 || profile.runCode === true, beforeDispatch, preparedReadme: prepared.preparedReadme,
       executionDeadlineMs: runtime.deadlineMs,
-      targetedModule12: !!runtime.targetedRun && folder === "assignments/module_12"
-        && source.repo.toLowerCase().startsWith("intro-to-computer-science-fall-2026/"),
+      targetedModule12,
     }), source.sourceCommit, source.repo, profile, receipt.rubric, prepared.preparedReadme);
     const { settlement, ...value } = evaluation;
     // Settlement can fail after the evaluator has already returned. Keep the

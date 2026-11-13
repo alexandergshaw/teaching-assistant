@@ -63,6 +63,24 @@ beforeEach(() => {
   vi.mocked(settleRepoGrade).mockResolvedValue(true);
 });
 describe("repository grading dashboard runner", () => {
+  it.each(["automatic", "refresh", "recovery"] as const)("does not enable sandbox execution for %s module-12 work", async (kind) => {
+    const repo = "intro-to-computer-science-fall-2026/student", folder = "assignments/module_12";
+    const captured = captureRepoGradeProfile({ accountId: "owner", courseId: "course", folder }, { runCode: false },
+      { provider: "gemini", model: "configured-model", graderVersion: "configured-version" });
+    if (captured.status !== "ready") throw new Error("Invalid profile");
+    const receipt = resolveRepoGradeRubric(captured.profile, graded.rubric);
+    const ready = { ...source, repo, folders: [folder] };
+    const scopedPlan = { ...plan, courseConfig: { ...courseConfig, github_org: "intro-to-computer-science-fall-2026" },
+      discovery: { ...plan.discovery, repos: [ready] } };
+    const evaluatePinned = vi.fn().mockResolvedValue({ ...graded, fullName: repo });
+    const extra = kind === "refresh" ? { changedRefreshRun: { runId: cohortId, lease: cohortId } }
+      : kind === "recovery" ? { recoveryRun: { runId: cohortId, lease: cohortId } } : {};
+    vi.mocked(claimRepoGrade).mockResolvedValue({ status: "claimed", claim: { ...claim, mode: kind === "recovery" ? "retry" : "automatic" } });
+    await runRepoGradeTarget(scopedPlan, { repo, folder, sourceRef: "main", sha }, {
+      ...extra, loadPreparedProfile: vi.fn().mockResolvedValue({ profile: captured.profile, receipt, cohortId }), evaluatePinned,
+    });
+    expect(evaluatePinned).toHaveBeenCalledWith(expect.objectContaining({ runCode: false, targetedModule12: false }));
+  });
   it.each([
     ["recovered-succeeded", "succeeded"],
     ["recovered-no-submission", "no-submission"],

@@ -95,19 +95,24 @@ export function isGradeBlob(file: RepoTreeEntry): boolean {
     && /^[a-f0-9]{40}$/.test(file.sha) && Number.isSafeInteger(file.size) && file.size >= 0;
 }
 
-export function verifyGradeBlob(bytes: Buffer, file: RepoTreeEntry): string {
+export function verifyGradeBlobBytes(bytes: Buffer, file: RepoTreeEntry): Buffer {
   if (!isGradeBlob(file) || bytes.length !== file.size) return invalid();
   const blobSha = createHash("sha1").update(`blob ${file.size}\0`).update(bytes).digest("hex");
   if (blobSha !== file.sha) return invalid();
+  return bytes;
+}
+
+export function verifyGradeBlob(bytes: Buffer, file: RepoTreeEntry): string {
+  verifyGradeBlobBytes(bytes, file);
   const text = textUtf8.decode(bytes);
   if (text.includes("\0") || /^version https:\/\/git-lfs\.github\.com\/spec\/v1\r?\n/.test(text)) return invalid();
   return text;
 }
 
-export async function verifyGradeArchiveFiles(
+export async function verifyGradeArchiveBytes(
   archive: GradeArchive, files: readonly RepoTreeEntry[], signal: AbortSignal,
-): Promise<ReadonlyMap<string, string>> {
-  const verified = new Map<string, string>();
+): Promise<ReadonlyMap<string, Buffer>> {
+  const verified = new Map<string, Buffer>();
   let expanded = 0;
   for (const file of files) {
     signal.throwIfAborted();
@@ -118,7 +123,12 @@ export async function verifyGradeArchiveFiles(
     // Bound native inflation even when the ZIP header deliberately lies low.
     const bytes = member.method === 0 ? compressed : await inflate(compressed, { maxOutputLength: Math.max(1, file.size) });
     signal.throwIfAborted();
-    verified.set(file.path, verifyGradeBlob(bytes, file));
+    verified.set(file.path, verifyGradeBlobBytes(bytes, file));
   }
   return verified;
+}
+
+export async function verifyGradeArchiveFiles(archive: GradeArchive, files: readonly RepoTreeEntry[], signal: AbortSignal): Promise<ReadonlyMap<string, string>> {
+  const bytes = await verifyGradeArchiveBytes(archive, files, signal);
+  return new Map(files.map((file) => [file.path, verifyGradeBlob(bytes.get(file.path)!, file)]));
 }

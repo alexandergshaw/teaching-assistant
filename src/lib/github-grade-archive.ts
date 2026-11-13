@@ -6,7 +6,7 @@ import { GithubGradeSourceRateLimitError } from "./github-http-error";
 import { classifyGithubFailure } from "./github-rate-limit";
 import { validateGithubOwnerRepo } from "./github-ref-name";
 import { githubRestHeaders, isGithubCommitSha } from "./github.repos";
-import { GradeArchiveLimitError, indexGradeArchive, isGradeBlob, verifyGradeArchiveFiles, verifyGradeBlob, type GradeArchive } from "./github-grade-archive-zip";
+import { GradeArchiveLimitError, indexGradeArchive, isGradeBlob, verifyGradeArchiveFiles, verifyGradeBlob, verifyGradeBlobBytes, type GradeArchive } from "./github-grade-archive-zip";
 import type { RepoTreeEntry } from "./github.files";
 
 const MAX_DOWNLOAD_BYTES = 12 * 1024 * 1024;
@@ -231,5 +231,32 @@ export function makePinnedArchiveReader(scope: { accountId: string; owner: strin
     const verified = await verifyGradeArchiveFiles(archive, files, signal);
     remember(key, archive);
     return verified;
+  };
+}
+
+/** Reads explicitly named pinned members as hash-verified bytes, including binary files. */
+export function makePinnedArchiveBytesReader(scope: { accountId: string; owner: string; repo: string; sha: string }) {
+  return async (files: readonly RepoTreeEntry[], callerSignal?: AbortSignal): Promise<ReadonlyMap<string, Buffer>> => {
+    const { accountId, owner, repo, sha } = scope;
+    if (!accountId || !validateGithubOwnerRepo(owner, repo) || !isGithubCommitSha(sha)) return unavailable();
+    if (files.length > SCOPED_BUDGET.maxFiles || files.some((file) => !isGradeBlob(file) || file.size >= SCOPED_BUDGET.maxBlobBytes)
+      || files.reduce((total, file) => total + file.size, 0) > MAX_FALLBACK_BYTES) return unavailable();
+    const timeout = AbortSignal.timeout(SOURCE_READ_TIMEOUT_MS);
+    const signal = callerSignal ? AbortSignal.any([callerSignal, timeout]) : timeout;
+    const headers = githubRestHeaders();
+    const credential = createHash("sha256").update(headers.Authorization).digest("hex");
+    const output = new Map<string, Buffer>();
+    const rawHeaders = new Headers(headers); rawHeaders.set("Accept", "application/vnd.github.raw+json");
+    for (const file of files) {
+      signal.throwIfAborted();
+      if (output.has(file.path)) return unavailable();
+      checkCooldown(credential);
+      const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/blobs/${file.sha}`, {
+        headers: rawHeaders, signal, redirect: "manual", cache: "no-store",
+      });
+      observeQuota(response, credential);
+      output.set(file.path, verifyGradeBlobBytes(await readBody(response, signal, file.size, unavailable), file));
+    }
+    return output;
   };
 }

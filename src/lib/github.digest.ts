@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { classifyModule12Artifact } from "./grade/module12-optional-artifact";
 import { boundSubmissionInventory, type SubmissionFileInventory } from "./grade/submission-file-inventory";
 // Codebase digest for LLM analysis (course/rubric generation, grading).
 
@@ -130,6 +132,7 @@ export interface RepoDigestSkipCounts {
 }
 
 export interface RepoDigest {
+  unexaminedOptionalArtifacts?: string[];
   inventory?: SubmissionFileInventory;
   fullName: string;
   description: string;
@@ -307,6 +310,7 @@ export async function ingestRepo(
     maxFiles?: number; maxBytes?: number; perFileBytes?: number; maxBlobBytes?: number;
     pathPrefix?: string; sourceCommit?: string; signal?: AbortSignal; treeCacheAccountId?: string;
     excludeInstructionReadme?: boolean;
+    module12OptionalArtifacts?: { trustedInstructions: string; readBytes: (files: readonly RepoTreeEntry[], signal?: AbortSignal) => Promise<ReadonlyMap<string, Buffer>> };
     readPinnedFiles?: (files: readonly RepoTreeEntry[], signal?: AbortSignal) => Promise<ReadonlyMap<string, string>>;
   } = {},
   ref?: string
@@ -340,7 +344,26 @@ export async function ingestRepo(
     const inFolder = !folder || entry.path.toLowerCase().startsWith(`${folder.toLowerCase()}/`);
     return !(isRegularFile && inFolder && isInstructionReadmeDocument(entry.path));
   }) : scoped;
-  const selection = selectDigestFiles(scopedTree, {
+  const optionalArtifacts: string[] = [];
+  if (sourceCommit !== undefined && owner === "intro-to-computer-science-fall-2026"
+    && folder === "assignments/module_12" && opts.module12OptionalArtifacts
+    && createHash("sha256").update(opts.module12OptionalArtifacts.trustedInstructions.trim()).digest("hex")
+      === "a3b8baa7998ddc1ee15717e0485fff7a13d07f12acd0db0c2b74593b754ffecf") {
+    const possible = scopedTree.filter((entry) => entry.type === "blob"
+      && ["TestUtils.class", "test_utils.exe", "test_utils"].includes(entry.path.split("/").pop() ?? ""));
+    if (possible.length) {
+      try {
+        const bytes = await opts.module12OptionalArtifacts.readBytes(possible, signal);
+        const paths = scopedTree.filter((entry) => entry.type === "blob").map((entry) => entry.path);
+        for (const entry of possible) {
+          const body = bytes.get(entry.path);
+          if (body && classifyModule12Artifact(entry.path, body, paths, opts.module12OptionalArtifacts.trustedInstructions)) optionalArtifacts.push(entry.path);
+        }
+      } catch { signal?.throwIfAborted(); }
+    }
+  }
+  const selectedTree = scopedTree.filter((entry) => !optionalArtifacts.includes(entry.path));
+  const selection = selectDigestFiles(selectedTree, {
     maxFiles, maxBytes, perFileBytes, maxBlobBytes, pathPrefix: opts.pathPrefix,
     requireCompleteSubmission: sourceCommit !== undefined,
     allowVerifiedExtensionless: sourceCommit !== undefined && !!opts.readPinnedFiles,
@@ -447,6 +470,7 @@ export async function ingestRepo(
   }
   return {
     inventory,
+    ...(optionalArtifacts.length ? { unexaminedOptionalArtifacts: optionalArtifacts } : {}),
     fullName: info.fullName,
     description: info.description,
     fileCount: count,

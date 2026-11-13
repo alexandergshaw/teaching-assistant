@@ -1,7 +1,7 @@
 import "server-only";
 
 import { excludeInstructionsFromDigest, getRepoTreeWithMeta, ingestRepo, isScaffoldingFile, listBranches } from "@/lib/github";
-import { generateRubric, gradeEntries, type GradingRun, type StudentSubmissionEntry, type GradeDetermination } from "@/lib/grade";
+import { generateRubric, gradeEntries, isUngraded, type GradeResult, type GradingRun, type StudentSubmissionEntry, type GradeDetermination } from "@/lib/grade";
 import { buildEmbeddedRubric, gradeEntriesEmbedded, renderRubricText } from "@/lib/embedded-grader";
 import { attachCodeRuns } from "@/lib/code-runner";
 import { rememberRubric } from "@/lib/research/rubric-bank";
@@ -16,7 +16,7 @@ import type { ManualRepoGradeError, ManualRepoGradeExecution } from "@/lib/repo-
 import { getRepoGraderIdentity, type RepoGraderIdentity } from "@/lib/repo-grades-dashboard/grader-identity";
 import type { PreparedRepoGradeReadme } from "@/lib/repo-grades-dashboard/preparation-runtime";
 import { repoDigestToEmbeddedEntry } from "@/lib/repo-grade-entry";
-import { makePinnedArchiveReader } from "@/lib/github-grade-archive";
+import { makePinnedArchiveReader, makePinnedArchiveBytesReader } from "@/lib/github-grade-archive";
 import { missingSqlCommentRequiresReview } from "@/lib/grade/sql-comment-review";
 
 // The not-merged note (null for every other status) that withBranchNote folds
@@ -99,6 +99,7 @@ export async function evaluateRepoGrade(
       pathPrefix, sourceCommit, ...(signal && { signal }),
       ...(excludeInstructionReadme && { excludeInstructionReadme: true }),
       ...(automaticGrader && { treeCacheAccountId: automaticGrader.accountId, readPinnedFiles: makePinnedArchiveReader({ ...parsed, accountId: automaticGrader.accountId, sha: sourceCommit }) }),
+      ...(automaticGrader && execution?.preparedReadme?.template === true && { module12OptionalArtifacts: { trustedInstructions: execution.preparedReadme.instructions, readBytes: makePinnedArchiveBytesReader({ ...parsed, accountId: automaticGrader.accountId, sha: sourceCommit }) } }),
     })
     : await ingestRepo(parsed.owner, parsed.repo, { pathPrefix, ...(excludeInstructionReadme && { excludeInstructionReadme: true }) }, targetBranch);
   if (sourceCommit && digest.truncated) {
@@ -298,6 +299,11 @@ export async function evaluateRepoGrade(
     entry.gradedRef = sourceCommit;
   }
   const provenance = sourceCommit ? { sourceCommit } : {};
+  const recordUnexaminedArtifacts = (run: { results: GradeResult[] }) => {
+    if (!digest.unexaminedOptionalArtifacts?.length) return;
+    const notice = `Unexamined optional binary files: ${digest.unexaminedOptionalArtifacts.join(", ")}. These files were not executed or assessed; the grade covers the source files.`;
+    for (const result of run.results) if (!isUngraded(result)) result.overallComment = `${result.overallComment}\n\n${notice}`;
+  };
 
   // Embedded Deterministic Engine: grade the repo in-process against the
   // supplied rubric, or one generated from the instructions. No model call.
@@ -319,6 +325,7 @@ export async function evaluateRepoGrade(
     // the LLM path does. Code execution is opt-in for the embedded engine.
     if (runCode) await attachCodeRuns(entries, modelExecution?.beforeDispatch);
     const run = withBranchNote(gradeEntriesEmbedded(entries, builtRubric), branchNote);
+    recordUnexaminedArtifacts(run);
     return { run, rubric: automaticGrader ? rubric : renderRubricText(builtRubric), fullName: digest.fullName, ...provenance, digestTruncated, readmePath, readmeMissing, branchMergeCheck: mergedCheck };
   }
 
@@ -338,6 +345,7 @@ export async function evaluateRepoGrade(
     execution?.markKnownFailure();
     return { error: "Repository grading inputs exceed the grading limit.", partial: true, sourceCommit, reason: "grading-input-truncated" };
   }
+  recordUnexaminedArtifacts(run);
   return { run, rubric: effectiveRubric, fullName: digest.fullName, ...provenance, digestTruncated, readmePath, readmeMissing, branchMergeCheck: mergedCheck };
 }
 

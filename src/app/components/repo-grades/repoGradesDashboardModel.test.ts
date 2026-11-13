@@ -45,7 +45,7 @@ describe("class repository results", () => {
     const matching = [{ ...evidence[0], sourceSha: empty.commit! }];
     expect(unorderedNoSubmissionContext({ latest: empty, scored: null }, matching, false, false)).toBeNull();
     expect(unorderedNoSubmissionContext({ latest: empty, scored: null }, [{ ...matching[0], sourceRef: "other" }], false, false)).toBe("attempt");
-    expect(unorderedNoSubmissionContext({ latest: { ...empty, commit: null }, scored: null }, matching, false, false)).toBe("attempt");
+    expect(unorderedNoSubmissionContext({ latest: { ...empty, commit: "" }, scored: null }, matching, false, false)).toBe("attempt");
     const zero = attempt(3, "org/a", "lab", 0);
     expect(unorderedNoSubmissionContext({ latest: empty, scored: zero }, evidence, false, false)).toBe("score");
     for (const status of ["failed", "unknown"] as const) {

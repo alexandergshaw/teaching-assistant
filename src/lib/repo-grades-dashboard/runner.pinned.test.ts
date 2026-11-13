@@ -179,7 +179,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-const actualInstructor = readFileSync(new URL("./fixtures/module12-instructor.txt", import.meta.url), "utf8");
+const actualInstructor = JSON.parse(readFileSync(new URL("./fixtures/module12-instructor.json", import.meta.url), "utf8")) as string;
 const actualRubrics = JSON.parse(readFileSync(new URL("./fixtures/module12-rubrics.json", import.meta.url), "utf8")) as string[];
 const actualRepo = "intro-to-computer-science-fall-2026/info-2350-fixture";
 const actualFolder = "assignments/module_12";

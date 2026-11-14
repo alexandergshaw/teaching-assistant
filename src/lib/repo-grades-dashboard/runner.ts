@@ -236,7 +236,7 @@ function classifyEvaluation(
     )) {
     const candidate = response.run.results.length === 1 ? response.run.results[0] : undefined;
     const reviewFeedback = candidate && !isUngraded(candidate) && !candidate.submissionTruncated ? {
-      overall: `Provisional model feedback; execution, test coverage, correctness, and artifact equivalence have not been independently verified. Review against the pinned source and observations.\n\n${candidate.overallComment}`,
+      overall: candidate.overallComment,
       rubric: candidate.rubricAreas.map(item => ({ area: item.area, comment: item.comment })),
     } : response.generalSourceReview ?? {
       overall: "Review the pinned source and rubric alongside the execution observations. Test coverage, correctness, and artifact equivalence have not been independently verified.", rubric: [],
@@ -273,7 +273,7 @@ function classifyEvaluation(
   if (general && (!/^\s*\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?\s*$/.test(grade.totalScore)
     || !matchesFrozenRubricScore(rubric, grade.rubricAreas, fraction))) {
     const reviewFeedback = {
-      overall: `Provisional model feedback; the returned scores could not be reconciled with the saved rubric. Review the pinned source and observations.\n\n${grade.overallComment}`,
+      overall: grade.overallComment,
       rubric: grade.rubricAreas.map(item => ({ area: item.area, comment: item.comment })),
     };
     return { status: "partial", reason: "execution-unverified", settlement: { outcome: "partial", generalExecutionEvidence: general,
@@ -298,9 +298,7 @@ function classifyEvaluation(
   }) : grade.rubricAreas;
   const result: RepoGradeResultRecord = {
     score: (fraction.earned / fraction.possible) * 100,
-    feedback: general && general.policy !== "source-only"
-      ? `Provisional model assessment. Entry points were selected heuristically; test coverage, correctness, and artifact equivalence have not been independently verified. Review the pinned source and execution observations.\n\n${grade.overallComment}`
-      : grade.overallComment,
+    feedback: grade.overallComment,
     ...(general && { generalExecutionEvidence: general }),
     ...(response.sourceExecutionSummary ? { sourceExecutionSummary: response.sourceExecutionSummary } : {}),
     ...(rawEvidence ? { unexaminedArtifacts: response.unexaminedArtifacts ?? [], module12Evidence: rawEvidence,

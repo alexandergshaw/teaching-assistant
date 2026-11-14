@@ -1,4 +1,3 @@
-import { resultCopyNotice, scoredCopyNotice } from "./repoGradeCopyAll";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { Alert, Box, Button, Chip, Stack, Typography } from "@mui/material";
 import { isOwnerDecision } from "@/lib/access";
@@ -144,7 +143,7 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
     </FeedbackDisclosure> : null}
     {draft && <FeedbackDisclosure compact title="Review-only draft" label={`Review-only draft: ${repo.name} / ${folder}`}>
       <RepoResultFeedback repo={repo.name} folder={folder} source="review-only draft"
-        feedback={{ overall: draft.feedback ?? "", strengths: draft.feedback_sections?.strengths ?? "", improvements: draft.feedback_sections?.improvements ?? "", resubmitNotice: draft.feedback_sections?.resubmitNotice ?? "" }} rubric={draft.rubric ?? []} hideCopyAll copyNotice="Unscored provisional draft; test coverage was not verified. Instructor review is required." />
+        feedback={{ overall: draft.feedback ?? "", strengths: draft.feedback_sections?.strengths ?? "", improvements: draft.feedback_sections?.improvements ?? "", resubmitNotice: draft.feedback_sections?.resubmitNotice ?? "" }} rubric={draft.rubric ?? []} hideCopyAll />
     </FeedbackDisclosure>}
     <RepoGradeRubricScores areas={scored?.rubric ?? []} criterionOrder={criterionOrder}
       placeholderOnly={provenNoSubmission || (!scored && cell?.saved?.latest.status === "no-submission")}
@@ -178,14 +177,12 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
       <Typography variant="caption" color="text.secondary">Submission unknown</Typography>}
     {draft && <RepoResultCopy key={draft.generation} repo={repo.name} folder={folder} source="saved"
       feedback={{ overall: draft.feedback ?? "", strengths: draft.feedback_sections?.strengths ?? "", improvements: draft.feedback_sections?.improvements ?? "", resubmitNotice: draft.feedback_sections?.resubmitNotice ?? "" }}
-      rubric={draft.rubric ?? []} distinguishSource={false} copyLabel="Copy review-only draft"
-      copyNotice={`Unscored provisional draft; test coverage was not verified. Instructor review is required. ${resultCopyNotice(draft) ?? ""}`} />}
+      rubric={draft.rubric ?? []} distinguishSource={false} copyLabel="Copy review-only draft" />}
     {generalAttempt?.general_review_feedback && <RepoResultCopy key={generalAttempt.generation} repo={repo.name} folder={folder} source="saved"
       feedback={{ overall: generalAttempt.general_review_feedback.overall ?? "", strengths: "", improvements: "", resubmitNotice: "" }}
-      rubric={generalAttempt.general_review_feedback.rubric.map(item => ({ ...item, score: "" }))} distinguishSource={false} copyLabel="Copy unscored source review"
-      copyNotice={`Unscored source review; this is not a grade. ${generalAttempt.generation !== cell?.saved?.latest.generation ? "This review belongs to an earlier attempt. " : ""}${resultCopyNotice(generalAttempt) ?? ""}`} />}
+      rubric={generalAttempt.general_review_feedback.rubric.map(item => ({ ...item, score: "" }))} distinguishSource={false} copyLabel="Copy unscored source review" />}
     {scored && feedback && <RepoResultCopy key={scored.generation} repo={repo.name} folder={folder}
-      source="saved" feedback={feedback} rubric={scored.rubric ?? []} distinguishSource={false} copyNotice={scoredCopyNotice(scored, !!(earlierScore || historicalEmpty || scored.generation !== cell?.saved?.latest.generation))} />}
+      source="saved" feedback={feedback} rubric={scored.rubric ?? []} distinguishSource={false} />}
   </>;
 }
 
@@ -224,7 +221,7 @@ function SavedMatrixResult({ result, repo, folder, feedback, showSource, part, e
             {sections && <p>Original score {sections.rawScore}</p>}
             {scored.feedback !== null && !sections && <p>Saved overall feedback may be shortened.</p>}
             {feedback && <RepoResultFeedback key={scored.generation} repo={repo} folder={folder} source="saved"
-              feedback={feedback} rubric={[]} hideCopyAll copyNotice={scoredCopyNotice(scored, !!earlierPin || scored.generation !== latest.generation)} />}
+              feedback={feedback} rubric={[]} hideCopyAll />}
           </>
         )}
       </FeedbackDisclosure>}

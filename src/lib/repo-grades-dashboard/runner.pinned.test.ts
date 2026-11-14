@@ -325,7 +325,7 @@ describe("admitted pinned repository evaluator", () => {
       .resolves.toMatchObject({ status: "succeeded" });
     expect(runGenericRepoSandbox).toHaveBeenCalledOnce();
     const settlement = vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1];
-    expect(settlement).toMatchObject({ outcome: "succeeded", result: { feedback: expect.stringContaining("Provisional model assessment"), generalExecutionEvidence: { coverage: { status: "unverified" }, runs: [expect.objectContaining({ entryPoint: "lab/main.py" })] } } });
+    expect(settlement).toMatchObject({ outcome: "succeeded", result: { feedback: expect.not.stringContaining("Provisional model assessment"), generalExecutionEvidence: { coverage: { status: "unverified" }, runs: [expect.objectContaining({ entryPoint: "lab/main.py" })] } } });
     expect(fetcher.mock.calls.some(([url]) => url === modelUrl)).toBe(true);
   });
   it("does not present a model score as verified when a source comment is cited", async () => {
@@ -339,7 +339,7 @@ describe("admitted pinned repository evaluator", () => {
     const runtime = { loadPreparedProfile: vi.fn(async () => ({ profile: captured.profile, receipt, cohortId: "8d74ee61-463c-4b3f-af5d-5fc9b55023c1" })) };
     vi.mocked(claimRepoGrade).mockResolvedValueOnce({ status: "claimed", claim: { ...claim, mode: "retry" } });
     await runRepoGradeTarget(plan, target, { ...runtime, deadlineMs: Date.now() + 260_000, targetedRun: { runId: "run", lease: "lease" } });
-    expect(vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1]).toMatchObject({ outcome: "succeeded", result: { feedback: expect.stringContaining("Provisional model assessment"), generalExecutionEvidence: { coverage: { status: "unverified" } } } });
+    expect(vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1]).toMatchObject({ outcome: "succeeded", result: { feedback: expect.not.stringContaining("Provisional model assessment"), generalExecutionEvidence: { coverage: { status: "unverified" } } } });
   });
   it("grades explicit written-only work without pretending to execute it", async () => {
     const essay={...files.submission,path:"lab/essay.txt"};
@@ -395,7 +395,7 @@ describe("admitted pinned repository evaluator", () => {
     await expect(runRepoGradeTarget(plan, target, { ...runtime, deadlineMs: Date.now() + 260_000, targetedRun: { runId: "run", lease: "lease" } }))
       .resolves.toMatchObject({ status: "succeeded" });
     expect(runGenericWindowsArtifact).toHaveBeenCalledOnce();
-    expect(vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1]).toMatchObject({ outcome: "succeeded", result: { feedback: expect.stringContaining("Provisional model assessment"), generalExecutionEvidence: { coverage: { status: "unverified" }, artifacts: [expect.objectContaining({ path: exe.path, kind: "pe", status: "observed", runtime: "wine", sourceEquivalence: "unverified" })] } } });
+    expect(vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1]).toMatchObject({ outcome: "succeeded", result: { feedback: expect.not.stringContaining("Provisional model assessment"), generalExecutionEvidence: { coverage: { status: "unverified" }, artifacts: [expect.objectContaining({ path: exe.path, kind: "pe", status: "observed", runtime: "wine", sourceEquivalence: "unverified" })] } } });
     expect(fetcher.mock.calls.some(([url]) => url === modelUrl)).toBe(true);
   });
   it("grades verified extensionless and .text submission files together", async () => {

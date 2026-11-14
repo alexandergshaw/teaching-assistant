@@ -1,34 +1,26 @@
-import type { RepoGradeSavedAttempt } from "./repoGradesDashboardModel";
 import { FEEDBACK_FIELDS, formatFeedback, type FeedbackBoxesEdit } from "../grading-results/gradingResultsHelpers";
 import type { RubricScore } from "./rubricAlignment";
 
 /** Include rubric comments even when there is no overall feedback. */
 export function repoGradeCopyAllText(feedback: FeedbackBoxesEdit, rubric: readonly RubricScore[]): string {
-  const sections = rubric.filter(({ comment }) => comment?.trim()).map(({ area, comment }) => `${area}:\n${comment!.trim()}`);
-  const details = FEEDBACK_FIELDS.map((field) => feedback[field].trim()).filter(Boolean);
-  const overall = feedback.overall.trim();
+  const sections = rubric.map(({ area, comment }) => ({ area, comment: studentCopyText(comment ?? "") })).filter(({ comment }) => comment).map(({ area, comment }) => `${area}:\n${comment}`);
+  const details = FEEDBACK_FIELDS.map((field) => studentCopyText(feedback[field])).filter(Boolean);
+  const overall = studentCopyText(feedback.overall);
   const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
   const duplicate = details.length > 0 && normalize(overall) === normalize(details.join(" "));
   const summary = [...(overall && !duplicate ? [overall] : []), ...details].map(formatFeedback);
   return [...summary, ...sections].join("\n\n");
 }
 
-export function resultCopyNotice(attempt: RepoGradeSavedAttempt): string | undefined {
-  const notices: string[] = [];
-  if (attempt.unexamined_artifacts?.length) notices.push("Some optional binary files were not examined; their correctness and equivalence to source were not established.");
-  if (attempt.module12_evidence) notices.push(`${attempt.status === "partial" ? "This review is unscored." : "This score is provisional."} Test counts, coverage and binary-to-source equivalence were not independently verified; runtime failures may reflect unavailable dependencies.`);
-  if (attempt.general_execution_evidence) notices.push(attempt.general_execution_evidence.policy === "source-only"
-    ? "No execution was attempted for this written-work assessment."
-    : "Execution entry points were selected heuristically. Test counts, coverage and source equivalence were not independently verified; unsupported files were not assessed. Wine observations do not establish native Windows compatibility.");
-  if (attempt.general_execution_evidence && attempt.status !== "partial") notices.push("This is a provisional model assessment of the pinned submission.");
-  return notices.join(" ") || undefined;
-}
-
-export function withCopyNotice(text: string, notice?: string): string {
-  return text && notice ? `${text}\n\n${notice}` : text;
-}
-
-
-export function scoredCopyNotice(attempt: RepoGradeSavedAttempt, earlier: boolean): string {
-  return [earlier ? "This feedback belongs to an earlier or unconfirmed grading attempt." : "", resultCopyNotice(attempt)].filter(Boolean).join(" ");
+/** Remove exact notices inserted by earlier application versions, preserving student feedback. */
+export function studentCopyText(text: string): string {
+  return text
+    .replace(/^(?:Provisional model assessment\. Entry points were selected heuristically; test coverage, correctness, and artifact equivalence have not been independently verified\. Review the pinned source and execution observations\.|Provisional model feedback; execution, test coverage, correctness, and artifact equivalence have not been independently verified\. Review against the pinned source and observations\.|Provisional model feedback; the returned scores could not be reconciled with the saved rubric\. Review the pinned source and observations\.)\s*\n\s*\n/, "")
+    .replace(/\n\s*\nUnassessed optional binary files: [^\n]*\. These files have not been assessed for correctness or source equivalence\. Test coverage was not independently verified\.\s*$/, "")
+    .replace(/^Review-only draft\. Test coverage was not verified\.(?: Unexamined binary files: [^\n]*\.| No optional files were excluded\.)?$/, "")
+    .replace(/^Review the pinned source and rubric alongside the execution observations\. Test coverage, correctness, and artifact equivalence have not been independently verified\.$/, "")
+    .replace(/^These are literal source matches to rubric wording, not findings that criteria were met\. Check the pinned source and execution observations; test coverage, correctness, and artifact equivalence have not been independently verified\.$/, "")
+    .replace(/^Literal keyword matches, for inspection only:\n[\s\S]*$/, "")
+    .replace(/^Instructor review is required(?:; test execution was not verified)?\.$/, "")
+    .trim();
 }

@@ -8,7 +8,6 @@ import FeedbackExpandModal from "../grading-results/FeedbackExpandModal";
 import RowFeedbackBoxes from "../grading-results/RowFeedbackBoxes";
 import { visuallyHidden } from "../ui/visuallyHidden";
 import {
-  copyAllFeedbackText,
   FEEDBACK_FIELDS,
   FEEDBACK_FIELD_META,
   formatFeedback,
@@ -20,7 +19,7 @@ import type { RepoGradeCellEdit, RepoGradeFeedbackDraft, RetainedRepoGradeResult
 import { copyRepoFeedback, type RepoFeedbackCopyTarget } from "./repoFeedbackClipboard";
 import type { UseRepoGradesGradingActionsResult } from "./useRepoGradesGradingActions";
 import styles from "./repo-grades-dashboard.module.css";
-import { repoGradeCopyAllText, withCopyNotice } from "./repoGradeCopyAll";
+import { repoGradeCopyAllText, studentCopyText } from "./repoGradeCopyAll";
 import type { RubricScore } from "./rubricAlignment";
 
 export function useFeedbackCopy(version: string, isAvailable?: () => boolean, source?: RetainedRepoGradeResult["source"]) {
@@ -102,7 +101,7 @@ export function FeedbackDisclosure({ title, label, expanded, onExpand, children,
   );
 }
 
-export function RepoResultCopy({ repo, folder, source, feedback, distinguishSource, retainedSource, rubric = [], copyNotice, copyLabel }: {
+export function RepoResultCopy({ repo, folder, source, feedback, distinguishSource, retainedSource, rubric = [], copyLabel }: {
   repo: string;
   folder: string;
   source: "browser" | "saved" | "retained";
@@ -110,12 +109,11 @@ export function RepoResultCopy({ repo, folder, source, feedback, distinguishSour
   distinguishSource: boolean;
   retainedSource?: RetainedRepoGradeResult["source"];
   rubric?: readonly RubricScore[];
-  copyNotice?: string;
   copyLabel?: string;
 }) {
   const label = copyLabel ?? (distinguishSource ? `Copy ${source} feedback` : "Copy feedback");
-  const { copy, copiedKey, failed } = useFeedbackCopy(JSON.stringify([repo, folder, source, feedback, rubric, copyNotice]), undefined, retainedSource);
-  const text = withCopyNotice(repoGradeCopyAllText(feedback, rubric), copyNotice);
+  const { copy, copiedKey, failed } = useFeedbackCopy(JSON.stringify([repo, folder, source, feedback, rubric]), undefined, retainedSource);
+  const text = repoGradeCopyAllText(feedback, rubric);
   if (!text) return null;
   return (
     <>
@@ -129,24 +127,24 @@ export function RepoResultCopy({ repo, folder, source, feedback, distinguishSour
   );
 }
 
-export function RepoResultFeedback({ repo, folder, source, feedback, rubric, hideCopyAll = false, copyNotice }: {
+export function RepoResultFeedback({ repo, folder, source, feedback, rubric, hideCopyAll = false }: {
   repo: string;
   folder: string;
   source: string;
   feedback: FeedbackBoxesEdit;
   rubric: readonly Readonly<RepoGradeCellEdit["rubricAreas"][number]>[];
   hideCopyAll?: boolean;
-  copyNotice?: string;
 }) {
   const hasComment = Object.values(feedback).some((value) => value.trim() !== "");
+  const copyable = repoGradeCopyAllText(feedback, []);
   const target = `${source} feedback for ${repo}, ${folder || "repository root"}`;
-  const { copy, copiedKey, failed } = useFeedbackCopy(JSON.stringify([target, feedback, copyNotice]));
+  const { copy, copiedKey, failed } = useFeedbackCopy(JSON.stringify([target, feedback]));
   if (!hasComment && rubric.length === 0) return null;
   return (
     <>
-      {hasComment && !hideCopyAll && (
+      {copyable && !hideCopyAll && (
         <Button type="button" size="small" aria-label={`Copy ${target}`}
-          onClick={() => void copy("all", withCopyNotice(copyAllFeedbackText(feedback), copyNotice), "all")}>
+          onClick={() => void copy("all", copyable, "all")}>
           {copiedKey === "all" ? "Copied" : "Copy feedback"}
         </Button>
       )}
@@ -164,8 +162,8 @@ export function RepoResultFeedback({ repo, folder, source, feedback, rubric, hid
         {feedback.overall && (
           <>
             <p className={styles.feedbackText}>{feedback.overall}</p>
-            {<Button type="button" size="small" aria-label={`Copy overall ${target}`}
-              onClick={() => void copy("overall", withCopyNotice(formatFeedback(feedback.overall), copyNotice), "overall")}>
+            {studentCopyText(feedback.overall) && <Button type="button" size="small" aria-label={`Copy overall ${target}`}
+              onClick={() => void copy("overall", studentCopyText(formatFeedback(feedback.overall)), "overall")}>
               {copiedKey === "overall" ? "Copied" : "Copy overall feedback"}
             </Button>}
           </>
@@ -174,8 +172,8 @@ export function RepoResultFeedback({ repo, folder, source, feedback, rubric, hid
           <div key={field}>
             <p>{FEEDBACK_FIELD_META[field].fieldLabel}</p>
             <p className={styles.feedbackText}>{feedback[field]}</p>
-            {<Button type="button" size="small" aria-label={`Copy ${FEEDBACK_FIELD_META[field].descriptorLower} from ${target}`}
-              onClick={() => void copy(field, withCopyNotice(formatFeedback(feedback[field]), copyNotice), field)}>
+            {studentCopyText(feedback[field]) && <Button type="button" size="small" aria-label={`Copy ${FEEDBACK_FIELD_META[field].descriptorLower} from ${target}`}
+              onClick={() => void copy(field, studentCopyText(formatFeedback(feedback[field])), field)}>
               {copiedKey === field ? "Copied" : `Copy ${FEEDBACK_FIELD_META[field].fieldLabel}`}
             </Button>}
           </div>

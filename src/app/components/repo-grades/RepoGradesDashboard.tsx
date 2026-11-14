@@ -1,3 +1,4 @@
+import { resultCopyNotice, scoredCopyNotice } from "./repoGradeCopyAll";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { Alert, Box, Button, Chip, Stack, Typography } from "@mui/material";
 import { isOwnerDecision } from "@/lib/access";
@@ -106,7 +107,7 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
     </FeedbackDisclosure>}
     {scored?.unexamined_artifacts?.length ? <Alert severity="warning" role="status">
       Unexamined optional binary files: {scored.unexamined_artifacts.map((item) => item.path).join(", ")}.
-      Correctness and equivalence to source were not established. Feedback copying is unavailable for this result while the omitted files require review.
+      Correctness and equivalence to source were not established. Review these files before relying on the result.
     </Alert> : null}
     {scored?.module12_evidence && <Alert severity="warning" role="status">
       This is a provisional model-assessed score based on submitted source and observed execution. Test counts, coverage and binary-to-source equivalence were not independently verified; runtime failures may reflect unavailable dependencies.
@@ -143,7 +144,7 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
     </FeedbackDisclosure> : null}
     {draft && <FeedbackDisclosure compact title="Review-only draft" label={`Review-only draft: ${repo.name} / ${folder}`}>
       <RepoResultFeedback repo={repo.name} folder={folder} source="review-only draft"
-        feedback={{ overall: draft.feedback ?? "", strengths: draft.feedback_sections?.strengths ?? "", improvements: draft.feedback_sections?.improvements ?? "", resubmitNotice: draft.feedback_sections?.resubmitNotice ?? "" }} rubric={draft.rubric ?? []} />
+        feedback={{ overall: draft.feedback ?? "", strengths: draft.feedback_sections?.strengths ?? "", improvements: draft.feedback_sections?.improvements ?? "", resubmitNotice: draft.feedback_sections?.resubmitNotice ?? "" }} rubric={draft.rubric ?? []} hideCopyAll copyNotice="Unscored provisional draft; test coverage was not verified. Instructor review is required." />
     </FeedbackDisclosure>}
     <RepoGradeRubricScores areas={scored?.rubric ?? []} criterionOrder={criterionOrder}
       placeholderOnly={provenNoSubmission || (!scored && cell?.saved?.latest.status === "no-submission")}
@@ -175,8 +176,16 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
     </Typography>}
     {!scanStatus && !draft && !provenNoSubmission && !cell?.saved?.scored && cell?.saved?.latest.status !== "no-submission" &&
       <Typography variant="caption" color="text.secondary">Submission unknown</Typography>}
-    {scored && feedback && !scored.unexamined_artifacts?.length && !scored.module12_evidence && !scored.general_execution_evidence && <RepoResultCopy key={scored.generation} repo={repo.name} folder={folder}
-      source="saved" feedback={feedback} rubric={scored.rubric ?? []} distinguishSource={false} />}
+    {draft && <RepoResultCopy key={draft.generation} repo={repo.name} folder={folder} source="saved"
+      feedback={{ overall: draft.feedback ?? "", strengths: draft.feedback_sections?.strengths ?? "", improvements: draft.feedback_sections?.improvements ?? "", resubmitNotice: draft.feedback_sections?.resubmitNotice ?? "" }}
+      rubric={draft.rubric ?? []} distinguishSource={false} copyLabel="Copy review-only draft"
+      copyNotice={`Unscored provisional draft; test coverage was not verified. Instructor review is required. ${resultCopyNotice(draft) ?? ""}`} />}
+    {generalAttempt?.general_review_feedback && <RepoResultCopy key={generalAttempt.generation} repo={repo.name} folder={folder} source="saved"
+      feedback={{ overall: generalAttempt.general_review_feedback.overall ?? "", strengths: "", improvements: "", resubmitNotice: "" }}
+      rubric={generalAttempt.general_review_feedback.rubric.map(item => ({ ...item, score: "" }))} distinguishSource={false} copyLabel="Copy unscored source review"
+      copyNotice={`Unscored source review; this is not a grade. ${generalAttempt.generation !== cell?.saved?.latest.generation ? "This review belongs to an earlier attempt. " : ""}${resultCopyNotice(generalAttempt) ?? ""}`} />}
+    {scored && feedback && <RepoResultCopy key={scored.generation} repo={repo.name} folder={folder}
+      source="saved" feedback={feedback} rubric={scored.rubric ?? []} distinguishSource={false} copyNotice={scoredCopyNotice(scored, !!(earlierScore || historicalEmpty || scored.generation !== cell?.saved?.latest.generation))} />}
   </>;
 }
 
@@ -215,7 +224,7 @@ function SavedMatrixResult({ result, repo, folder, feedback, showSource, part, e
             {sections && <p>Original score {sections.rawScore}</p>}
             {scored.feedback !== null && !sections && <p>Saved overall feedback may be shortened.</p>}
             {feedback && <RepoResultFeedback key={scored.generation} repo={repo} folder={folder} source="saved"
-              feedback={feedback} rubric={[]} hideCopyAll disableCopy={!!scored.unexamined_artifacts?.length || !!scored.module12_evidence || !!scored.general_execution_evidence} />}
+              feedback={feedback} rubric={[]} hideCopyAll copyNotice={scoredCopyNotice(scored, !!earlierPin || scored.generation !== latest.generation)} />}
           </>
         )}
       </FeedbackDisclosure>}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { repoGradeCopyAllText } from "./repoGradeCopyAll";
+import { repoGradeCopyAllText, resultCopyNotice, withCopyNotice, scoredCopyNotice } from "./repoGradeCopyAll";
 
 const empty = { overall: "", strengths: "", improvements: "", resubmitNotice: "" };
 
@@ -28,4 +28,30 @@ describe("repo grade feedback copying", () => {
     expect(repoGradeCopyAllText(input, [])).toBe("Summary\n\nGood\n\nImprove");
     expect(repoGradeCopyAllText({ ...input, overall: "Good Improve" }, [])).toBe("Good\n\nImprove");
   });
+});
+
+import type { RepoGradeSavedAttempt } from "./repoGradesDashboardModel";
+
+describe("copying qualified results", () => {
+  it("keeps feedback and caveats together without creating feedback from a warning", () => {
+    expect(withCopyNotice("Useful feedback", "Provisional result")).toBe("Useful feedback\n\nProvisional result");
+    expect(withCopyNotice("", "Provisional result")).toBe("");
+    expect(withCopyNotice("Useful feedback")).toBe("Useful feedback");
+  });
+  it("preserves each applicable evidence limitation", () => {
+    const attempt = { unexamined_artifacts: [{ path: "program.exe" }], module12_evidence: {}, general_execution_evidence: { policy: "execute" } } as unknown as RepoGradeSavedAttempt;
+    const notice = resultCopyNotice(attempt)!;
+    expect(notice).toContain("binary files were not examined");
+    expect(notice).toContain("provisional");
+    expect(notice).toContain("Wine observations");
+    expect(resultCopyNotice({ general_execution_evidence: { policy: "source-only" } } as unknown as RepoGradeSavedAttempt)).toContain("No execution was attempted");
+  });
+});
+
+it("identifies unscored reviews and earlier grades without calling a draft a score", () => {
+  const draft = { status: "partial", module12_evidence: {} } as unknown as RepoGradeSavedAttempt;
+  expect(resultCopyNotice(draft)).toContain("review is unscored");
+  expect(resultCopyNotice(draft)).not.toContain("score is provisional");
+  expect(scoredCopyNotice(draft, true)).toContain("earlier or unconfirmed");
+  expect(scoredCopyNotice(draft, false)).not.toContain("earlier or unconfirmed");
 });

@@ -2,11 +2,42 @@
 
 import { useEffect, useState } from "react";
 import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, Stack, TextField, Typography } from "@mui/material";
-import { instructorReviewAction, instructorReviewEligibilityAction, type InstructorCriterion } from "@/app/actions/repo-grade-instructor-review";
+import { instructorReviewAction, instructorReviewEligibilityAction, latestInstructorReviewAction, type InstructorCriterion } from "@/app/actions/repo-grade-instructor-review";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { canEditInstructorReview } from "./instructorReviewAvailability";
 
 type Review = { review_id: number; criteria: InstructorCriterion[]; feedback: string; score: number; source_sha: string };
+type HistoricalReview = Pick<Review, "criteria" | "feedback" | "score" | "source_sha"> & { generation: number; source_ref: string };
+
+export function RepoGradeHistoricalReview(props: { courseId: string; repo: string; folder: string; latestGeneration: number }) {
+  const { user } = useSupabase();
+  if (!user) return null;
+  return <HistoricalReviewForScope key={JSON.stringify([user.id, props.courseId, props.repo, props.folder, props.latestGeneration])} {...props} userId={user.id} />;
+}
+function HistoricalReviewForScope({ courseId, repo, folder, latestGeneration, userId }: { courseId: string; repo: string; folder: string; latestGeneration: number; userId: string }) {
+  const [review, setReview] = useState<HistoricalReview | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let active = true;
+    latestInstructorReviewAction({ courseId, accountId: userId, repo, folder }).then(value => {
+      if (!active || value === null) return;
+      const item = value as Partial<HistoricalReview>;
+      if (!Number.isSafeInteger(item.generation) || typeof item.score !== "number" || item.score < 0 || item.score > 100
+        || typeof item.source_sha !== "string" || !/^[a-f0-9]{40}$/i.test(item.source_sha) || typeof item.source_ref !== "string"
+        || typeof item.feedback !== "string" || !Array.isArray(item.criteria)
+        || item.criteria.some(c => !c || typeof c.area !== "string" || typeof c.score !== "number" || typeof c.note !== "string")) { setFailed(true); return; }
+      setReview(item as HistoricalReview);
+    }).catch(() => { if (active) setFailed(true); });
+    return () => { active = false; };
+  }, [courseId, repo, folder, userId]);
+  if (failed) return <Alert severity="warning">Earlier instructor reviews could not be loaded.</Alert>;
+  if (!review || review.generation >= latestGeneration) return null;
+  return <Alert severity="info"><strong>Earlier instructor-reviewed score: {review.score}%</strong><br />
+    Reviewed revision {review.source_ref} <code title={review.source_sha}>{review.source_sha.slice(0, 12)}</code>; a newer attempt is shown above.
+    <Typography variant="body2">{review.feedback}</Typography>
+    {review.criteria.map(item => <Typography key={item.area} variant="body2">{item.area}: {item.score}/25 — {item.note}</Typography>)}
+  </Alert>;
+}
 type Props = { courseId: string; generation: number; sourceSha: string; areas: string[] };
 export default function RepoGradeInstructorReview(props: Props) {
   const { user } = useSupabase();
@@ -67,11 +98,3 @@ function ReviewForScope({ courseId, generation, sourceSha, areas, userId }: Prop
     </Dialog>
   </Stack>;
 }
-
-
-
-
-
-
-
-

@@ -5,6 +5,16 @@ import { createServiceClient } from "@/lib/supabase/server";
 
 export type InstructorCriterion = { area: string; score: number; note: string };
 
+export async function latestInstructorReviewAction(input: { courseId: string; accountId: string; repo: string; folder: string }) {
+  const owner = await requireAppOwner();
+  if (owner.id !== input.accountId || !input.courseId || !input.repo || input.repo.length > 400 || input.folder.length > 1000) throw new Error("Review unavailable");
+  const { data, error } = await createServiceClient().rpc("repo_grade_latest_instructor_review", {
+    p_user_id: owner.id, p_course_id: input.courseId, p_repo: input.repo, p_folder: input.folder,
+  });
+  if (error) throw new Error("Review unavailable");
+  return data;
+}
+
 export async function instructorReviewAction(input: { courseId: string; accountId: string; generation: number; sourceSha: string; criteria?: InstructorCriterion[]; feedback?: string; expectedReviewId?: number | null }) {
   const owner = await requireAppOwner();
   if (owner.id !== input.accountId || !Number.isSafeInteger(input.generation) || input.generation <= 0 || !/^[a-f0-9]{40}$/i.test(input.sourceSha)) throw new Error("Review unavailable");

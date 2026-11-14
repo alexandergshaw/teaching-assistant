@@ -4,7 +4,7 @@ import { isOwnerDecision } from "@/lib/access";
 import type { FeedbackBoxesEdit } from "../grading-results/gradingResultsHelpers";
 import { hasUnresolvedStaleNoSubmission, unorderedNoSubmissionContext, newerVerifiedNoSubmission, noSubmissionMatchesScan, savedResultIsEarlierThanObservedPin, type RepoGradeMatrix, type RepoGradeSavedAttempt, type RepoGradeSavedResult } from "./repoGradesDashboardModel";
 import { FeedbackDisclosure, RepoResultCopy, RepoResultFeedback } from "./RepoDashboardFeedback";
-import RepoGradeInstructorReview from "./RepoGradeInstructorReview";
+import RepoGradeInstructorReview, { RepoGradeHistoricalReview } from "./RepoGradeInstructorReview";
 import RepoGradeProfileSettings from "./RepoGradeProfileSettings";
 import RepoGradeRubricScores from "./RepoGradeRubricScores";
 import RepoGradeStatusChip from "./RepoGradeStatusChip";
@@ -92,6 +92,7 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
       Instructor review is required.
     </Alert>}
     {draft && courseId && <RepoGradeInstructorReview key={draft.generation} courseId={courseId} generation={draft.generation} sourceSha={draft.commit} areas={(draft.rubric ?? []).map(item => item.area)} />}
+    {cell?.saved && courseId && <RepoGradeHistoricalReview courseId={courseId} repo={repo.name} folder={folder} latestGeneration={cell.saved.latest.generation} />}
     {draft?.module12_evidence && <FeedbackDisclosure compact title="Execution observations" label={`Execution observations: ${repo.name} / ${folder}`}>
       <Typography component="p" variant="body2">Coverage and source equivalence are unverified. Output is supplied by the submission and may be misleading.</Typography>
       {draft.module12_evidence.sourceReceipts.map(item => <Typography component="p" variant="body2" key={item.sourcePath}>

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { owner, rpc, retry } = vi.hoisted(() => ({ owner: vi.fn(), rpc: vi.fn(), retry: vi.fn() }));
 vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: owner }));
 vi.mock("@/lib/supabase/server", () => ({ createServiceClient: () => ({ rpc }) }));
-import { instructorReviewAction, instructorReviewEligibilityAction } from "./repo-grade-instructor-review";
+import { instructorReviewAction, instructorReviewEligibilityAction, latestInstructorReviewAction } from "./repo-grade-instructor-review";
 const base = { courseId: "course", accountId: "owner", generation: 7, sourceSha: "a".repeat(40) };
 const criteria = ["one", "two", "three", "four"].map(area => ({ area, score: 18.75, note: "Evidence" }));
 describe("instructor review action", () => {
@@ -29,5 +29,13 @@ describe("instructor review action", () => {
     rpc.mockResolvedValue({ data: false, error: null });
     expect(await instructorReviewEligibilityAction(base)).toBe(false);
     expect(await instructorReviewEligibilityAction({ ...base, accountId: "other" })).toBe(false);
-  });});
-
+  });
+  it("reads earlier reviews only for the authenticated owner and exact cell", async () => {
+    rpc.mockResolvedValue({ data: { generation: 3, score: 100 }, error: null });
+    const cell = { courseId: "course", accountId: "owner", repo: "school/student", folder: "assignments/module_12" };
+    expect(await latestInstructorReviewAction(cell)).toEqual({ generation: 3, score: 100 });
+    expect(rpc).toHaveBeenCalledWith("repo_grade_latest_instructor_review", { p_user_id: "owner", p_course_id: "course", p_repo: cell.repo, p_folder: cell.folder });
+    await expect(latestInstructorReviewAction({ ...cell, accountId: "other" })).rejects.toThrow();
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+});

@@ -55,7 +55,7 @@ import { LegibilityProbeModal } from "../grading-recording/LegibilityProbeModal"
 import { triggerFileDownload } from "../course-planning/utils";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useDiscussionCapture } from "../recording/useDiscussionCapture";
-import { EXTRACT_BATCH_WIRE_BUDGET } from "../recording/discussion-capture";
+import { EXTRACT_BATCH_WIRE_BUDGET, videoExtensionFromMimeType } from "../recording/discussion-capture";
 import { checkWireBudget, sumBase64WireBytes } from "@/lib/upload-budget";
 import { extractModuleContentAction } from "@/app/actions/module-content-extract";
 import { MODULE_EXTRACT_BATCH_SIZE, type ExtractedBlock } from "../module-deck-capture/module-extraction-prompt";
@@ -96,9 +96,8 @@ function fmt(seconds: number): string {
 export default function WalkthroughAnnouncementPanel({ active }: { active: boolean }) {
   const [provider] = useLlmProvider();
 
-  // AC13-equivalent: saveVideo is ALWAYS false - a recording blob never
-  // crosses a Server Action for this surface either.
-  const { capturing, elapsedSec, pendingFrames, droppedFrames, frameEncodeNotice, stalled, previewRef, start, stop, takeFrameBatch } =
+  // The optional local recording stays in the browser; sampled frames are sent for extraction.
+  const { capturing, elapsedSec, pendingFrames, droppedFrames, frameEncodeNotice, stalled, previewRef, start, stop, takeFrameBatch, recordingUrl, recordingMimeType, recordingError, recordingAudio, recordingFinalizing } =
     useDiscussionCapture();
 
   // Setup state (course, module, notes, toggles, course list) lives in
@@ -356,14 +355,14 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
   // WA-DRAFT-LOSS: warn on a full page unload while a capture, a draft, or an
   // unposted drafted slot would be lost. Declared after `slots` on purpose.
   useEffect(() => {
-    if (!upload.busy && !library.controller.dirty() && !shouldWarnBeforeUnload({ capturing, pendingFrames, slots, extracting: extracting || batchInFlightRef.current })) return;
+    if (!recordingUrl && !recordingFinalizing && !upload.busy && !library.controller.dirty() && !shouldWarnBeforeUnload({ capturing, pendingFrames, slots, extracting: extracting || batchInFlightRef.current })) return;
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = "";
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [capturing, pendingFrames, slots, extracting, library.controller, library.state, upload.busy]);
+  }, [capturing, pendingFrames, slots, extracting, library.controller, library.state, upload.busy, recordingUrl, recordingFinalizing]);
 
   const anyDrafting = slots.some((s) => s.draft.phase === "drafting");
 
@@ -391,14 +390,15 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       stop();
       return;
     }
-    if (extracting || pendingFrames > 0 || batchInFlightRef.current) return;
+    if (recordingFinalizing || extracting || pendingFrames > 0 || batchInFlightRef.current) return;
     if (inputKind === "upload" || upload.busy) { pushNotice("info", "Choose New walkthrough before switching from an uploaded video to live capture."); return; }
+    if (recordingUrl && !window.confirm("Starting a new recording replaces the previous video in this tab. Download it first if you want to keep it. Continue?")) return;
     setInputKind("live");
     setStartError(null);
     setAutoDrafted(false);
     (async () => {
       try {
-        await start({ saveVideo: false, onStarted: () => {
+        await start({ saveVideo: true, microphone: true, onStarted: () => {
           resetCompletedRun(currentSlotsRef, () => {
             extractionEpoch.current += 1;
             scriptCopy.current.invalidate(); setScriptCopyStatus(null);
@@ -412,7 +412,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
         setStartError(`Could not start the screen capture: ${err instanceof Error ? err.message : "unknown error"}`);
       }
     })();
-  }, [capturing, extracting, pendingFrames, start, stop, reset, inputKind, upload.busy, pushNotice]);
+  }, [capturing, extracting, pendingFrames, start, stop, reset, inputKind, upload.busy, pushNotice, recordingUrl, recordingFinalizing]);
 
   const publishUpload = (value: VideoReadResult, pinnedProvider: LlmProvider) => {
     batchBlocksRef.current = value.blocks;
@@ -471,12 +471,13 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       <p className={styles.fieldHint}>
         Share your screen and click through a series of LMS pages - the app reads what is visible and drafts an
         announcement matching a previous one&apos;s format, and/or a video script, covering the pages in the order
-        you walked them.
+        you walked them. Your screen recording stays in this browser until downloaded. Allow microphone access to include narration.
       </p>
 
-      {(startError || droppedFrames > 0 || frameEncodeNotice || notices.length > 0) && (
+      {(startError || recordingError || droppedFrames > 0 || frameEncodeNotice || notices.length > 0) && (
         <div role="status" aria-live="polite" className={styles.field}>
           {startError && <p className={`${controls.notice} ${controls.noticeDanger}`}>{startError}</p>}
+          {recordingError && <p className={`${controls.notice} ${controls.noticeDanger}`}>{recordingError}</p>}
           {droppedFrames > 0 && (
             <p className={`${controls.notice} ${controls.noticeDanger}`}>
               {droppedFrames} frame{droppedFrames === 1 ? "" : "s"} scrolled past faster than they could be read and
@@ -520,6 +521,11 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
         onExpand={() => setManuallyExpanded(true)}
         capturing={capturing}
       />
+
+      {recordingUrl && !capturing && <div className={styles.ghActions}>
+        <Button component="a" href={recordingUrl} download={`walkthrough.${videoExtensionFromMimeType(recordingMimeType ?? "video/webm")}`} variant="outlined" size="small">Download screen recording</Button>
+        <span>{recordingAudio === "recording" ? "Microphone connected at the start; check the downloaded video for audio." : "No microphone audio was recorded."} Download before starting another recording or leaving this page.</span>
+      </div>}
 
       {pairPreferences.notice && <p role="status">{pairPreferences.notice}</p>}
       <AnnouncementLibrary key={library.scopeKey} controller={library.controller} state={library.state} enabled={library.enabled}
@@ -593,6 +599,9 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
           </div>
         )}
       </div>
+      {recordingFinalizing && <p role="status">Preparing your recording for download.</p>}
+      {capturing && recordingAudio === "requesting" && <p role="status">Allow microphone access to begin recording, or deny it to continue without narration.</p>}
+      {capturing && recordingAudio === "unavailable" && <p role="status">Microphone unavailable; recording will continue without narration.</p>}
       {stalled && (
         <p role="status" aria-live="polite" className={`${controls.notice} ${controls.noticeWarning}`}>
           Nothing new has been read off the screen for 30 seconds. Keep this app&apos;s tab visible in a second window
@@ -720,8 +729,8 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
           sticky run bar (P5: two always-visible Generate buttons, never a
           mode toggle). The bar holds no Post or other irreversible control. */}
       <div className={`${styles.ghActions} ${runBar.runBarDock}`}>
-        <Button size="small" variant="outlined" disabled={capturing || extracting || pendingFrames > 0} onClick={() => {
-          if (capturing || extracting || pendingFrames > 0 || batchInFlightRef.current) return;
+        <Button size="small" variant="outlined" disabled={recordingFinalizing || capturing || extracting || pendingFrames > 0} onClick={() => {
+          if (recordingFinalizing || capturing || extracting || pendingFrames > 0 || batchInFlightRef.current) return;
           if ((hasMaterial || upload.busy || upload.result || slots.some(slot => slot.draft.phase !== "empty")) && !window.confirm("Start a new walkthrough? This cancels video reading and clears captured material and drafts; saved examples stay available.")) return;
           stop();
           extractionEpoch.current += 1;
@@ -729,8 +738,8 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
           upload.reset(); uploadSnapshot.current = null; setInputKind(null); setSelectedVideo(null);
           setLegibleBlockCount(0); scriptCopy.current.invalidate(); setScriptCopyStatus(null); setScriptText(""); setScriptError(null); setScriptGenerating(false); reset();
         }}>New walkthrough</Button>
-        <Button variant={variantFor(capturing || !hasMaterial)} color="primary" size="small" disabled={upload.busy || inputKind === "upload"} onClick={handleStartStop}>
-          {capturing ? "Stop capture" : "Start capture"}
+        <Button variant={variantFor(capturing || !hasMaterial)} color="primary" size="small" disabled={recordingFinalizing || upload.busy || inputKind === "upload"} onClick={handleStartStop}>
+          {capturing ? recordingAudio === "requesting" ? "Cancel recording setup" : "Stop recording" : "Record walkthrough"}
         </Button>
         <Button variant="outlined" size="small" ref={probeButtonRef} disabled={capturing} onClick={() => setProbeOpen(true)}>
           Run legibility probe

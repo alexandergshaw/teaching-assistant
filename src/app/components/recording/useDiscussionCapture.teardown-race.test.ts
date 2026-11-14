@@ -17,6 +17,8 @@ vi.mock("react", () => ({
   useEffect: (fn: () => void | (() => void)) => { hooks.cursor++; hooks.effects.push(fn); },
 }));
 
+vi.mock("@/lib/frame-ticker", () => ({ startFrameTicker: () => ({ stop: vi.fn() }) }));
+
 import { useDiscussionCapture } from "./useDiscussionCapture";
 
 beforeEach(() => { hooks.cells = []; hooks.cursor = 0; hooks.effects = []; hooks.cleanup = []; });
@@ -58,5 +60,60 @@ it("does not resume setup after stop during adoption while still mounted", async
   expect(track.stop).toHaveBeenCalledTimes(1);
   expect(track.addEventListener).not.toHaveBeenCalled();
   expect(createElement).not.toHaveBeenCalled();
+  for (const cleanup of hooks.cleanup) cleanup();
+});
+
+it("stops a microphone granted after recording setup was cancelled", async () => {
+  let grant!: (value: MediaStream) => void;
+  const permission = new Promise<MediaStream>(resolve => { grant = resolve; });
+  const displayTrack = { stop: vi.fn(), addEventListener: vi.fn(), muted: false };
+  const display = { getTracks: () => [displayTrack], getVideoTracks: () => [displayTrack], addTrack: vi.fn() };
+  const microphoneTrack = { stop: vi.fn() };
+  const microphone = { getTracks: () => [microphoneTrack] } as unknown as MediaStream;
+  const createElement = vi.fn(() => { throw new Error("capture setup ran after cancellation"); });
+  vi.stubGlobal("navigator", { mediaDevices: { getDisplayMedia: vi.fn().mockResolvedValue(display), getUserMedia: vi.fn(() => permission) } });
+  vi.stubGlobal("document", { createElement });
+  const capture = useDiscussionCapture();
+  for (const effect of hooks.effects) { const cleanup = effect(); if (cleanup) hooks.cleanup.push(cleanup); }
+  const starting = capture.start({ saveVideo: true, microphone: true });
+  await vi.waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled());
+  capture.stop();
+  grant(microphone);
+  await starting;
+  expect(microphoneTrack.stop).toHaveBeenCalledOnce();
+  expect(displayTrack.stop).toHaveBeenCalledOnce();
+  expect(display.addTrack).not.toHaveBeenCalled();
+  expect(createElement).not.toHaveBeenCalled();
+  for (const cleanup of hooks.cleanup) cleanup();
+});
+
+it("blocks a new capture until an inactive recorder has delivered its final video", async () => {
+  const track = { stop: vi.fn(), addEventListener: vi.fn(), muted: false };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const picker = vi.fn().mockResolvedValue(stream);
+  const recorders: Array<{ state: string; onstop: (() => void) | null }> = [];
+  class Recorder {
+    static isTypeSupported() { return true; }
+    state = "recording"; mimeType = "video/webm"; onstop: (() => void) | null = null; ondataavailable = null;
+    constructor() { recorders.push(this); }
+    start() {}
+    stop() { this.state = "inactive"; }
+  }
+  vi.stubGlobal("MediaRecorder", Recorder);
+  vi.stubGlobal("navigator", { mediaDevices: { getDisplayMedia: picker } });
+  vi.stubGlobal("URL", { createObjectURL: () => "blob:video", revokeObjectURL: vi.fn() });
+  vi.stubGlobal("document", { createElement: (tag: string) => tag === "video"
+    ? { play: async () => {}, pause: vi.fn(), srcObject: null }
+    : { getContext: () => ({}) } });
+  const capture = useDiscussionCapture();
+  for (const effect of hooks.effects) { const cleanup = effect(); if (cleanup) hooks.cleanup.push(cleanup); }
+  await capture.start({ saveVideo: true });
+  recorders[0].state = "inactive";
+  capture.stop();
+  await capture.start({ saveVideo: true });
+  expect(picker).toHaveBeenCalledTimes(1);
+  recorders[0].onstop?.();
+  await capture.start({ saveVideo: true });
+  expect(picker).toHaveBeenCalledTimes(2);
   for (const cleanup of hooks.cleanup) cleanup();
 });

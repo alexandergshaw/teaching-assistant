@@ -12,6 +12,7 @@
 // - that is C2 (useReplyRows.ts) and C3 (useDiscussionReplies.ts).
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { attachRecordingMicrophone } from "./recording-microphone";
 import { createCapturePicker } from "./capture-picker";
 import { startFrameTicker } from "@/lib/frame-ticker";
 import type { FrameTicker } from "@/lib/frame-ticker";
@@ -53,6 +54,8 @@ export interface UseDiscussionCaptureReturn {
    *  the recording: <reason>. The capture is still running."). */
   recordingError: string | null;
   recordingUrl: string | null;
+  recordingFinalizing: boolean;
+  recordingAudio: "none" | "requesting" | "recording" | "unavailable";
   recordingBytes: number;
   /** A20/AC6: the negotiated mime type this session's recording was actually
    *  encoded with (`recorder.mimeType || mimeType || "video/webm"`), so a
@@ -75,7 +78,7 @@ export interface UseDiscussionCaptureReturn {
    *  discipline as `recordingError`. */
   frameEncodeNotice: string | null;
   previewRef: React.RefObject<HTMLVideoElement | null>;
-  start: (opts: { saveVideo: boolean; autoDownload?: boolean; downloadFileNameBase?: string; onStarted?: () => void }) => Promise<void>;
+  start: (opts: { saveVideo: boolean; microphone?: boolean; autoDownload?: boolean; downloadFileNameBase?: string; onStarted?: () => void }) => Promise<void>;
   stop: () => void;
   /** Removes and returns up to `max` frames, oldest first, packed to fit
    *  `maxWireBytes` (AC10a). Never returns more than asked for; always
@@ -117,6 +120,9 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
   const [droppedFrames, setDroppedFrames] = useState(0);
   const [recordingError, setRecordingError] = useState<string | null>(null);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
+  const [recordingFinalizing, setRecordingFinalizing] = useState(false);
+  const finalizingRef = useRef(false);
+  const [recordingAudio, setRecordingAudio] = useState<"none" | "requesting" | "recording" | "unavailable">("none");
   const [recordingBytes, setRecordingBytes] = useState(0);
   const [recordingMimeType, setRecordingMimeType] = useState<string | null>(null);
   const [lastSessionAutoDownload, setLastSessionAutoDownload] = useState(false);
@@ -176,7 +182,7 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
 
   // Optional MediaRecorder (AC31, AC48, AC49).
   const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const recordingSessionRef = useRef(0);
   const recordingUrlRef = useRef<string | null>(null);
 
   const revokeRecordingUrl = useCallback(() => {
@@ -189,6 +195,7 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
   const clearRecording = useCallback(() => {
     revokeRecordingUrl();
     setRecordingUrl(null);
+    setRecordingAudio("none");
     setRecordingBytes(0);
     setRecordingMimeType(null);
     setLastSessionAutoDownload(false);
@@ -352,13 +359,14 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
       // the browser's own sharing bar already fired "ended". track.stop()
       // does not fire "ended", so our own teardown never re-enters through
       // the listener either way.
-      if (recorderRef.current && recorderRef.current.state !== "inactive") {
-        recorderRef.current.stop();
+      if (recorderRef.current) {
+        finalizingRef.current = true;
+        if (mountedRef.current) setRecordingFinalizing(true);
+        if (recorderRef.current.state !== "inactive") recorderRef.current.stop();
       }
       // Safe to drop the ref here: onstop's closure captured the local
       // `recorder` variable from start(), not this ref, so nulling it does
-      // not affect the pending onstop callback (AC49 - chunksRef is never
-      // touched here either).
+      // not affect the pending onstop callback, whose chunks belong to that recorder.
       recorderRef.current = null;
 
       if (samplingVideoRef.current) {
@@ -406,8 +414,8 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const start = useCallback(async (opts: { saveVideo: boolean; autoDownload?: boolean; downloadFileNameBase?: string; onStarted?: () => void }) => {
-    if (capturingRef.current) return;
+  const start = useCallback(async (opts: { saveVideo: boolean; microphone?: boolean; autoDownload?: boolean; downloadFileNameBase?: string; onStarted?: () => void }) => {
+    if (capturingRef.current || finalizingRef.current) return;
 
     let stream: MediaStream;
     try {
@@ -432,6 +440,23 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
     // Teardown can run after admission and before this continuation resumes.
     if (!mountedRef.current || displayStreamRef.current !== stream) return;
 
+    const recordingSession = ++recordingSessionRef.current;
+
+    // Request microphone only for callers that explicitly opt in. A stopped or
+    // replaced display stream owns no microphone, even if permission resolves late.
+    if (opts.saveVideo && opts.microphone) {
+      stream.getVideoTracks()[0]?.addEventListener("ended", () => teardownRef.current(), { once: true });
+      setRecordingAudio("requesting");
+      setCapturing(true);
+      const audio = await attachRecordingMicrophone(stream,
+        () => navigator.mediaDevices.getUserMedia({ audio: true, video: false }),
+        () => mountedRef.current && displayStreamRef.current === stream);
+      if (audio === "cancelled") return;
+      setRecordingAudio(audio);
+    } else {
+      setRecordingAudio("none");
+    }
+
     // Reset per-session bookkeeping.
     pendingQueueRef.current = [];
     setPendingFrames(0);
@@ -455,7 +480,6 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
     setRecordingBytes(0);
     setRecordingMimeType(null);
     setLastSessionAutoDownload(false);
-    chunksRef.current = [];
 
     const track = stream.getVideoTracks()[0];
     if (track) {
@@ -502,12 +526,17 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
       try {
         const mimeType = pickRecorderMimeType();
         const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+        const chunks: Blob[] = [];
         recorder.ondataavailable = (evt) => {
-          if (evt.data.size > 0) chunksRef.current.push(evt.data);
+          if (evt.data.size > 0) chunks.push(evt.data);
         };
         recorder.onstop = () => {
+          if (recorderRef.current === recorder) recorderRef.current = null;
+          finalizingRef.current = false;
+          if (mountedRef.current) setRecordingFinalizing(false);
+          if (recordingSession !== recordingSessionRef.current) return;
           const resolvedMimeType = recorder.mimeType || mimeType || "video/webm";
-          const blob = new Blob(chunksRef.current, { type: resolvedMimeType });
+          const blob = new Blob(chunks, { type: resolvedMimeType });
           const url = URL.createObjectURL(blob);
           if (mountedRef.current) {
             recordingUrlRef.current = url;
@@ -578,6 +607,8 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
     droppedFrames,
     recordingError,
     recordingUrl,
+    recordingFinalizing,
+    recordingAudio,
     recordingBytes,
     recordingMimeType,
     lastSessionAutoDownload,

@@ -73,7 +73,7 @@ describe("one autosaved walkthrough announcement collection", () => {
 
   it("keeps capture, manual generation, and draft posting controls connected", () => {
     expect(panel).toContain("onClick={handleStartStop}");
-    expect(panel).toContain("await start({ saveVideo: false, onStarted: () => {");
+    expect(panel).toContain("await start({ saveVideo: true, microphone: true, onStarted: () => {");
     expect(panel).toContain("resetCompletedRun(currentSlotsRef, () => {");
     expect(panel).toContain("onClick={() => void generate()}");
     expect(panel).toMatch(/onArm=\{\(\)\s*=>\s*\{\s*if\s*\(scriptText\)\s*\{\s*setScriptRegenerateFor\(scriptRegenerateContext\);\s*return;\s*\}\s*void handleGenerateScript\(\);\s*\}\}/);

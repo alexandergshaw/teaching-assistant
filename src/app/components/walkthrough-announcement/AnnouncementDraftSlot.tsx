@@ -132,6 +132,14 @@ export default function AnnouncementDraftSlot({
     <fieldset ref={rootRef} className={controls.section}>
       <legend className={controls.sectionLegend}>{pairRole(slot.id) === "weekly" ? "Weekly overview" : pairRole(slot.id) === "midweek" ? "Midweek reminder" : `Draft ${ordinal}`}</legend>
 
+      {phase === "drafted" && <div className={styles.ghActions}>
+        <Button size="small" variant="outlined" onClick={() => onCopy(slot.id)} aria-label={`Copy draft ${ordinal}`}>
+          {slot.copied ? "Copied" : "Copy announcement"}
+        </Button>
+        {slot.copyError && <span role="alert">{slot.copyError}</span>}
+        {slot.copied && <span role="status">Copied.</span>}
+      </div>}
+
       <div className={styles.adaptRow}>
         <TextField
           select
@@ -257,12 +265,12 @@ export default function AnnouncementDraftSlot({
           </p>
 
           {slot.copyError && (
-            <div role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
+            <div className={`${controls.notice} ${controls.noticeDanger}`}>
               {slot.copyError}
             </div>
           )}
           {slot.copied && (
-            <p role="status" aria-live="polite" className={styles.fieldHint}>
+            <p className={styles.fieldHint}>
               Copied.
             </p>
           )}

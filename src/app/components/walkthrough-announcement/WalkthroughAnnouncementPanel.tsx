@@ -1,5 +1,7 @@
 "use client";
 
+import { createScriptCopyController } from "./script-copy";
+
 // Manual > Recording > "Announcement from a walkthrough" - the assembly
 // panel for docs/announcement-from-walkthrough-acceptance-criteria.md.
 //
@@ -256,6 +258,9 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
   const [scriptGenerating, setScriptGenerating] = useState(false);
   const [scriptError, setScriptError] = useState<string | null>(null);
   const [scriptText, setScriptText] = useState("");
+  const [scriptCopyStatus, setScriptCopyStatus] = useState<"copied" | "failed" | null>(null);
+  const scriptCopy = useRef(createScriptCopyController());
+  useEffect(() => { const controller = scriptCopy.current; return () => controller.invalidate(); }, []);
   const [scriptRegenerateFor, setScriptRegenerateFor] = useState<string | null>(null);
   const scriptRevisionRef = useRef(0);
   const scriptRegenerateContext = JSON.stringify([courseId, moduleLabel, notesText, provider, capturing, legibleBlockCount, scriptText, inputKind, upload.result]);
@@ -344,7 +349,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
     stop();
     while (takeFrameBatch(MODULE_EXTRACT_BATCH_SIZE, EXTRACT_BATCH_WIRE_BUDGET).length) { /* Discard the previous course's queued frames. */ }
     let cancelled = false;
-    void Promise.resolve().then(() => { if (!cancelled) { setLegibleBlockCount(0); setExtracting(false); setScriptText(""); setScriptGenerating(false); setInputKind(null); setSelectedVideo(null); } });
+    void Promise.resolve().then(() => { if (!cancelled) { scriptCopy.current.invalidate(); setScriptCopyStatus(null); setLegibleBlockCount(0); setExtracting(false); setScriptText(""); setScriptGenerating(false); setInputKind(null); setSelectedVideo(null); } });
     return () => { cancelled = true; extractionEpoch.current += 1; };
   }, [library.scopeKey, stop, takeFrameBatch]);
 
@@ -396,6 +401,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
         await start({ saveVideo: false, onStarted: () => {
           resetCompletedRun(currentSlotsRef, () => {
             extractionEpoch.current += 1;
+            scriptCopy.current.invalidate(); setScriptCopyStatus(null);
             setScriptGenerating(false);
             batchBlocksRef.current = [];
             setLegibleBlockCount(0);
@@ -450,7 +456,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
         return;
       }
       scriptRevisionRef.current += 1;
-      setScriptText(result.script);
+      scriptCopy.current.invalidate(); setScriptCopyStatus(null); setScriptText(result.script);
     } catch {
       if (epoch === extractionEpoch.current) setScriptError("Could not generate the video script. Please try again.");
     } finally {
@@ -677,15 +683,20 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
                 size="small"
                 label="Script"
                 value={scriptText}
-                onChange={(e) => { scriptRevisionRef.current += 1; setScriptRegenerateFor(null); setScriptText(e.target.value); }}
+                onChange={(e) => { scriptRevisionRef.current += 1; scriptCopy.current.invalidate(); setScriptRegenerateFor(null); setScriptCopyStatus(null); setScriptText(e.target.value); }}
                 multiline
                 minRows={8}
                 fullWidth
               />
               <div className={styles.ghActions}>
-                <Button size="small" variant="outlined" onClick={() => void navigator.clipboard.writeText(scriptText)}>
+                <Button size="small" variant="outlined" onClick={() => {
+                  setScriptCopyStatus(null);
+                  void scriptCopy.current.copy(scriptText, value => navigator.clipboard.writeText(value), setScriptCopyStatus);
+                }}>
                   Copy
                 </Button>
+                {scriptCopyStatus &&
+                  <span role="status">{scriptCopyStatus === "copied" ? "Copied." : "Could not copy. Select the script text to copy it manually."}</span>}
                 <Button
                   size="small"
                   variant="outlined"
@@ -715,7 +726,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
           extractionEpoch.current += 1;
           batchBlocksRef.current = [];
           upload.reset(); uploadSnapshot.current = null; setInputKind(null); setSelectedVideo(null);
-          setLegibleBlockCount(0); setScriptText(""); setScriptError(null); setScriptGenerating(false); reset();
+          setLegibleBlockCount(0); scriptCopy.current.invalidate(); setScriptCopyStatus(null); setScriptText(""); setScriptError(null); setScriptGenerating(false); reset();
         }}>New walkthrough</Button>
         <Button variant={variantFor(capturing || !hasMaterial)} color="primary" size="small" disabled={upload.busy || inputKind === "upload"} onClick={handleStartStop}>
           {capturing ? "Stop capture" : "Start capture"}

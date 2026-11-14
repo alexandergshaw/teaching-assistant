@@ -2,13 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readRepoGradeStartupHistory } from "./startup-history";
 import { repoGradeStartupKey } from "./scheduler";
 
-const { result } = vi.hoisted(() => ({ result: { rows: [] as unknown[], candidates: [] as unknown[] } }));
+const { result } = vi.hoisted(() => ({ result: { rows: [] as unknown[], candidates: [] as unknown[], artifacts: [] as unknown[] } }));
 vi.mock("@/lib/supabase/server", () => ({ createServiceClient: () => ({ from: () => {
   const query = { select: () => query, eq: () => query, neq: () => query, in: () => query,
     order: () => query, limit: () => query, abortSignal: () => query,
     retry: async () => ({ data: result.rows, count: result.rows.length, error: null }) };
   return query;
-}, rpc: () => { const query = { abortSignal: () => query, retry: async () => ({ data: result.candidates, error: null }) }; return query; } }) }));
+}, rpc: (name: string) => { const query = { abortSignal: () => query, retry: async () => ({ data: name === "repo_grade_artifact_recovery_candidates" ? result.artifacts : result.candidates, error: null }) }; return query; } }) }));
 const target = { accountId: "owner", courseId: "course", repo: "org/repo", folder: "lab", sourceRef: "main", sha: "a".repeat(40) };
 const receipt = (generation: number, status: string, dispatch_state: string | null, mode = "automatic") => ({
   generation, user_id: "owner", course_id: "course", repo: "org/repo", folder: "lab", source_ref: "main",
@@ -16,7 +16,7 @@ const receipt = (generation: number, status: string, dispatch_state: string | nu
 });
 async function observed() { return (await readRepoGradeStartupHistory("owner", "course", [target]))?.get(repoGradeStartupKey(target)); }
 describe("automatic prepared-partial recovery history", () => {
-  beforeEach(() => { result.rows = []; result.candidates = []; });
+  beforeEach(() => { result.rows = []; result.candidates = []; result.artifacts = []; });
   it("schedules only a partial whose dispatch never started", async () => {
     result.rows = [receipt(1, "partial", "prepared")];
     expect(await observed()).toBe("recoverable-partial");
@@ -39,5 +39,19 @@ describe("automatic prepared-partial recovery history", () => {
     expect(await observed()).toBe("recoverable-text");
     result.rows = [receipt(3, "unknown", "prepared", "retry"), ...result.rows];
     expect(await observed()).toBe("unknown");
+  });
+  it("schedules artifact continuation only for a server-proven candidate without an unresolved receipt", async () => {
+    result.rows = [receipt(2, "partial", "dispatched", "retry")];
+    result.artifacts = [{ repo: target.repo, folder: target.folder, sha: target.sha, ref: target.sourceRef }];
+    expect(await observed()).toBe("recoverable-artifact");
+    result.rows = [receipt(3, "unknown", "dispatched", "retry"), ...result.rows];
+    expect(await observed()).toBe("unknown");
+  });
+  it("continues a newer proven artifact attempt despite an earlier saved score, only on the matching ref", async () => {
+    result.rows = [receipt(2, "partial", "dispatched", "retry"), receipt(1, "succeeded", "dispatched")];
+    result.artifacts = [{ repo: target.repo, folder: target.folder, sha: target.sha, ref: target.sourceRef }];
+    expect(await observed()).toBe("recoverable-artifact");
+    result.artifacts = [{ repo: target.repo, folder: target.folder, sha: target.sha, ref: "other" }];
+    expect(await observed()).toBe("succeeded");
   });
 });

@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runManualRepoGrade, runWithRepoGradeAdmission } from "./admission";
 import { repoGradeAdmissionMode } from "./admission-mode";
-import { beginRepoGradeDispatch, checkRepoGradeTargetDispatch, claimRepoGrade, settleRepoGrade } from "./ledger";
+import { beginRepoGradeDispatch, checkRepoGradeTargetDispatch, checkRepoGradeRunDispatch, claimRepoGrade, settleRepoGrade } from "./ledger";
 import { BoundedRubricRefusalError } from "@/lib/grade/rubric";
 import { LlmOutcomeUnknownError, type LlmExecutionPolicy } from "@/lib/llm";
 import { SandboxExecutionRefusedError } from "@/lib/code-runner";
 import { ingestRepo } from "@/lib/github";
 import { evaluateRepoGrade } from "@/lib/repo-grade-evaluator";
 
-vi.mock("./ledger", () => ({ beginRepoGradeDispatch: vi.fn(), checkRepoGradeTargetDispatch: vi.fn(), claimRepoGrade: vi.fn(), settleRepoGrade: vi.fn() }));
+vi.mock("./ledger", () => ({ beginRepoGradeDispatch: vi.fn(), checkRepoGradeTargetDispatch: vi.fn(), checkRepoGradeRunDispatch: vi.fn(), claimRepoGrade: vi.fn(), settleRepoGrade: vi.fn() }));
 vi.mock("./admission-mode", () => ({ repoGradeAdmissionMode: vi.fn() }));
 vi.mock("@/lib/github", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/github")>(),
@@ -47,6 +47,21 @@ afterEach(() => {
 });
 
 describe("repository grading admission", () => {
+  it("rechecks the bound worker lease at each dispatch and stops after pause", async () => {
+    const fencedRun = { runId: "run", lease: "lease" };
+    const claim = { mode: "automatic" as const, token: "server", generation: 7 };
+    vi.mocked(claimRepoGrade).mockResolvedValue({ status: "claimed", claim });
+    vi.mocked(settleRepoGrade).mockResolvedValue(true);
+    vi.mocked(checkRepoGradeRunDispatch).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const sent = vi.fn();
+    await expect(runWithRepoGradeAdmission({ ...automatic, fencedRun }, async permit => {
+      await permit!(new AbortController().signal); sent();
+      await permit!(new AbortController().signal); sent();
+      return complete();
+    })).resolves.toEqual({ status: "unknown" });
+    expect(sent).toHaveBeenCalledTimes(1);
+    expect(checkRepoGradeRunDispatch).toHaveBeenCalledTimes(2);
+  });
   it("rechecks a targeted lease before every dispatch and stops after pause", async () => {
     const target = { runId: "run", lease: "lease" };
     const request = { ...automatic, mode: "retry" as const, targetedRun: target };

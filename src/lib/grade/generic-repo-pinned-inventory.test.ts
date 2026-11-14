@@ -1,0 +1,11 @@
+import { beforeEach, expect, it, vi } from "vitest";
+const api=vi.hoisted(()=>({tree:vi.fn(),bytes:vi.fn()}));
+vi.mock("@/lib/github.repos",()=>({getRepoCommitTree:api.tree}));
+vi.mock("@/lib/github-grade-archive",()=>({makePinnedArchiveBytesReader:()=>api.bytes}));
+import { readGenericPinnedInventory } from "./generic-repo-pinned-inventory";
+const entries=[{path:"lab/main.py",type:"blob",mode:"100644",size:1,sha:"a".repeat(40)},{path:"lab/helper.dat",type:"blob",mode:"100644",size:1,sha:"b".repeat(40)}];
+const input={owner:"org",repo:"repo",accountId:"owner",sourceCommit:"c".repeat(40),folder:"lab",signal:new AbortController().signal,inventory:{source:"pinned",scope:{kind:"tree" as const,path:"lab"},enumerationComplete:true,files:entries.map(e=>({path:e.path,content:"read" as const}))}};
+beforeEach(()=>{vi.resetAllMocks();api.tree.mockResolvedValue({entries,truncated:false});api.bytes.mockResolvedValue(new Map(entries.map(e=>[e.path,Buffer.from("x")])));});
+it("returns every verified scoped blob under its original path",async()=>{expect((await readGenericPinnedInventory(input)).map(f=>f.path)).toEqual(entries.map(e=>e.path));expect(api.bytes).toHaveBeenCalledWith(entries,input.signal);});
+it("refuses incomplete trees and mismatched inventories before reading bytes",async()=>{api.tree.mockResolvedValueOnce({entries,truncated:true});await expect(readGenericPinnedInventory(input)).rejects.toThrow("Incomplete pinned");await expect(readGenericPinnedInventory({...input,inventory:{...input.inventory,files:input.inventory.files.slice(0,1)}})).rejects.toThrow("does not match");expect(api.bytes).not.toHaveBeenCalled();});
+it("refuses symlink modes and missing bytes",async()=>{api.tree.mockResolvedValueOnce({entries:[{...entries[0],mode:"120000"},entries[1]],truncated:false});await expect(readGenericPinnedInventory(input)).rejects.toThrow("bounds");api.bytes.mockResolvedValueOnce(new Map());await expect(readGenericPinnedInventory(input)).rejects.toThrow("incomplete");});

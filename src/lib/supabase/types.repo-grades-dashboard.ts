@@ -27,6 +27,7 @@ export type RepoGradeFeedbackField = keyof RepoGradeFeedbackSections | "overall"
 export type RepoGradeUnexaminedArtifact = { path: string; reason: "optional-binary-unexamined" };
 import type { Module12ExecutionReceipt } from "@/lib/grade/module12-receipt";
 import type { Module12Evidence, Module12EvidenceSummary } from "@/lib/grade/module12-evidence";
+import type { GeneralExecutionEvidence, GeneralExecutionSummary, GeneralSourceReview } from "@/lib/grade/general-execution-evidence";
 
 export type RepoGradeResultRecord = {
   sourceExecutionSummary?: string;
@@ -36,6 +37,7 @@ export type RepoGradeResultRecord = {
   unexaminedArtifacts?: RepoGradeUnexaminedArtifact[];
   executionReceipts?: Module12ExecutionReceipt[];
   module12Evidence?: Module12Evidence;
+  generalExecutionEvidence?: GeneralExecutionEvidence;
   reviewReason?: "execution-unverified";
   rubric: Array<{ area: string; score: string; comment: string }>;
 };
@@ -64,6 +66,8 @@ export type RepoGradeHistoryRow = {
   unexamined_artifacts?: RepoGradeUnexaminedArtifact[] | null;
   execution_receipts?: Module12ExecutionReceipt[] | null;
   module12_evidence?: Module12EvidenceSummary | null;
+  general_execution_evidence?: GeneralExecutionSummary | null;
+  general_review_feedback?: GeneralSourceReview | null;
   review_reason?: "execution-unverified" | null;
 };
 

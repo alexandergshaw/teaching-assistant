@@ -1,0 +1,15 @@
+import { beforeEach, expect, it, vi } from "vitest";
+const mocks=vi.hoisted(()=>({rpc:vi.fn(),owner:vi.fn()}));
+vi.mock("@/lib/supabase/auth",()=>({requireAppOwner:mocks.owner}));
+vi.mock("@/lib/supabase/server",()=>({createServiceClient:()=>({rpc:mocks.rpc})}));
+import { runCheckpointedSource, sourcePlanDigest } from "./source-checkpoint";
+const plan={language:"python" as const,entryPoint:"lab/main.py",selection:"heuristic" as const};
+const receipt={entryPoint:plan.entryPoint};
+const identity={claim:{mode:"retry" as const,generation:7,token:"token"},run:{runId:"run",lease:"lease"},sourceSha:"b".repeat(40),plan,manifest:[{path:plan.entryPoint,sha256:"a".repeat(64)}],allowStart:true,resumeGeneration:6};
+const base={identity,signal:new AbortController().signal,beforeDispatch:vi.fn().mockResolvedValue(undefined),validateReceipt:(x:unknown):x is typeof receipt => !!x && typeof x==="object" && "entryPoint" in x && x.entryPoint===plan.entryPoint};
+beforeEach(()=>{vi.clearAllMocks();mocks.owner.mockResolvedValue({id:"owner"});});
+const answer=(data:unknown)=>({retry:async()=>({data,error:null})});
+it("reuses a validated exact-plan receipt without launching",async()=>{mocks.rpc.mockReturnValue(answer({status:"completed",receipt}));const execute=vi.fn();await expect(runCheckpointedSource({...base,execute})).resolves.toEqual(receipt);expect(execute).not.toHaveBeenCalled();expect(mocks.rpc.mock.calls[0][1]).toMatchObject({p_plan_sha256:sourcePlanDigest(plan),p_resume_generation:6});});
+it("does not execute an unresolved prior dispatch",async()=>{mocks.rpc.mockReturnValue(answer({status:"unknown"}));const execute=vi.fn();await expect(runCheckpointedSource({...base,execute})).rejects.toThrow("unresolved");expect(execute).not.toHaveBeenCalled();});
+it("records VM identity before retaining an observed receipt",async()=>{mocks.rpc.mockReturnValueOnce(answer({status:"started"})).mockReturnValueOnce(answer(true)).mockReturnValueOnce(answer(true));const execute=async(record:(id:string)=>Promise<void>)=>{await record("sbx_1");return receipt;};await expect(runCheckpointedSource({...base,execute})).resolves.toEqual(receipt);expect(mocks.rpc.mock.calls.map(([name])=>name)).toEqual(["repo_grade_begin_source_dispatch","repo_grade_record_source_sandbox","repo_grade_finish_source_dispatch"]);});
+it("does not accept an invalid cached receipt",async()=>{mocks.rpc.mockReturnValue(answer({status:"completed",receipt:{entryPoint:"wrong"}}));await expect(runCheckpointedSource({...base,execute:vi.fn()})).rejects.toThrow("Invalid saved");});

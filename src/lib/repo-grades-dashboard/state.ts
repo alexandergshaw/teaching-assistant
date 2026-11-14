@@ -1,6 +1,7 @@
 import type { RepoGradeCourseConfig, RepoGradeFeedbackField, RepoGradeResultRecord, RepoGradeReviewDraft } from "@/lib/supabase/types.repo-grades-dashboard";
 import type { RepoGradeRubricReceipt } from "./profile";
 import type { RepoGradeTargetEvidence } from "./preparation-input";
+import type { GeneralExecutionEvidence, GeneralSourceReview } from "@/lib/grade/general-execution-evidence";
 
 export type RepoGradeCohort = Readonly<{ cohortId: string; receipt: RepoGradeRubricReceipt }>;
 
@@ -29,7 +30,8 @@ export type RepoGradeClaimRequest = {
       startupBatchId?: string;
       targetedRun?: { runId: string; lease: string };
       changedRefreshRun?: { runId: string; lease: string };
-      recoveryRun?: { runId: string; lease: string; capability?: "text-extension-v1" };
+      recoveryRun?: { runId: string; lease: string; capability?: "text-extension-v1" | "artifact-continuation-v1" };
+      fencedRun?: { runId: string; lease: string };
     }
 );
 
@@ -46,6 +48,7 @@ export type RepoGradeAutomaticSettlement =
   | { outcome: "succeeded"; inputsComplete: true; result: RepoGradeResultRecord }
   | { outcome: "no-submission"; inputsComplete: true }
   | { outcome: "partial"; feedbackRetention?: RepoGradeFeedbackField }
+  | { outcome: "partial"; generalExecutionEvidence: GeneralExecutionEvidence; reviewFeedback?: GeneralSourceReview }
   | { outcome: "partial"; inputsComplete: true; result: RepoGradeReviewDraft }
   | { outcome: "failed" | "unknown" };
 

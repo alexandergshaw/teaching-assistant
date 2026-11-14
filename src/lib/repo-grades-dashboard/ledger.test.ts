@@ -71,6 +71,13 @@ describe("repository grading ledger RPC boundary", () => {
       p_run_id: token, p_lease: token, p_user_id: "owner", p_source_sha: automaticRequest.sha,
     }));
   });
+  it("routes artifact continuation directly through its one-use recovery claim",async()=>{
+    rpc.mockReturnValue({retry:()=>Promise.resolve({data:{status:"claimed",generation:42,token},error:null})});
+    const run={runId:token,lease:token};
+    await expect(claimRepoGrade({...automaticRequest,mode:"retry",fencedRun:run,recoveryRun:{...run,capability:"artifact-continuation-v1"}})).resolves.toEqual({status:"claimed",claim:{mode:"retry",generation:42,token}});
+    expect(rpc).toHaveBeenCalledWith("repo_grade_claim_artifact_recovery",expect.objectContaining({p_user_id:"owner",p_run_id:token,p_lease:token,p_source_sha:automaticRequest.sha}));
+    expect(rpc.mock.calls[0][1]).not.toHaveProperty("p_kind");
+  });
   it("binds an explicit regrade claim to the exact live run and lease", async () => {
     rpc.mockReturnValue({ retry: () => Promise.resolve({ data: { status: "claimed", generation: 42, token }, error: null }) });
     const targetedRun = { runId: token, lease: token };

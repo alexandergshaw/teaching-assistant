@@ -32,6 +32,7 @@ type TargetCompletion = {
   readmeExample?: RepoGradeReadmeExample;
 };
 export type AutomaticRepoGradeCompletion = DiscoveryCompletion | TargetCompletion
+  | { state: "fresh-tick" }
   | { state: "evidence-continue"; basis: string; progress: RepoGradeEvidenceBatchProgress }
   | { state: "verified-empty-regrade" }
   | { state: "github-throttled"; rateLimit: DiscoveryRateLimit; claim?: RepoGradeClaim & { mode: "automatic" | "retry" } };
@@ -220,6 +221,13 @@ export function automaticRepoGradeEvidenceStore(
 }
 
 export async function finishAutomaticRepoGrade(work: AutomaticRepoGradeWork, lease: string, result: AutomaticRepoGradeCompletion) {
+  if (result.state === "fresh-tick") {
+    if (work.phase !== "grading") return false;
+    return await rpc("repo_grade_defer_target", {
+      p_user_id: work.accountId, p_run_id: work.runId, p_lease: lease, p_course_id: work.courseId,
+      p_repo: work.repo, p_folder: work.folder, p_source_ref: work.ref, p_source_sha: work.sha,
+    }) === true;
+  }
   if (result.state === "verified-empty-regrade") {
     if (work.phase !== "grading") return false;
     return await rpc("repo_grade_automatic_finish_empty_regrade", {

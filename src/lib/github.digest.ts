@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { classifyModule12Artifact } from "./grade/module12-optional-artifact";
+import { genericArtifactInventory } from "./grade/generic-artifact-inventory";
 import { boundSubmissionInventory, type SubmissionFileInventory } from "./grade/submission-file-inventory";
 // Codebase digest for LLM analysis (course/rubric generation, grading).
 
@@ -133,6 +134,7 @@ export interface RepoDigestSkipCounts {
 
 export interface RepoDigest {
   unexaminedOptionalArtifacts?: string[];
+  unexaminedGenericArtifacts?: string[];
   inventory?: SubmissionFileInventory;
   fullName: string;
   description: string;
@@ -311,6 +313,7 @@ export async function ingestRepo(
     pathPrefix?: string; sourceCommit?: string; signal?: AbortSignal; treeCacheAccountId?: string;
     excludeInstructionReadme?: boolean;
     module12OptionalArtifacts?: { trustedInstructions: string; trustedRubric: string; readBytes: (files: readonly RepoTreeEntry[], signal?: AbortSignal) => Promise<ReadonlyMap<string, Buffer>> };
+    genericVerifiedArtifacts?: { readBytes: (files: readonly RepoTreeEntry[], signal?: AbortSignal) => Promise<ReadonlyMap<string, Buffer>> };
     readPinnedFiles?: (files: readonly RepoTreeEntry[], signal?: AbortSignal) => Promise<ReadonlyMap<string, string>>;
   } = {},
   ref?: string
@@ -369,7 +372,25 @@ export async function ingestRepo(
       }
     }
   }
-  const selectedTree = scopedTree.filter((entry) => !optionalArtifacts.includes(entry.path));
+  const genericArtifacts: string[] = [];
+  if (sourceCommit !== undefined && opts.genericVerifiedArtifacts) {
+    const candidates = scopedTree.filter(entry => entry.type === "blob" && ["100644", "100755"].includes(entry.mode ?? "")
+      && (!isTextCandidate(entry.path, entry.mode) || !fileExt(entry.path)) && !optionalArtifacts.includes(entry.path));
+    if (candidates.length) {
+      try {
+        const bytes = await opts.genericVerifiedArtifacts.readBytes(candidates, signal);
+        const observed = candidates.map(entry => ({ path: entry.path, bytes: bytes.get(entry.path) }));
+        if (observed.some(entry => !entry.bytes)) throw new Error("Artifact bytes unavailable");
+        for (const item of genericArtifactInventory(observed as Array<{path:string;bytes:Buffer}>)) {
+          if (item.kind !== "unsupported-source") genericArtifacts.push(item.path);
+        }
+      } catch (error) {
+        signal?.throwIfAborted();
+        if (error instanceof GithubGradeSourceRateLimitError) throw error;
+      }
+    }
+  }
+  const selectedTree = scopedTree.filter((entry) => !optionalArtifacts.includes(entry.path) && !genericArtifacts.includes(entry.path));
   const selection = selectDigestFiles(selectedTree, {
     maxFiles, maxBytes, perFileBytes, maxBlobBytes, pathPrefix: opts.pathPrefix,
     requireCompleteSubmission: sourceCommit !== undefined,
@@ -399,6 +420,7 @@ export async function ingestRepo(
       truncated: treeTruncated,
       files: [],
       inventory,
+      ...(genericArtifacts.length ? { unexaminedGenericArtifacts: genericArtifacts } : {}),
       prefixMatchedNothing: true,
       skipped: { type: 0, size: 0, budget: 0, fetchError: 0 },
       treeTruncated,
@@ -478,6 +500,7 @@ export async function ingestRepo(
   return {
     inventory,
     ...(optionalArtifacts.length ? { unexaminedOptionalArtifacts: optionalArtifacts } : {}),
+    ...(genericArtifacts.length ? { unexaminedGenericArtifacts: genericArtifacts } : {}),
     fullName: info.fullName,
     description: info.description,
     fileCount: count,

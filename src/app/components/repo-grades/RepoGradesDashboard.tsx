@@ -73,6 +73,8 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
   const earlierScore = savedResultIsEarlierThanObservedPin(cell?.saved, cell?.automaticBlocks);
   const ambiguousNoSubmission = unorderedNoSubmissionContext(cell?.saved, cell?.automaticBlocks, provenNoSubmission, !!staleNoSubmission);
   const scored = provenNoSubmission ? null : cell?.saved?.scored;
+  const generalAttempt = cell?.saved?.latest.general_execution_evidence ? cell.saved.latest : scored?.general_execution_evidence ? scored : null;
+  const generalEvidence = generalAttempt?.general_execution_evidence;
   const draft = cell?.saved?.draft && cell.saved.draft.generation === cell.saved.latest.generation ? cell.saved.draft : null;
   const sections = scored?.feedback_sections;
   const feedback = scored && {
@@ -109,6 +111,21 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
     {scored?.module12_evidence && <Alert severity="warning" role="status">
       This is a provisional model-assessed score based on submitted source and observed execution. Test counts, coverage and binary-to-source equivalence were not independently verified; runtime failures may reflect unavailable dependencies.
     </Alert>}
+    {generalEvidence && <Alert severity="warning" role="status">
+      {generalEvidence.policy === "source-only" ? "No execution was attempted for this written-work assessment." : "Source entry points, when present, were selected heuristically. Test counts, coverage and source equivalence were not independently verified; unsupported files were not assessed. Wine observations do not establish native Windows compatibility."} {generalAttempt?.status === "partial" ? "This attempt did not produce a score." : "This is a provisional model assessment of the pinned submission."} {generalAttempt && generalAttempt.generation !== cell?.saved?.latest.generation ? "These observations belong to an earlier attempt." : ""}
+    </Alert>}
+    {generalEvidence && <FeedbackDisclosure compact title="Execution observations" label={`Execution observations: ${repo.name} / ${folder}`}>
+      {generalEvidence.held.map(item => <Typography component="p" variant="body2" key={item.language}>{item.language}: {item.reason === "ambiguous" ? "Multiple possible entry points; review required." : "No entry point identified; review required."}</Typography>)}
+      {generalEvidence.runs.map(item => <Typography component="p" variant="body2" key={`${item.language}:${item.entryPoint}`}>
+        {item.entryPoint}: {item.status}; compile {item.compileState}, exit {item.compileExit ?? "not reported"}; run {item.runState}, exit {item.runExit ?? "not reported"}.
+      </Typography>)}
+      {generalEvidence.artifacts.map(item => <Typography component="p" variant="body2" key={item.path}>{item.path}: {item.status} ({item.kind}){item.runtime ? `, ${item.runtime}, ${item.executionState}, exit ${item.executionExit ?? "not reported"}` : ""}.</Typography>)}
+    </FeedbackDisclosure>}
+    {generalAttempt?.general_review_feedback && <FeedbackDisclosure compact title="Unscored source review" label={`Unscored source review: ${repo.name} / ${folder}`}>
+      <Typography component="p" variant="body2">This review is not a grade. Check the source and recorded observations against the rubric.</Typography>
+      {generalAttempt.general_review_feedback.overall && <Typography component="p" variant="body2">{generalAttempt.general_review_feedback.overall}</Typography>}
+      {generalAttempt.general_review_feedback.rubric.map((item,index) => <Typography component="p" variant="body2" key={`${item.area}:${index}`}><strong>{item.area}</strong>: {item.comment}</Typography>)}
+    </FeedbackDisclosure>}
     {scored?.module12_evidence && <FeedbackDisclosure compact title="Execution observations" label={`Execution observations: ${repo.name} / ${folder}`}>
       {scored.module12_evidence.sourceReceipts.map(item => <Typography component="p" variant="body2" key={item.sourcePath}>
         {item.sourcePath}: compile {item.compileState}, exit {item.compileExit ?? "not reported"}; run {item.runState}, exit {item.runExit ?? "not reported"}.
@@ -158,7 +175,7 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
     </Typography>}
     {!scanStatus && !draft && !provenNoSubmission && !cell?.saved?.scored && cell?.saved?.latest.status !== "no-submission" &&
       <Typography variant="caption" color="text.secondary">Submission unknown</Typography>}
-    {scored && feedback && !scored.unexamined_artifacts?.length && !scored.module12_evidence && <RepoResultCopy key={scored.generation} repo={repo.name} folder={folder}
+    {scored && feedback && !scored.unexamined_artifacts?.length && !scored.module12_evidence && !scored.general_execution_evidence && <RepoResultCopy key={scored.generation} repo={repo.name} folder={folder}
       source="saved" feedback={feedback} rubric={scored.rubric ?? []} distinguishSource={false} />}
   </>;
 }
@@ -198,7 +215,7 @@ function SavedMatrixResult({ result, repo, folder, feedback, showSource, part, e
             {sections && <p>Original score {sections.rawScore}</p>}
             {scored.feedback !== null && !sections && <p>Saved overall feedback may be shortened.</p>}
             {feedback && <RepoResultFeedback key={scored.generation} repo={repo} folder={folder} source="saved"
-              feedback={feedback} rubric={[]} hideCopyAll disableCopy={!!scored.unexamined_artifacts?.length || !!scored.module12_evidence} />}
+              feedback={feedback} rubric={[]} hideCopyAll disableCopy={!!scored.unexamined_artifacts?.length || !!scored.module12_evidence || !!scored.general_execution_evidence} />}
           </>
         )}
       </FeedbackDisclosure>}

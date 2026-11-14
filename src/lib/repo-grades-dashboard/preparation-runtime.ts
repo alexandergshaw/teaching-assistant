@@ -173,7 +173,7 @@ export async function prepareRepoGradeStartupProfile(
   const invalidProfile = profile.accountId !== accountId ? "invalid-scope"
     : profile.sourceRef !== expectedSourceRef ? "source-configuration-changed"
     : profile.targetBranch ? "unsupported-target-branch"
-    : profile.runCode ? "automatic-execution-unsupported" : null;
+    : profile.runCode && profile.provider !== "gemini" ? "automatic-execution-unsupported" : null;
   if (invalidProfile) {
     observeProfileFailure?.(invalidProfile);
     return null;

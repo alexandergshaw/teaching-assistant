@@ -46,6 +46,7 @@ function fixture(runCode?: boolean, sourceRef?: string) {
   const receipt = resolveRepoGradeRubric(saved.profile, graded.rubric);
   if (!receipt) throw new Error("Invalid rubric fixture");
   const runtime = {
+    deadlineMs: Date.now() + 260_000,
     loadPreparedProfile: vi.fn<NonNullable<Parameters<typeof runRepoGradeTarget>[2]>["loadPreparedProfile"]>()
       .mockResolvedValue({ profile: saved.profile, receipt, cohortId }),
     evaluatePinned: vi.fn<NonNullable<NonNullable<Parameters<typeof runRepoGradeTarget>[2]>["evaluatePinned"]>>()
@@ -97,12 +98,29 @@ describe("repository grading dashboard runner", () => {
   });
   it("uses a fenced retry for an explicit saved-grade replacement", async () => {
     const { runtime } = fixture();
+    const frozenRubric = "Correctness (10 points): Review the program.";
+    const captured = captureRepoGradeProfile({ accountId: "owner", courseId: "course", folder: "assignment" }, {},
+      { provider: "gemini", model: "configured-model", graderVersion: "configured-version" });
+    if (captured.status !== "ready") throw new Error("Invalid profile fixture");
+    runtime.loadPreparedProfile.mockResolvedValue({ profile: captured.profile, receipt: resolveRepoGradeRubric(captured.profile, frozenRubric), cohortId });
     const targetedRun = { runId: cohortId, lease: cohortId };
     const retryClaim = { ...claim, mode: "retry" as const };
     vi.mocked(claimRepoGrade).mockResolvedValue({ status: "claimed", claim: retryClaim });
-    await expect(runRepoGradeTarget(plan, target, { ...runtime, targetedRun })).resolves.toEqual({ status: "succeeded" });
+    const stage = { command: "python3 main.py", exitCode: 0, signal: null, timedOut: false, stdout: "", stderr: "", stdoutTruncated: false, stderrTruncated: false };
+    runtime.evaluatePinned.mockResolvedValue({ ...graded, rubric: frozenRubric, run: { ...graded.run, results: [{ ...grade, rubricAreas: [{ area: "Correctness", score: "0/10", comment: "Review." }] }] }, generalAssessmentMode: "heuristic-source-model", generalExecutionEvidence: { repoCommit: sha, inputManifest: [{ path: "assignment/main.py", sha256: "b".repeat(64) }], runs: [{ language: "python", entryPoint: "assignment/main.py", selection: "heuristic", image: "image", toolVersion: "version", networkPolicy: "deny-all", compile: null, run: stage, status: "observed" }], held: [], coverage: { status: "unverified" }, artifacts: [] } });
+    await expect(runRepoGradeTarget(plan, target, { ...runtime, targetedRun })).resolves.toMatchObject({ status: "succeeded" });
     expect(claimRepoGrade).toHaveBeenCalledWith(expect.objectContaining({ mode: "retry", targetedRun, sha }));
     expect(settleRepoGrade).toHaveBeenCalledWith(retryClaim, expect.objectContaining({ outcome: "succeeded" }));
+  });
+  it("retains ambiguous generic execution as partial rather than assigning a score", async () => {
+    const { runtime } = fixture();
+    const evidence = { repoCommit: sha, inputManifest: [{ path: "assignment/a.py", sha256: "b".repeat(64) }], runs: [],
+      held: [{ language: "python" as const, reason: "ambiguous" as const }], coverage: { status: "unverified" as const }, artifacts: [] };
+    runtime.evaluatePinned.mockResolvedValue({ error: "Ambiguous execution", partial: true, reason: "execution-unverified", sourceCommit: sha, generalExecutionEvidence: evidence });
+    vi.mocked(claimRepoGrade).mockResolvedValue({ status: "claimed", claim: { ...claim, mode: "retry" } });
+    await expect(runRepoGradeTarget(plan, target, { ...runtime, targetedRun: { runId: cohortId, lease: cohortId } }))
+      .resolves.toMatchObject({ status: "partial", reason: "execution-unverified" });
+    expect(settleRepoGrade).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ outcome: "partial", generalExecutionEvidence: evidence }));
   });
   it("blocks an injected runtime in default legacy mode", async () => {
     vi.mocked(repoGradeAdmissionMode).mockReturnValue("legacy-manual");

@@ -19,6 +19,7 @@ const OBSERVATION_PRIORITY: Record<RepoGradeLedgerObservation, number> = {
   "never-attempted": 0,
   "recoverable-partial": 1,
   "recoverable-text": 1,
+  "recoverable-artifact": 1,
   failed: 2,
   partial: 2,
   claimed: 3,
@@ -39,6 +40,7 @@ export async function readRepoGradeStartupHistory(
   ownerId: string, courseId: string, targets: readonly RepoGradeStartupTarget[],
 ): Promise<ReadonlyMap<string, RepoGradeLedgerObservation> | null> {
   const observationsByCommit = new Map<string, RepoGradeLedgerObservation>();
+  const artifactContinuations = new Set<string>();
   const commits = new Set<string>();
   for (const target of targets) {
     if (target.accountId !== ownerId || target.courseId !== courseId || !/^[0-9a-f]{40}$/.test(target.sha)) return null;
@@ -86,6 +88,21 @@ export async function readRepoGradeStartupHistory(
       // A prior retry can be considered only if the database also finds the
       // linked unsupported-submission target and no spent capability marker.
       // This is a scheduling hint; the claim repeats all checks atomically.
+      {
+        // The database treats this as a hint only. The recovery claim binds
+        // the exact run, pinned revision, marker and new generation atomically.
+        const artifactCandidates = await client.rpc("repo_grade_artifact_recovery_candidates", {
+          p_user_id: ownerId, p_course_id: courseId, p_shas: [...subset],
+        }).abortSignal(signal).retry(false);
+        if (signal.aborted || artifactCandidates.error || !Array.isArray(artifactCandidates.data) || artifactCandidates.data.length > MAX_RECEIPTS) return null;
+        for (const candidate of artifactCandidates.data) {
+          if (!candidate || typeof candidate.repo !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(candidate.repo)
+            || typeof candidate.folder !== "string" || typeof candidate.ref !== "string" || !candidate.ref
+            || typeof candidate.sha !== "string" || !subset.has(candidate.sha)) return null;
+          artifactContinuations.add(repoGradeStartupKey({ accountId: ownerId, courseId, repo: candidate.repo,
+            folder: candidate.folder, sourceRef: candidate.ref, sha: candidate.sha }));
+        }
+      }
       if ([...observationsByCommit.values()].some((status) => status === "partial")) {
         const candidates = await client.rpc("repo_grade_text_recovery_candidates", {
           p_user_id: ownerId, p_course_id: courseId, p_shas: [...subset],
@@ -99,7 +116,13 @@ export async function readRepoGradeStartupHistory(
         }
       }
     }
-    return new Map(targets.map((target) => [repoGradeStartupKey(target), observationsByCommit.get(commitKey(target))!]));
+    return new Map(targets.map((target) => {
+      const key = repoGradeStartupKey(target), observed = observationsByCommit.get(commitKey(target))!;
+      // A database-proven latest continuation can follow an older saved grade.
+      // Keep unresolved claims higher priority and bind to the exact ref.
+      return [key, artifactContinuations.has(key) && observed !== "unknown" && observed !== "claimed"
+        ? "recoverable-artifact" : observed] as const;
+    }));
   } catch {
     return null;
   }

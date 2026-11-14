@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { expect, it, vi } from "vitest";
 vi.mock("./module12-binary-sandbox", () => ({ inspectModule12Binary: vi.fn() }));
+vi.mock("./generic-windows-sandbox", async (original) => ({ ...await original<typeof import("./generic-windows-sandbox")>(), runGenericWindowsArtifact: vi.fn() }));
 import { inspectModule12Binary } from "./module12-binary-sandbox";
+import { runGenericWindowsArtifact } from "./generic-windows-sandbox";
 import { inspectModule12PinnedArtifacts } from "./module12-inspect-pinned";
 const file = { path: "assignments/module_12/TestUtils.class", bytes: new Uint8Array([1, 2]) };
 const input = { files: [file], repoCommit: "a".repeat(40), signal: new AbortController().signal, beforeDispatch: async () => {} };
@@ -14,4 +16,13 @@ it("binds every observation to its exact pinned bytes and revision", async () =>
 it("rejects duplicate paths and excessive parallel artifact dispatch", async () => {
   await expect(inspectModule12PinnedArtifacts({ ...input, files: [file, file] })).rejects.toThrow("capacity");
   await expect(inspectModule12PinnedArtifacts({ ...input, files: [0, 1, 2, 3].map(i => ({ ...file, path: `${file.path}${i}` })) })).rejects.toThrow("capacity");
+});
+it("binds a Wine observation to every pinned companion file", async () => {
+  const bytes=new Uint8Array(100);bytes.set([0x4d,0x5a]);bytes[60]=64;bytes.set([0x50,0x45,0,0,0x64,0x86],64);bytes.set([0x0b,0x02],88);
+  const pe={path:"assignments/module_12/test_utils.exe",bytes}, source={path:"assignments/module_12/test_utils.cpp",bytes:new Uint8Array([1])};
+  const manifest=[source,pe].map(item=>({path:item.path,sha256:createHash("sha256").update(item.bytes).digest("hex")}));
+  vi.mocked(runGenericWindowsArtifact).mockResolvedValueOnce({ path:pe.path,repoCommit:input.repoCommit,sha256:manifest[1].sha256,inputManifest:manifest,kind:"pe",status:"observed",architecture:"x86_64",image:"image",runtime:"wine",runtimeVersion:"wine-10",networkPolicy:"deny-all",execution:{command:"wine ./test_utils.exe",exitCode:0,signal:null,timedOut:false,stdout:"",stderr:"",stdoutTruncated:false,stderrTruncated:false},sourceEquivalence:"unverified",coverage:"unverified" });
+  const [result]=await inspectModule12PinnedArtifacts({...input,files:[pe],sourceFiles:[source]});
+  expect(result).toMatchObject({path:pe.path,executionStatus:"observed",sourceEquivalence:"unverified"});
+  expect(runGenericWindowsArtifact).toHaveBeenCalledWith(expect.objectContaining({files:[source,pe]}));
 });

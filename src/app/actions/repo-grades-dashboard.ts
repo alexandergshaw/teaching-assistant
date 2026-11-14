@@ -178,7 +178,7 @@ export async function runRepoGradeStartupTargetAction(
     const history = await readRepoGradeStartupHistory(owner.id, plan.courseId, [target]);
     const status = history?.get(repoGradeStartupKey(target));
     if (!status) return { status: "storage-unavailable" } as const;
-    if (status === "recoverable-partial" || status === "recoverable-text") return { status: "partial" } as const;
+    if (status === "recoverable-partial" || status === "recoverable-text" || status === "recoverable-artifact") return { status: "partial" } as const;
     if (status !== "never-attempted") return { status };
 
     // Return unretained feedback to the authorized caller for session recovery.
@@ -280,6 +280,8 @@ export async function readRepoGradeHistoryAction(courseId: string, expectedAccou
         unexamined_artifacts: row.unexamined_artifacts ?? null,
         execution_receipts: row.execution_receipts ?? null,
         module12_evidence: row.module12_evidence ?? null,
+        general_execution_evidence: row.general_execution_evidence ?? null,
+        general_review_feedback: row.general_review_feedback ?? null,
         review_reason: row.review_reason ?? null,
         feedback_retention: row.feedback_retention ?? null,
         rubric: row.rubric,

@@ -70,7 +70,7 @@ export default function RepoGradeProfileSettings({ courseId, organization, colum
 
 type SaveStatus = Awaited<ReturnType<typeof saveRepoGradeProfile>>["status"] | "saving" | null;
 
-export function ProfileForm({ courseId, organization, folder, initialProfile, reload }: {
+export function ProfileForm({ courseId, folder, initialProfile, reload }: {
   courseId: string;
   organization: string;
   folder: string;
@@ -86,7 +86,7 @@ export function ProfileForm({ courseId, organization, folder, initialProfile, re
   const [generateRubric, setGenerateRubric] = useState(initialProfile?.rubricPolicy === "generate");
   const savingProfile = status === "saving";
   const existingEmbeddedGenerator = baseline?.provider === "embedded" && baseline.rubricPolicy === "generate";
-  const targetedExecution = organization.trim().toLowerCase() === "intro-to-computer-science-fall-2026" && folder === "assignments/module_12";
+  const incompatibleExecution = draft.provider !== "gemini" && draft.runCode;
 
   function updateDraft(changes: Partial<ProfileDraft>) {
     setDraft((current) => ({ ...current, ...changes }));
@@ -95,7 +95,7 @@ export function ProfileForm({ courseId, organization, folder, initialProfile, re
 
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (saving.current || status === "conflict") return;
+    if (saving.current || status === "conflict" || incompatibleExecution) return;
     if (!generateRubric && !draft.rubric.trim()) {
       setRubricError(true);
       return;
@@ -147,12 +147,13 @@ export function ProfileForm({ courseId, organization, folder, initialProfile, re
             }} />}
         <FormControlLabel control={<Checkbox checked={draft.applyNamingDeduction} disabled={savingProfile}
           onChange={(event) => updateDraft({ applyNamingDeduction: event.currentTarget.checked })} />} label="Apply naming deductions" />
-        <Typography component="p" variant="body2">Automatic code execution is unavailable. {targetedExecution && "For this assignment, explicit targeted regrades with Gemini run source tests in an isolated sandbox and save an unscored review draft. Clear any saved code execution opt-in to enable grading."}</Typography>
-        {baseline?.runCode && (
+        <Typography component="p" variant="body2">When enabled, automatic grading attempts to run submitted code in an isolated sandbox. Unsupported or ambiguous work remains available for review.</Typography>
+        {(draft.provider === "gemini" || draft.runCode) && (
           <FormControlLabel control={<Checkbox checked={draft.runCode} disabled={savingProfile}
             onChange={(event) => updateDraft({ runCode: event.currentTarget.checked })} />}
-            label="Keep saved code execution opt-in. Clear it to use automatic grading." />
+            label="Run submitted code during automatic grading" />
         )}
+        {incompatibleExecution && <Typography component="p" role="alert" color="error">Choose Gemini or turn off code execution before saving.</Typography>}
         {baseline?.targetBranch && (
           <FormControlLabel control={<Checkbox checked={draft.targetBranch !== null} disabled={savingProfile}
             onChange={(event) => updateDraft({ targetBranch: event.currentTarget.checked ? baseline.targetBranch : null })} />}
@@ -166,7 +167,7 @@ export function ProfileForm({ courseId, organization, folder, initialProfile, re
       </fieldset>
       {saveError && <p role="alert">{saveError}</p>}
       <div>
-        <Button type="submit" variant="contained" disabled={savingProfile || status === "conflict"}>Save folder profile</Button>
+        <Button type="submit" variant="contained" disabled={savingProfile || status === "conflict" || incompatibleExecution}>Save folder profile</Button>
         {status === "conflict" && <Button type="button" onClick={reload}>Reload saved profile and discard edits</Button>}
       </div>
     </form>

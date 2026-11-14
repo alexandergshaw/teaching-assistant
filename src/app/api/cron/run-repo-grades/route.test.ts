@@ -105,4 +105,13 @@ describe("durable repository grading worker route", () => {
       state: "unknown", reason: "worker-interrupted",
     });
   });
+  it("ends the current tick after deferring a target for a fresh budget", async () => {
+    const target = { ...work, phase: "grading", repo: "Example/Repo", folder: "a", ref: "main", sha: "a".repeat(40) };
+    mocks.claim.mockReset().mockResolvedValue(target);
+    mocks.worker.mockResolvedValue({ state: "fresh-tick" });
+    const response = await GET(request("Bearer server-only-test-secret"));
+    expect(response.status).toBe(200);
+    expect(mocks.finish).toHaveBeenCalledWith(target, expect.any(String), { state: "fresh-tick" });
+    expect(mocks.claim).toHaveBeenCalledTimes(1);
+  });
 });

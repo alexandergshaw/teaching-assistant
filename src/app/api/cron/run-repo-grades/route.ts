@@ -60,6 +60,7 @@ export async function GET(request: Request) {
         throw new Error("Automatic repository grading settlement unavailable");
       }
       handled += 1;
+      if (result.state === "fresh-tick") break;
     }
     return scheduled.failed
       ? Response.json({ status: "schedule-unavailable", handled, scheduled }, { status: 503 })

@@ -5,7 +5,7 @@ import { LlmOutcomeUnknownError, type LlmExecutionPolicy } from "@/lib/llm";
 import { SandboxExecutionRefusedError } from "@/lib/code-runner";
 import { createGradeCallSink, type GradeCallSink } from "@/lib/grade/grade-item-diagnostic";
 import { BoundedRubricRefusalError } from "@/lib/grade/rubric";
-import { beginRepoGradeDispatch, checkRepoGradeTargetDispatch, claimRepoGrade, settleRepoGrade } from "./ledger";
+import { beginRepoGradeDispatch, checkRepoGradeTargetDispatch, checkRepoGradeRunDispatch, claimRepoGrade, settleRepoGrade } from "./ledger";
 import type { RepoGradeAutomaticSettlement, RepoGradeClaim, RepoGradeClaimRequest, RepoGradeManualSettlement } from "./state";
 import { repoGradeAdmissionMode } from "./admission-mode";
 
@@ -19,7 +19,7 @@ type AdmissionFailure = RepoGradeClaimStatus | "runtime-unavailable" | "storage-
 type AdmissionResult<T> = { status: "completed"; value: T } | { status: AdmissionFailure }
   | { status: "deferred-pre-dispatch"; claim: RepoGradeClaim & { mode: "automatic" | "retry" } };
 type BeforeDispatch = NonNullable<LlmExecutionPolicy["beforeDispatch"]>;
-type Evaluate<T, Settlement> = (beforeDispatch?: BeforeDispatch) => Promise<Evaluation<T, Settlement>>;
+type Evaluate<T, Settlement> = (beforeDispatch?: BeforeDispatch, claim?: RepoGradeClaim) => Promise<Evaluation<T, Settlement>>;
 
 export function runWithRepoGradeAdmission<T>(
   request: ManualRequest, evaluate: Evaluate<T, RepoGradeManualSettlement>,
@@ -74,7 +74,11 @@ export async function runWithRepoGradeAdmission<T>(
       if (!evaluating || remainingMs === null || performance.now() - dispatchRequestedAt >= remainingMs) {
         throw new Error("Repository grading dispatch was denied.");
       }
-      if ("targetedRun" in request && request.targetedRun
+      if ("fencedRun" in request && request.fencedRun
+        && !await Promise.race([checkRepoGradeRunDispatch(claim, request.fencedRun), interrupted.promise])) {
+        throw new Error("Repository worker was paused or its lease expired.");
+      }
+      if ("targetedRun" in request && request.targetedRun && !("fencedRun" in request && request.fencedRun)
         && !await Promise.race([checkRepoGradeTargetDispatch(claim, request.targetedRun), interrupted.promise])) {
         throw new Error("Targeted repository grading was paused or its lease expired.");
       }
@@ -88,7 +92,7 @@ export async function runWithRepoGradeAdmission<T>(
   let evaluation: Evaluation<T, RepoGradeAutomaticSettlement | RepoGradeManualSettlement> | undefined;
   let knownFailure: "pre-dispatch-failed" | "sandbox-refused" | undefined;
   try {
-    evaluation = await evaluate(beforeDispatch);
+    evaluation = await evaluate(beforeDispatch, claim);
   } catch (error) {
     if (error instanceof SandboxExecutionRefusedError) knownFailure = "sandbox-refused";
     else if (!dispatchAllowed && !(error instanceof LlmOutcomeUnknownError)) knownFailure = "pre-dispatch-failed";

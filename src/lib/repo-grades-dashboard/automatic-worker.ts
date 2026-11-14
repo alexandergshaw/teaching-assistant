@@ -92,7 +92,8 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode, opt
           if (work.targetFilter && !refresh && prior) return selector;
           switch (prior) {
             case "never-attempted":
-            case "recoverable-partial": return selector;
+            case "recoverable-partial":
+            case "recoverable-artifact": return selector;
             case "recoverable-text":
               return source?.status === "ready" && source.textRecoveryFolders?.includes(folder)
                 ? selector : { ...selector, state: "partial", reason: "prior-attempt" };
@@ -124,7 +125,7 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode, opt
     if (!prior) return { state: "blocked", reason: "history-unavailable" };
     // A refresh may only use the automatic claim. Recovery is a separate
     // capability and must not be combined with the refresh lease fence.
-    if (refresh && (prior === "recoverable-partial" || prior === "recoverable-text")) {
+    if (refresh && (prior === "recoverable-partial" || prior === "recoverable-text" || prior === "recoverable-artifact")) {
       return { state: "partial", reason: "prior-attempt" };
     }
     if (!targeted && prior === "recoverable-text" && !(snapshot && plan.discovery.status === "scanned"
@@ -132,7 +133,7 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode, opt
         && row.sourceRef === work.ref && row.sourceCommit === work.sha && row.textRecoveryFolders?.includes(work.folder)))) {
       return { state: "partial", reason: "prior-attempt" };
     }
-    if (!targeted && prior !== "never-attempted" && prior !== "recoverable-partial" && prior !== "recoverable-text") {
+    if (!targeted && prior !== "never-attempted" && prior !== "recoverable-partial" && prior !== "recoverable-text" && prior !== "recoverable-artifact") {
       if (prior === "succeeded" || prior === "no-submission") return { state: "already-processed" };
       return { state: prior === "claimed" ? "busy" : prior, reason: "prior-attempt" };
     }
@@ -160,9 +161,11 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode, opt
     let evidenceContinue: PreparationEvidenceContinue | undefined;
     const outcome = await runRepoGradeTarget(plan, target, {
       ...(options && { deadlineMs: options.deadlineMs }),
+      fencedRun: { runId, lease },
       ...(targeted && { targetedRun: { runId, lease } }),
       ...(refresh && { changedRefreshRun: { runId, lease } }),
       ...(!targeted && prior === "recoverable-partial" && { recoveryRun: { runId, lease } }),
+      ...(!targeted && prior === "recoverable-artifact" && { recoveryRun: { runId, lease, capability: "artifact-continuation-v1" as const } }),
       ...(!targeted && prior === "recoverable-text" && { recoveryRun: { runId, lease, capability: "text-extension-v1" as const } }),
       deferSourceThrottle: work.retryGithubRateLimits === true,
       loadPreparedProfile: (scope) => mode === "embedded-only"
@@ -203,6 +206,8 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode, opt
       return { state: "blocked", reason: outcome.status, preparationRetry: outcome.preparationRetry };
     }
     switch (outcome.status) {
+      case "deferred-budget":
+        return { state: "fresh-tick" };
       case "deferred-source-throttle":
         return { state: "github-throttled", rateLimit: confirmedGradeSourceCooldown() ?? { retryAtMs: null, primary: false }, claim: outcome.claim };
       case "terminal": return { state: "already-processed" };

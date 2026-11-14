@@ -9,8 +9,10 @@ import { evaluateRepoGrade, type RepoGradePartialReason, type RepoGradeResponse 
 import { createGradeCallSink } from "@/lib/grade/grade-item-diagnostic";
 import type { LlmExecutionPolicy } from "@/lib/llm";
 import { parseEarnedPossibleScore } from "@/lib/grade/parsing";
+import { matchesFrozenRubricScore } from "./frozen-rubric-score";
 import { isUngraded } from "@/lib/grade/types";
 import { validModule12Evidence } from "@/lib/grade/module12-evidence";
+import { validGeneralExecutionEvidence, generalEvidenceScorable, validGeneralSourceReview } from "@/lib/grade/general-execution-evidence";
 import { requireAppOwner } from "@/lib/supabase/auth";
 import { table } from "@/lib/supabase/courses.row";
 import type {
@@ -72,10 +74,11 @@ export async function planRepoGradeCourse(
 }
 
 type PinnedInput = {
-  repo: string; folder: string; sourceCommit: string; profile: RepoGradeProfile; rubric: string; runCode: boolean; targetedModule12?: boolean;
+  repo: string; folder: string; sourceCommit: string; profile: RepoGradeProfile; rubric: string; runCode: boolean; targetedModule12?: boolean; targetedGeneric?: boolean;
   executionDeadlineMs?: number;
   preparedReadme?: PreparedRepoGradeReadme;
   beforeDispatch?: LlmExecutionPolicy["beforeDispatch"];
+  artifactExecutionContext?: { claim: RepoGradeClaim; run: { runId: string; lease: string }; recovery: boolean };
 };
 type PinnedEvaluation = RepoGradeResponse | { knownFailure: true };
 
@@ -84,7 +87,8 @@ type AutomaticRuntime = {
   startupBatchId?: string;
   targetedRun?: { runId: string; lease: string };
   changedRefreshRun?: { runId: string; lease: string };
-  recoveryRun?: { runId: string; lease: string; capability?: "text-extension-v1" };
+  recoveryRun?: { runId: string; lease: string; capability?: "text-extension-v1" | "artifact-continuation-v1" };
+  fencedRun?: { runId: string; lease: string };
   deferSourceThrottle?: boolean;
   loadPreparedProfile(scope: {
     accountId: string; courseId: string; folder: string;
@@ -99,8 +103,10 @@ type AutomaticRuntime = {
 };
 
 const PINNED_EVALUATION_BUDGET_MS = 45_000;
-const MODULE12_EVALUATION_BUDGET_MS = 160_000;
-const MODULE12_MINIMUM_BUDGET_MS = 150_000;
+const MODULE12_EVALUATION_BUDGET_MS = 245_000;
+const MODULE12_MINIMUM_BUDGET_MS = 230_000;
+const GENERIC_EVALUATION_BUDGET_MS = 245_000;
+const GENERIC_MINIMUM_BUDGET_MS = 230_000;
 
 /** Only the admitted runner invokes the real evaluator. The injected loader
  * must supply a previously prepared cohort, including its exact receipt. */
@@ -109,14 +115,14 @@ async function evaluatePinnedRepoGrade(input: PinnedInput): Promise<PinnedEvalua
   const [owner, name, extra] = repo.split("/");
   // The sandbox has its own timeout and result contract. A persisted opt-in
   // requires a coordinated execution policy before automatic dispatch.
-  if ((runCode && !input.targetedModule12) || !owner || !name || extra !== undefined || repo.trim() !== repo
+  if ((runCode && !input.targetedModule12 && !input.targetedGeneric) || !owner || !name || extra !== undefined || repo.trim() !== repo
     || !validateGithubOwnerRepo(owner, name) || !isGithubCommitSha(sourceCommit)) return { knownFailure: true };
 
   const callSink = createGradeCallSink();
-  const budgetMs = runCode && input.targetedModule12
-    ? Math.min(MODULE12_EVALUATION_BUDGET_MS, (input.executionDeadlineMs ?? 0) - Date.now())
+  const budgetMs = runCode && (input.targetedModule12 || input.targetedGeneric)
+    ? Math.min(input.targetedGeneric ? GENERIC_EVALUATION_BUDGET_MS : MODULE12_EVALUATION_BUDGET_MS, (input.executionDeadlineMs ?? 0) - Date.now())
     : PINNED_EVALUATION_BUDGET_MS;
-  if (budgetMs < (runCode ? MODULE12_MINIMUM_BUDGET_MS : 1)) return { knownFailure: true };
+  if (budgetMs < (runCode ? (input.targetedGeneric ? GENERIC_MINIMUM_BUDGET_MS : MODULE12_MINIMUM_BUDGET_MS) : 1)) return { knownFailure: true };
   const deadlineMs = Date.now() + budgetMs;
   const signal = AbortSignal.timeout(budgetMs);
   let dispatched = false;
@@ -127,6 +133,8 @@ async function evaluatePinnedRepoGrade(input: PinnedInput): Promise<PinnedEvalua
       {
         automaticGrader: profile,
         targetedModule12: input.targetedModule12,
+        targetedGeneric: input.targetedGeneric,
+        artifactExecutionContext: input.artifactExecutionContext,
         preparedReadme,
         modelExecution: {
           deadlineMs, signal, beforeDispatch: beforeDispatch && (async (dispatchSignal) => {
@@ -165,7 +173,7 @@ async function evaluatePinnedRepoGrade(input: PinnedInput): Promise<PinnedEvalua
 
 type RunOutcome = RepoGradeAutomaticSettlement["outcome"] | RepoGradeClaimStatus
   | RepoGradePreparationFailure["status"]
-  | "ungraded" | "runtime-unavailable" | "unsupported-target-branch" | "embedded-profile-required";
+  | "ungraded" | "runtime-unavailable" | "deferred-budget" | "unsupported-target-branch" | "embedded-profile-required";
 
 type UnsettledEvaluation = { feedbackRetention?: RepoGradeFeedbackField; unretainedResult: RepoGradeResultRecord };
 type RunResult =
@@ -187,9 +195,17 @@ function classifyEvaluation(
   profile: RepoGradeProfile,
   rubric: string,
   preparedReadme?: PreparedRepoGradeReadme,
+  expectedGeneric = false,
 ): Exclude<RunResult, { status: "deferred-source-throttle" }> & { settlement: RepoGradeAutomaticSettlement } {
   if ("knownFailure" in response) return { status: "failed", settlement: { outcome: "failed" } };
   if ("error" in response) {
+    if (response.partial && response.sourceCommit === sourceCommit && response.generalExecutionEvidence
+      && validGeneralExecutionEvidence(response.generalExecutionEvidence) && response.generalExecutionEvidence.repoCommit === sourceCommit) {
+      const reviewFeedback = response.generalSourceReview && validGeneralSourceReview(response.generalSourceReview)
+        ? response.generalSourceReview
+        : { overall: "Review the pinned source and rubric alongside the execution observations. Test coverage, correctness, and artifact equivalence have not been independently verified.", rubric: [] };
+      return { status: "partial", reason: "execution-unverified", settlement: { outcome: "partial", generalExecutionEvidence: response.generalExecutionEvidence, reviewFeedback } };
+    }
     return response.partial && response.sourceCommit === sourceCommit
       ? { status: "partial", reason: response.reason, settlement: { outcome: "partial" } }
       : { status: "unknown", settlement: { outcome: "unknown" } };
@@ -208,6 +224,26 @@ function classifyEvaluation(
   }
   if (response.rubric !== rubric) {
     return { status: "unknown", settlement: { outcome: "unknown" } };
+  }
+  const general = response.generalExecutionEvidence;
+  if (expectedGeneric && (!general || !validGeneralExecutionEvidence(general) || general.repoCommit !== sourceCommit)) {
+    return { status: "partial", reason: "execution-unverified", settlement: { outcome: "partial" } };
+  }
+  if (general && (!validGeneralExecutionEvidence(general) || general.repoCommit !== sourceCommit)) {
+    return { status: "partial", reason: "execution-unverified", settlement: { outcome: "partial" } };
+  }
+  if (general && (!generalEvidenceScorable(general) || response.generalAssessmentMode !== "heuristic-source-model"
+    )) {
+    const candidate = response.run.results.length === 1 ? response.run.results[0] : undefined;
+    const reviewFeedback = candidate && !isUngraded(candidate) && !candidate.submissionTruncated ? {
+      overall: `Provisional model feedback; execution, test coverage, correctness, and artifact equivalence have not been independently verified. Review against the pinned source and observations.\n\n${candidate.overallComment}`,
+      rubric: candidate.rubricAreas.map(item => ({ area: item.area, comment: item.comment })),
+    } : response.generalSourceReview ?? {
+      overall: "Review the pinned source and rubric alongside the execution observations. Test coverage, correctness, and artifact equivalence have not been independently verified.", rubric: [],
+    };
+    const hasFeedback = validGeneralSourceReview(reviewFeedback);
+    return { status: "partial", reason: "execution-unverified", settlement: { outcome: "partial", generalExecutionEvidence: general,
+      ...(hasFeedback ? { reviewFeedback } : {}) } };
   }
   const rawEvidence = "module12Evidence" in response ? response.module12Evidence : undefined;
   if (rawEvidence !== undefined && !validModule12Evidence(rawEvidence, sourceCommit)) {
@@ -234,6 +270,15 @@ function classifyEvaluation(
   if (!fraction || fraction.earned < 0 || fraction.earned > fraction.possible || grade.determination) {
     return { status: "ungraded", settlement: { outcome: "failed" } };
   }
+  if (general && (!/^\s*\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?\s*$/.test(grade.totalScore)
+    || !matchesFrozenRubricScore(rubric, grade.rubricAreas, fraction))) {
+    const reviewFeedback = {
+      overall: `Provisional model feedback; the returned scores could not be reconciled with the saved rubric. Review the pinned source and observations.\n\n${grade.overallComment}`,
+      rubric: grade.rubricAreas.map(item => ({ area: item.area, comment: item.comment })),
+    };
+    return { status: "partial", reason: "execution-unverified", settlement: { outcome: "partial", generalExecutionEvidence: general,
+      ...(validGeneralSourceReview(reviewFeedback) && { reviewFeedback }) } };
+  }
   const allowedAreas = [
     ["Function Implementation", "Test Coverage Quantity", "Test Case Quality", "Code Organization and Testing Practice"],
     ["Function Implementation", "Test Suite Completeness", "Test Coverage (Normal/Edge/Invalid)", "Code Structure and Style"],
@@ -244,9 +289,19 @@ function classifyEvaluation(
     && allowedAreas.some(areas => rubric.includes(`${areas[1]} (25%)`) && JSON.stringify(areas) === JSON.stringify(grade.rubricAreas.map(item => item.area)))
     && scores.every(match => match && Number(match[1]) <= 25)
     && Math.abs(rubricTotal - fraction.earned) < 1e-8;
+  const normalizedRubric = general ? grade.rubricAreas.map(item => {
+    // The frozen-rubric check above already validated these fractions. Use a
+    // canonical form so database validation cannot disagree about whitespace
+    // or surrounding model text.
+    const parsed = parseEarnedPossibleScore(item.score)!;
+    return { ...item, score: `${parsed.earned}/${parsed.possible}` };
+  }) : grade.rubricAreas;
   const result: RepoGradeResultRecord = {
     score: (fraction.earned / fraction.possible) * 100,
-    feedback: grade.overallComment,
+    feedback: general && general.policy !== "source-only"
+      ? `Provisional model assessment. Entry points were selected heuristically; test coverage, correctness, and artifact equivalence have not been independently verified. Review the pinned source and execution observations.\n\n${grade.overallComment}`
+      : grade.overallComment,
+    ...(general && { generalExecutionEvidence: general }),
     ...(response.sourceExecutionSummary ? { sourceExecutionSummary: response.sourceExecutionSummary } : {}),
     ...(rawEvidence ? { unexaminedArtifacts: response.unexaminedArtifacts ?? [], module12Evidence: rawEvidence,
       ...(!modelAssessmentEligible && { reviewReason: "execution-unverified" as const }) }
@@ -255,7 +310,7 @@ function classifyEvaluation(
       strengths: grade.strengths, improvements: grade.improvements,
       resubmitNotice: grade.resubmitNotice, rawScore: grade.totalScore,
     },
-    rubric: grade.rubricAreas,
+    rubric: normalizedRubric,
   };
   const feedbackRetention = unretainedRepoGradeFeedbackField(result.feedback, result.sections, result.rubric);
   if (feedbackRetention) {
@@ -325,12 +380,14 @@ export async function runRepoGradeTarget(
   if (profile.sourceRef !== plannedRef) return { status: "configuration-changed" };
   const receipt = restoreRepoGradeRubric(profile, prepared.receipt);
   if (!receipt) return { status: "profile-unavailable" };
-  const targetedModule12 = !!runtime.targetedRun && folder === "assignments/module_12"
+  const executionAuthorized = !!runtime.targetedRun || (!!runtime.fencedRun && profile.runCode === true);
+  const targetedModule12 = executionAuthorized && folder === "assignments/module_12"
     && source.repo.toLowerCase().startsWith("intro-to-computer-science-fall-2026/") && profile.provider === "gemini";
+  const targetedGeneric = executionAuthorized && !targetedModule12 && profile.provider === "gemini";
   // A slow isolated run needs a bounded host deadline and settlement reserve.
   // Refuse before admission rather than start work that the host will kill.
-  if (targetedModule12
-    && (!runtime.deadlineMs || runtime.deadlineMs - Date.now() < MODULE12_MINIMUM_BUDGET_MS + 15_000)) return { status: "runtime-unavailable" };
+  if ((targetedModule12 || targetedGeneric)
+    && (!runtime.deadlineMs || runtime.deadlineMs - Date.now() < (targetedGeneric ? GENERIC_MINIMUM_BUDGET_MS : MODULE12_MINIMUM_BUDGET_MS) + 15_000)) return { status: "deferred-budget" };
 
   let unsettled: UnsettledEvaluation | undefined;
   const admission = await runWithRepoGradeAdmission({
@@ -342,14 +399,17 @@ export async function runRepoGradeTarget(
     ...(runtime.targetedRun && { targetedRun: runtime.targetedRun }),
     ...(runtime.changedRefreshRun && { changedRefreshRun: runtime.changedRefreshRun }),
     ...(runtime.recoveryRun && { recoveryRun: runtime.recoveryRun }),
-  }, async (beforeDispatch) => {
+    ...(runtime.fencedRun && { fencedRun: runtime.fencedRun }),
+  }, async (beforeDispatch, claim) => {
     const evaluatePinned = runtime.evaluatePinned ?? evaluatePinnedRepoGrade;
     const evaluation = classifyEvaluation(await evaluatePinned({
       repo: source.repo, folder, sourceCommit: source.sourceCommit, profile, rubric: receipt.rubric,
-      runCode: targetedModule12 || profile.runCode === true, beforeDispatch, preparedReadme: prepared.preparedReadme,
+      runCode: targetedModule12 || targetedGeneric || profile.runCode === true, beforeDispatch, preparedReadme: prepared.preparedReadme,
       executionDeadlineMs: runtime.deadlineMs,
       targetedModule12,
-    }), source.sourceCommit, source.repo, profile, receipt.rubric, prepared.preparedReadme);
+      targetedGeneric,
+      ...(claim && runtime.fencedRun && { artifactExecutionContext: { claim, run: runtime.fencedRun, recovery: runtime.recoveryRun?.capability === "artifact-continuation-v1" && !runtime.targetedRun } }),
+    }), source.sourceCommit, source.repo, profile, receipt.rubric, prepared.preparedReadme, targetedGeneric);
     const { settlement, ...value } = evaluation;
     // Settlement can fail after the evaluator has already returned. Keep the
     // exact payload for this caller even if durability cannot be confirmed.

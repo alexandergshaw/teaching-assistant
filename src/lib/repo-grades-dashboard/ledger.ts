@@ -1,9 +1,12 @@
 import "server-only";
+import { artifactManifestDigest } from "./artifact-dispatch";
+import { sourcePlanDigest } from "./source-checkpoint";
 
 import { isDeepStrictEqual } from "node:util";
 import { requireAppOwner } from "@/lib/supabase/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { validModule12Evidence, validModule12EvidenceSummary } from "@/lib/grade/module12-evidence";
+import { generalEvidenceScorable, validGeneralExecutionEvidence, validGeneralExecutionSummary, validGeneralSourceReview } from "@/lib/grade/general-execution-evidence";
 import type { RepoGradeClaimStatus, RepoGradeHistoryRow } from "@/lib/supabase/types.repo-grades-dashboard";
 import {
   isRepoGradeFeedbackField,
@@ -53,6 +56,7 @@ export async function claimRepoGrade(request: RepoGradeClaimRequest): Promise<
   const targetedRun = automatic ? request.targetedRun : undefined;
   const changedRefreshRun = automatic ? request.changedRefreshRun : undefined;
   const recoveryRun = automatic ? request.recoveryRun : undefined;
+  const fencedRun = automatic ? request.fencedRun : undefined;
   if (automatic && (!cohort || !validRepoGradeCohortId(cohort.cohortId)
     || cohort.receipt?.accountId !== owner.id || cohort.receipt.courseId !== request.courseId
     || cohort.receipt.folder !== request.folder)) {
@@ -72,10 +76,23 @@ export async function claimRepoGrade(request: RepoGradeClaimRequest): Promise<
     p_receipt: cohort?.receipt ?? null,
   };
   let response: unknown;
-  if (recoveryRun) {
+  if (fencedRun) {
+    const { p_mode: mode, ...targetArgs } = args;
+    const explicit = [targetedRun, changedRefreshRun, recoveryRun].filter(Boolean);
+    if (startupBatchId || explicit.length > 1 || !validRepoGradeCohortId(fencedRun.runId) || !validRepoGradeCohortId(fencedRun.lease)
+      || explicit.some(run => run?.runId !== fencedRun.runId || run?.lease !== fencedRun.lease)
+      || (mode !== (targetedRun || recoveryRun ? "retry" : "automatic"))) return { status: "forbidden" };
+    const kind = targetedRun ? "targeted" : changedRefreshRun ? "refresh" : recoveryRun?.capability === "text-extension-v1" ? "text-recovery" : recoveryRun ? "recovery" : "automatic";
+    response = recoveryRun?.capability === "artifact-continuation-v1"
+      ? await ledgerRpc("repo_grade_claim_artifact_recovery", { ...targetArgs, p_run_id: fencedRun.runId,
+        p_lease: fencedRun.lease, p_preparation_key: preparation?.key ?? null }, true)
+      : await ledgerRpc("repo_grade_claim_run_fenced", { ...targetArgs, p_run_id: fencedRun.runId,
+        p_lease: fencedRun.lease, p_preparation_key: preparation?.key ?? null, p_kind: kind }, true);
+  } else if (recoveryRun) {
     const { p_mode: mode, ...targetArgs } = args;
     if (mode !== "retry" || targetedRun || changedRefreshRun || startupBatchId || !validRepoGradeCohortId(recoveryRun.runId)
       || !validRepoGradeCohortId(recoveryRun.lease)) return { status: "forbidden" };
+    if (recoveryRun.capability === "artifact-continuation-v1") return { status: "forbidden" };
     response = await ledgerRpc(recoveryRun.capability === "text-extension-v1" ? "repo_grade_claim_text_recovery" : "repo_grade_claim_prepared_recovery", {
       ...targetArgs, p_run_id: recoveryRun.runId, p_lease: recoveryRun.lease,
       p_preparation_key: preparation?.key ?? null,
@@ -149,6 +166,17 @@ export async function checkRepoGradeTargetDispatch(claim: RepoGradeClaim, target
   return response;
 }
 
+/** Recheck the exact bound worker run and claim before each dispatch. */
+export async function checkRepoGradeRunDispatch(claim: RepoGradeClaim, target: { runId: string; lease: string }): Promise<boolean> {
+  const owner = await requireAppOwner();
+  const response = await ledgerRpc("repo_grade_check_run_dispatch", {
+    p_user_id: owner.id, p_generation: claim.generation, p_token: claim.token,
+    p_run_id: target.runId, p_lease: target.lease,
+  });
+  if (typeof response !== "boolean") throw new Error("Invalid worker dispatch authorization response");
+  return response;
+}
+
 export function settleRepoGrade(
   claim: RepoGradeClaim & { mode: "manual" }, settlement: RepoGradeManualSettlement,
 ): Promise<boolean>;
@@ -160,6 +188,11 @@ export async function settleRepoGrade(
 ): Promise<boolean> {
   const owner = await requireAppOwner();
   const result = "result" in settlement ? settlement.result : null;
+  const general = result?.generalExecutionEvidence ?? ("generalExecutionEvidence" in settlement ? settlement.generalExecutionEvidence : undefined);
+  const sourceReview = "reviewFeedback" in settlement ? settlement.reviewFeedback : undefined;
+  if (general && (!validGeneralExecutionEvidence(general) || result?.module12Evidence != null || result?.reviewReason != null || claim.mode === "manual")) throw new Error("Invalid general execution evidence");
+  if (sourceReview && (!general || settlement.outcome !== "partial" || !validGeneralSourceReview(sourceReview))) throw new Error("Invalid general source review");
+  if (general && settlement.outcome === "succeeded" && !generalEvidenceScorable(general)) throw new Error("Unverified general execution cannot be scored");
   if (result) {
     if (result.score !== null && (!Number.isFinite(result.score) || result.score < 0 || result.score > 100)) {
       throw new Error("Invalid repository evaluation score");
@@ -173,7 +206,16 @@ export async function settleRepoGrade(
   }
   const retention = "feedbackRetention" in settlement ? settlement.feedbackRetention : null;
   const evidence = result && "module12Evidence" in result ? result.module12Evidence : undefined;
-  const response = await ledgerRpc(evidence ? (settlement.outcome === "succeeded" ? "repo_grade_settle_scored_observations" : "repo_grade_settle_partial_evidence") : "repo_grade_settle", {
+  const continuation = general?.continuation;
+  if (continuation && (settlement.outcome !== "partial" || result || claim.mode === "manual" || artifactManifestDigest(general.inputManifest) !== continuation.manifestSha256 || continuation.sources?.some(source => source.planSha256 !== sourcePlanDigest({language:source.language,entryPoint:source.entryPoint,selection:"heuristic"})))) throw new Error("Invalid artifact continuation");
+  const { continuation: _continuation, ...baseGeneral } = general ?? {};
+  void _continuation;
+  let response = continuation && general ? await ledgerRpc("repo_grade_settle_artifact_continuation", {
+    p_user_id:owner.id,p_generation:claim.generation,p_token:claim.token,p_source_sha:general.repoCommit,
+    p_evidence:baseGeneral,p_review_feedback:sourceReview ?? null,p_manifest_sha256:continuation.manifestSha256,p_remaining_paths:continuation.paths,p_remaining_sources:continuation.sources ?? [],
+  }, true) : sourceReview && general ? await ledgerRpc("repo_grade_settle_general_partial_review", {
+    p_user_id: owner.id,p_generation: claim.generation,p_token: claim.token,p_source_sha: general.repoCommit,p_evidence: general,p_review_feedback: sourceReview,
+  }) : await ledgerRpc(general ? "repo_grade_settle_general_evidence" : evidence ? (settlement.outcome === "succeeded" ? "repo_grade_settle_scored_observations" : "repo_grade_settle_partial_evidence") : "repo_grade_settle", {
     p_user_id: owner.id,
     p_generation: claim.generation,
     p_token: claim.token,
@@ -181,6 +223,7 @@ export async function settleRepoGrade(
     p_inputs_complete: "inputsComplete" in settlement && settlement.inputsComplete,
     p_score: result?.score ?? null,
     p_feedback: result?.feedback ?? null,
+    ...(general && { p_source_sha: general.repoCommit, p_evidence: general }),
     ...(evidence ? { p_unexamined_artifacts: result?.unexaminedArtifacts ?? [], ...(settlement.outcome === "partial" && { p_review_reason: result?.reviewReason }), p_source_sha: evidence.sourceReceipts[0].repoCommit, p_evidence: evidence } : result?.reviewReason ? { p_unexamined_artifacts: result.unexaminedArtifacts ?? [], p_review_reason: result.reviewReason } : {}),
     p_rubric: result?.rubric.map(({ area, score, comment }) => ({ area, score, comment })) ?? null,
     ...(claim.mode !== "manual" && {
@@ -250,6 +293,8 @@ function validHistoryRow(row: unknown): row is RepoGradeHistoryRow {
     || (row.settled_at !== null && !validDate(row.settled_at))
     || (row.reconciled_at !== null && !validDate(row.reconciled_at))) return false;
   if (row.module12_evidence != null && (!((row.status === "partial" && row.score === null && row.review_reason === "execution-unverified") || (row.status === "succeeded" && row.score !== null && row.review_reason == null)) || !validModule12EvidenceSummary(row.module12_evidence))) return false;
+  if (row.general_execution_evidence != null && (!((row.status === "partial" && row.score === null) || (row.status === "succeeded" && row.score !== null)) || !validGeneralExecutionSummary(row.general_execution_evidence))) return false;
+  if (row.general_review_feedback != null && (row.status !== "partial" || row.score !== null || row.general_execution_evidence == null || !validGeneralSourceReview(row.general_review_feedback))) return false;
   if (row.unexamined_artifacts != null && (!Array.isArray(row.unexamined_artifacts) || (row.unexamined_artifacts.length > 0 && !validUnexaminedArtifacts(row.unexamined_artifacts)) || (row.score === null ? row.status !== "partial" || row.review_reason !== "execution-unverified" : row.status !== "succeeded" || row.module12_evidence == null))) return false;
   if (row.review_reason != null && (row.review_reason !== "execution-unverified" || row.unexamined_artifacts == null)) return false;
   if (row.feedback_retention != null

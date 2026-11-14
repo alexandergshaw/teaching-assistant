@@ -14,6 +14,8 @@ import { captureRepoGradeProfile, resolveRepoGradeRubric } from "./profile";
 import { runRepoGradeTarget } from "./runner";
 import { runModule12SandboxSource } from "@/lib/grade/module12-vercel-sandbox";
 import { inspectModule12Binary } from "@/lib/grade/module12-binary-sandbox";
+import { runGenericRepoSandbox } from "@/lib/grade/generic-repo-sandbox";
+import { runGenericWindowsArtifact } from "@/lib/grade/generic-windows-sandbox";
 
 vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn() }));
 vi.mock("@/lib/grade/inline-visuals", () => ({ collectInlineVisualEvidence: vi.fn() }));
@@ -21,6 +23,8 @@ vi.mock("./ledger", () => ({ beginRepoGradeDispatch: vi.fn(), checkRepoGradeTarg
 vi.mock("./admission-mode", () => ({ repoGradeAdmissionMode: vi.fn() }));
 vi.mock("@/lib/grade/module12-vercel-sandbox", () => ({ runModule12SandboxSource: vi.fn() }));
 vi.mock("@/lib/grade/module12-binary-sandbox", () => ({ inspectModule12Binary: vi.fn() }));
+vi.mock("@/lib/grade/generic-repo-sandbox", () => ({ runGenericRepoSandbox: vi.fn() }));
+vi.mock("@/lib/grade/generic-windows-sandbox", async (original) => ({ ...await original<typeof import("@/lib/grade/generic-windows-sandbox")>(), runGenericWindowsArtifact: vi.fn() }));
 
 const model = "gemini-test-version";
 const sha = "a".repeat(40);
@@ -189,6 +193,17 @@ beforeEach(() => {
       toolVersion: stage, runtimeVersion: stage, metadata: stage, executionStatus: "observed", execution: stage,
       sourceEquivalence: "unverified", testCoverage: "unverified" };
   });
+  vi.mocked(runGenericRepoSandbox).mockImplementation(async (input) => {
+    await input.beforeDispatch(input.signal);
+    const stage = { command: "python3 main.py", exitCode: 0, signal: null, timedOut: false, stdout: "untrusted output", stderr: "", stdoutTruncated: false, stderrTruncated: false };
+    return { repoCommit: input.repoCommit, inputManifest: input.files.map(file => ({ path: file.path, sha256: createHash("sha256").update(file.bytes).digest("hex") })),
+      runs: [{ ...input.plan, image: "image", toolVersion: "version", networkPolicy: "deny-all", compile: null, run: stage, status: "observed" }],
+      coverage: { status: "unverified" }, artifacts: [] };
+  });
+  vi.mocked(runGenericWindowsArtifact).mockImplementation(async input => {
+    await input.beforeDispatch(input.signal);
+    return { path: input.path, repoCommit: input.repoCommit, sha256: createHash("sha256").update(input.bytes).digest("hex"), inputManifest: input.files.map(file => ({ path: file.path, sha256: createHash("sha256").update(file.bytes).digest("hex") })), kind: "pe", status: "observed", architecture: "x86_64", image: "image", runtime: "wine", runtimeVersion: "wine-test", networkPolicy: "deny-all", execution: { command: "wine student.exe", exitCode: 0, signal: null, timedOut: false, stdout: "untrusted", stderr: "", stdoutTruncated: false, stderrTruncated: false }, sourceEquivalence: "unverified", coverage: "unverified" };
+  });
   vi.mocked(runModule12SandboxSource).mockImplementation(async (input) => {
     await input.beforeDispatch(input.signal);
     const language = input.path.endsWith(".py") ? "python" : input.path.endsWith(".java") ? "java" : "c++";
@@ -246,7 +261,7 @@ it.each(actualRubrics)("carries the exact reviewed rubric through evaluator, fen
     profileFingerprint: "b".repeat(64), status: "partial", claimedAt: "2026-11-13T10:00:00Z", settledAt: "2026-11-13T10:01:00Z",
     score: null, feedback: result.feedback, feedback_sections: result.sections, rubric: result.rubric,
     unexamined_artifacts: result.unexaminedArtifacts ?? null, review_reason: result.reviewReason ?? null, feedback_retention: null,
-    execution_receipts: null, module12_evidence: null }]);
+    execution_receipts: null, module12_evidence: null, general_execution_evidence: null, general_review_feedback: null }]);
   const saved = [...attempts.values()][0];
   const oldCheck = { repo: actualRepo, folder: actualFolder, sourceRef: "main", explanation: "", noSubmissionStale: true as const,
     observedSourceSha: sha, observedRunStartedAt: "2026-11-13T10:00:00Z" };
@@ -276,9 +291,9 @@ it("retains uncertainty with a source-assessed score and holds a failed executio
   if (captured.status !== "ready") throw new Error("Invalid profile fixture");
   const receipt = resolveRepoGradeRubric(captured.profile, rubric);
   vi.mocked(claimRepoGrade).mockResolvedValueOnce({ status: "claimed", claim: { ...claim, mode: "retry" } });
-  const runtime = { deadlineMs: Date.now() + 200_000, targetedRun: { runId: "test-run", lease: "test-lease" }, loadPreparedProfile: vi.fn(async () => ({ profile: captured.profile, receipt,
+  const runtime = { deadlineMs: Date.now() + 260_000, targetedRun: { runId: "test-run", lease: "test-lease" }, loadPreparedProfile: vi.fn(async () => ({ profile: captured.profile, receipt,
     cohortId: "8d74ee61-463c-4b3f-af5d-5fc9b55023c1", preparedReadme: { path: null, instructions: actualInstructor, template: true } })) };
-  expect(await runRepoGradeTarget(actualPlan, actualTarget, { ...runtime, deadlineMs: Date.now() + 100_000 })).toMatchObject({ status: "runtime-unavailable" });
+  expect(await runRepoGradeTarget(actualPlan, actualTarget, { ...runtime, deadlineMs: Date.now() + 100_000 })).toMatchObject({ status: "deferred-budget" });
   expect(claimRepoGrade).not.toHaveBeenCalled();
   expect(await runRepoGradeTarget(actualPlan, actualTarget, runtime)).toMatchObject({ status: "succeeded" });
   const calls = vi.mocked(runModule12SandboxSource).mock.calls;
@@ -301,6 +316,87 @@ it("retains uncertainty with a source-assessed score and holds a failed executio
   expect(vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1]).toMatchObject({ outcome: "partial", result: { score: null, reviewReason: "execution-unverified" } });
 });
 describe("admitted pinned repository evaluator", () => {
+  it("labels a model grade provisional when execution coverage is unverified", async () => {
+    const fetcher = fetchRepo({ tree: [files.submission], contentOverrides: { [files.submission.path]: `if __name__ == "__main__": print("hello")` } });
+    const runtime = preparedRuntime({ instructions: "Assess the submitted program." });
+    vi.mocked(claimRepoGrade).mockResolvedValueOnce({ status: "claimed", claim: { ...claim, mode: "retry" } });
+    await expect(runRepoGradeTarget(plan, target, { ...runtime, deadlineMs: Date.now() + 260_000, targetedRun: { runId: "run", lease: "lease" } }))
+      .resolves.toMatchObject({ status: "succeeded" });
+    expect(runGenericRepoSandbox).toHaveBeenCalledOnce();
+    const settlement = vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1];
+    expect(settlement).toMatchObject({ outcome: "succeeded", result: { feedback: expect.stringContaining("Provisional model assessment"), generalExecutionEvidence: { coverage: { status: "unverified" }, runs: [expect.objectContaining({ entryPoint: "lab/main.py" })] } } });
+    expect(fetcher.mock.calls.some(([url]) => url === modelUrl)).toBe(true);
+  });
+  it("does not present a model score as verified when a source comment is cited", async () => {
+    fetchRepo({ tree: [files.submission], contentOverrides: { [files.submission.path]: `# correctness\nif __name__ == "__main__": print("hello")` },
+      modelResponse: () => Response.json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify({
+        overallComment: "Correctness: [lab/main.py:1] identifies the intended correctness check.", rubricResults: [{ area: "Correctness", score: "8/10" }],
+      }) }] } }] }) });
+    const captured = captureRepoGradeProfile({ accountId: plan.accountId, courseId: plan.courseId, folder: target.folder }, { instructions: "Assess the submitted program." }, grader);
+    if (captured.status !== "ready") throw new Error("Invalid profile fixture");
+    const receipt = resolveRepoGradeRubric(captured.profile, "Correctness (10 points): Assess correctness.");
+    const runtime = { loadPreparedProfile: vi.fn(async () => ({ profile: captured.profile, receipt, cohortId: "8d74ee61-463c-4b3f-af5d-5fc9b55023c1" })) };
+    vi.mocked(claimRepoGrade).mockResolvedValueOnce({ status: "claimed", claim: { ...claim, mode: "retry" } });
+    await runRepoGradeTarget(plan, target, { ...runtime, deadlineMs: Date.now() + 260_000, targetedRun: { runId: "run", lease: "lease" } });
+    expect(vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1]).toMatchObject({ outcome: "succeeded", result: { feedback: expect.stringContaining("Provisional model assessment"), generalExecutionEvidence: { coverage: { status: "unverified" } } } });
+  });
+  it("grades explicit written-only work without pretending to execute it", async () => {
+    const essay={...files.submission,path:"lab/essay.txt"};
+    fetchRepo({tree:[essay],contentOverrides:{[essay.path]:"A written reflection."},modelResponse:()=>Response.json({candidates:[{finishReason:"STOP",content:{parts:[{text:JSON.stringify({overallComment:"Clear reflection.",rubricResults:[{area:"Essay",score:"8/10",comment:"Clear."}]})}]}}]})});
+    const captured=captureRepoGradeProfile({accountId:plan.accountId,courseId:plan.courseId,folder:target.folder},{instructions:"Write a reflection on ethics."},grader);
+    if(captured.status!=="ready")throw new Error("Invalid profile fixture");
+    const receipt=resolveRepoGradeRubric(captured.profile,"Essay (10 points): Evaluate clarity.");
+    vi.mocked(claimRepoGrade).mockResolvedValueOnce({status:"claimed",claim:{...claim,mode:"retry"}});
+    const runtime={deadlineMs:Date.now()+260_000,targetedRun:{runId:"run",lease:"lease"},loadPreparedProfile:vi.fn(async()=>({profile:captured.profile,receipt,cohortId:"8d74ee61-463c-4b3f-af5d-5fc9b55023c1"}))};
+    await expect(runRepoGradeTarget(plan,target,runtime)).resolves.toMatchObject({status:"succeeded"});
+    expect(runGenericRepoSandbox).not.toHaveBeenCalled();
+    expect(vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1]).toMatchObject({outcome:"succeeded",result:{generalExecutionEvidence:{policy:"source-only",runs:[],held:[],artifacts:[]}}});
+  });
+  it("reviews explicitly static SQL without claiming database execution", async () => {
+    const query={...files.submission,path:"lab/" + "query.sql"};
+    fetchRepo({tree:[query],contentOverrides:{[query.path]:"SELECT * FROM users;"},modelResponse:()=>Response.json({candidates:[{finishReason:"STOP",content:{parts:[{text:JSON.stringify({overallComment:"The SELECT returns all columns.",rubricResults:[{area:"SQL query review",score:"8/10",comment:"Avoid unnecessary columns."}]})}]}}]})});
+    const captured=captureRepoGradeProfile({accountId:plan.accountId,courseId:plan.courseId,folder:target.folder},{instructions:"Review the submitted statements."},grader);
+    if(captured.status!=="ready")throw new Error("Invalid profile fixture");
+    const receipt=resolveRepoGradeRubric(captured.profile,"SQL query review (10 points): Analyze the SQL queries for clarity.");
+    vi.mocked(claimRepoGrade).mockResolvedValueOnce({status:"claimed",claim:{...claim,mode:"retry"}});
+    const runtime={deadlineMs:Date.now()+260_000,targetedRun:{runId:"run",lease:"lease"},loadPreparedProfile:vi.fn(async()=>({profile:captured.profile,receipt,cohortId:"8d74ee61-463c-4b3f-af5d-5fc9b55023c1"}))};
+    await expect(runRepoGradeTarget(plan,target,runtime)).resolves.toMatchObject({status:"succeeded"});
+    expect(runGenericRepoSandbox).not.toHaveBeenCalled();
+    expect(vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1]).toMatchObject({outcome:"succeeded",result:{generalExecutionEvidence:{policy:"source-only",runs:[],held:[],artifacts:[]}}});
+  });
+  it("retains a verified binary-only submission as partial rather than reporting no submission", async () => {
+    const exe = { ...files.submission, path: "lab/program.exe" };
+    const fetcher = fetchRepo({ tree: [exe], contentOverrides: { [exe.path]: Buffer.from([0x4d, 0x5a, 0, 1]) } });
+    const runtime = preparedRuntime({ instructions: "Assess the submitted executable." });
+    vi.mocked(claimRepoGrade).mockResolvedValueOnce({ status: "claimed", claim: { ...claim, mode: "retry" } });
+    await expect(runRepoGradeTarget(plan, target, { ...runtime, deadlineMs: Date.now() + 260_000, targetedRun: { runId: "run", lease: "lease" } }))
+      .resolves.toMatchObject({ status: "partial", reason: "execution-unverified" });
+    expect(vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1]).toMatchObject({ outcome: "partial", generalExecutionEvidence: { artifacts: [expect.objectContaining({ path: exe.path, kind: "pe", status: "unexamined" })] } });
+    expect(fetcher.mock.calls.some(([url]) => url === modelUrl)).toBe(false);
+  });
+  it("retains unscored source feedback when entry point selection is ambiguous", async () => {
+    const first = { ...files.submission, path: "lab/first.py" };
+    const second = { ...files.submission, path: "lab/second.py" };
+    fetchRepo({ tree: [first, second], contentOverrides: { [first.path]: "print('first')", [second.path]: "print('second')" } });
+    const runtime = preparedRuntime({ instructions: "Assess the submitted programs." });
+    vi.mocked(claimRepoGrade).mockResolvedValueOnce({ status: "claimed", claim: { ...claim, mode: "retry" } });
+    await expect(runRepoGradeTarget(plan, target, { ...runtime, deadlineMs: Date.now() + 260_000, targetedRun: { runId: "run", lease: "lease" } }))
+      .resolves.toMatchObject({ status: "partial", reason: "execution-unverified" });
+    expect(vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1]).toMatchObject({ outcome: "partial", reviewFeedback: { overall: expect.any(String), rubric: expect.any(Array) } });
+    expect(vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1]).not.toHaveProperty("result.score");
+  });
+  it("runs a pinned x64 Windows-only submission under Wine with explicit provisional evidence", async () => {
+    const exe = { ...files.submission, path: "lab/program.exe" };
+    const bytes = Buffer.alloc(100); bytes.set([0x4d, 0x5a]); bytes[60] = 64; bytes.set([0x50, 0x45, 0, 0, 0x64, 0x86], 64); bytes.set([0x0b, 0x02], 88);
+    const fetcher = fetchRepo({ tree: [exe], contentOverrides: { [exe.path]: bytes } });
+    const runtime = preparedRuntime({ instructions: "Assess the submitted executable." });
+    vi.mocked(claimRepoGrade).mockResolvedValueOnce({ status: "claimed", claim: { ...claim, mode: "retry" } });
+    await expect(runRepoGradeTarget(plan, target, { ...runtime, deadlineMs: Date.now() + 260_000, targetedRun: { runId: "run", lease: "lease" } }))
+      .resolves.toMatchObject({ status: "succeeded" });
+    expect(runGenericWindowsArtifact).toHaveBeenCalledOnce();
+    expect(vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1]).toMatchObject({ outcome: "succeeded", result: { feedback: expect.stringContaining("Provisional model assessment"), generalExecutionEvidence: { coverage: { status: "unverified" }, artifacts: [expect.objectContaining({ path: exe.path, kind: "pe", status: "observed", runtime: "wine", sourceEquivalence: "unverified" })] } } });
+    expect(fetcher.mock.calls.some(([url]) => url === modelUrl)).toBe(true);
+  });
   it("grades verified extensionless and .text submission files together", async () => {
     const schema = { ...files.submission, path: "lab/schema" };
     const output = { ...files.submission, path: "lab/output.text" };

@@ -6,6 +6,11 @@ const input={plan:{language:"python" as const,entryPoint:"lab/main.py",selection
 beforeEach(()=>{vi.clearAllMocks();api.create.mockResolvedValue(api);api.currentSession.mockReturnValue({sessionId:"session-1"});api.update.mockResolvedValue(undefined);api.mkDir.mockResolvedValue(undefined);api.writeFiles.mockResolvedValue(undefined);api.stop.mockResolvedValue(undefined);api.runCommand.mockResolvedValue({exitCode:0,stdout:async()=>"Python 3",stderr:async()=>""});});
 it("denies network before uploading all pinned files, and discloses binary artifacts",async()=>{const result=await runGenericRepoSandbox(input);expect(api.update.mock.invocationCallOrder[0]).toBeLessThan(api.writeFiles.mock.invocationCallOrder[0]);expect(api.writeFiles.mock.calls[0][0].map((f:{path:string})=>f.path)).toEqual(["main.py","data/a.bin"]);expect(result).toMatchObject({coverage:{status:"unverified"},artifacts:[{path:"lab/data/a.bin",kind:"binary",status:"unexamined"}],runs:[{entryPoint:"lab/main.py",status:"observed"}]});expect(input.beforeDispatch).toHaveBeenCalledTimes(3);expect(api.stop).toHaveBeenCalledOnce();});
 it("does not transfer input if egress isolation fails",async()=>{api.update.mockRejectedValue(new Error("unavailable"));await expect(runGenericRepoSandbox(input)).rejects.toThrow("unavailable");expect(api.writeFiles).not.toHaveBeenCalled();expect(api.stop).toHaveBeenCalledOnce();});
+it.each(["mjs", "cjs"])("executes a .%s Node module with its original path",async extension=>{
+  const entry=`lab/main.${extension}`;
+  await runGenericRepoSandbox({...input,plan:{language:"javascript",entryPoint:entry,selection:"heuristic"},files:[{path:entry,bytes:new TextEncoder().encode("console.log(1)")}]});
+  expect(api.runCommand).toHaveBeenCalledWith(expect.objectContaining({cmd:"node",args:[`./main.${extension}`]}));
+});
 it("rejects traversal, collisions and files outside scope before dispatch",async()=>{await expect(runGenericRepoSandbox({...input,files:[...input.files,{path:"lab/../escape",bytes:new Uint8Array()}]})).rejects.toThrow("Unsafe");await expect(runGenericRepoSandbox({...input,files:[...input.files,{path:"elsewhere/a",bytes:new Uint8Array()}]})).rejects.toThrow("outside");expect(api.create).not.toHaveBeenCalled();});
 
 it("preserves Unicode directory and file names in the isolated run",async()=>{

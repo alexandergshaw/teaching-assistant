@@ -4,7 +4,7 @@ import { isSafeGenericExecutionComponent } from "./generic-execution-path";
 export type GenericLanguage = "python" | "javascript" | "java" | "c" | "c++";
 export type GenericRunPlan = { language: GenericLanguage; entryPoint: string; selection: "heuristic" };
 export type GenericExecutionPlan = { runs: GenericRunPlan[]; held: Array<{ language: GenericLanguage; reason: "ambiguous" | "no-entry-point" }> };
-const extensions: Record<string, GenericLanguage> = { py: "python", js: "javascript", java: "java", c: "c", cpp: "c++", cc: "c++", cxx: "c++" };
+const extensions: Record<string, GenericLanguage> = { py: "python", js: "javascript", mjs: "javascript", cjs: "javascript", java: "java", c: "c", cpp: "c++", cc: "c++", cxx: "c++" };
 
 /** Resolve Java's runtime name only when the declared package agrees with
  * the submitted path. A mismatch is held instead of guessing a classpath. */
@@ -51,7 +51,7 @@ export function planGenericRepoExecution(files: readonly { path: string; bytes: 
       // A conventional filename alone also describes empty files and library
       // modules. Require an explicit command-line entry guard or visible output
       // operation; this is still a heuristic, not proof that tests ran.
-      if (language === "javascript") return (name === "main.js" || name === "index.js")
+      if (language === "javascript") return /^(?:main|index)\.(?:js|mjs|cjs)$/.test(name)
         && !/\b(?:module\s*\.\s*exports|exports\s*(?:\.|\[))/.test(content)
         && (/\brequire\s*\.\s*main\s*===?\s*module\b/.test(content)
           || /\bconsole\s*\.\s*(?:log|info|warn|error)\s*\(/.test(content)

@@ -25,6 +25,17 @@ describe("generic execution planning", () => {
       expect(planGenericRepoExecution([item]).held).toHaveLength(1);
     }
   });
+  it.each(["mjs", "cjs"])("plans a conventional .%s executable with Node", extension => {
+    expect(planGenericRepoExecution([f(`lab/main.${extension}`, "console.log('ready')")])).toEqual({
+      runs: [{ language: "javascript", entryPoint: `lab/main.${extension}`, selection: "heuristic" }], held: [],
+    });
+  });
+  it("holds conflicting Node module entry points and never assumes a module library ran", () => {
+    expect(planGenericRepoExecution([f("lab/main.mjs", "console.log(1)"), f("lab/index.cjs", "console.log(2)")]).held)
+      .toEqual([{ language: "javascript", reason: "ambiguous" }]);
+    expect(planGenericRepoExecution([f("lab/main.cjs", "module.exports = {}")]).held)
+      .toEqual([{ language: "javascript", reason: "no-entry-point" }]);
+  });
   it("does not select empty or exported JavaScript modules by conventional filename", () => {
     for (const name of ["main.js", "index.js"]) {
       for (const content of ["", "module.exports = {}", "exports.value = 1"]) {

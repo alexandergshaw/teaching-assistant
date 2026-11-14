@@ -224,3 +224,28 @@ it("deletes a possibly created stable ID after an unacknowledged create and reta
   const blank = harness(); const blankId = blank.controller.add()!; await blank.controller.remove(blankId);
   expect(blank.adapters.remove).not.toHaveBeenCalled(); blank.controller.dispose();
 });
+
+it("keeps one ready paste field without losing local edits or duplicating it", async () => {
+  const { controller: c } = harness();
+  c.ensureBlank();
+  expect(c.getState().cards).toHaveLength(0);
+  await c.load();
+  c.ensureBlank(); c.ensureBlank();
+  expect(c.getState().cards).toHaveLength(1);
+  const first = c.getState().cards[0].id;
+  c.edit(first, "exemplarText", "A prior announcement");
+  c.ensureBlank(); c.ensureBlank();
+  expect(c.getState().cards).toHaveLength(2);
+  expect(c.getState().cards.find(card => card.id === first)?.exemplarText).toBe("A prior announcement");
+  expect(c.dirty()).toBe(true);
+  const blank = c.getState().cards.find(card => card.id !== first)!;
+  c.edit(blank.id, "exemplarText", "");
+  expect(c.getState().cards.find(card => card.id === blank.id)?.error).toBeNull();
+  expect(await c.remove(blank.id)).toBe(true);
+  c.ensureBlank(); c.ensureBlank();
+  expect(c.getState().cards).toHaveLength(2);
+  expect(c.getState().cards.find(card => card.id === first)?.exemplarText).toBe("A prior announcement");
+  const other = harness().controller; await other.load(); other.ensureBlank();
+  expect(other.getState().cards).toHaveLength(1);
+  other.dispose(); c.dispose();
+});

@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, TextField, Dialog, DialogTitle, DialogContent, DialogActions } from "@mui/material";
 import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
@@ -7,9 +7,9 @@ import { type AnnouncementLibraryController, type LibraryState, importAnnounceme
 import { useAnnouncementLibraryDeparture } from "./useAnnouncementLibrary";
 import PreviousAnnouncementEditor from "./PreviousAnnouncementEditor";
 import type { TemplateChoice } from "./announcement-draft-slots";
-export default function AnnouncementLibrary({ controller, state, enabled, canAddDraft, showAddDraft = true, addDraft, onRemoved }: {
+export default function AnnouncementLibrary({ controller, state, enabled, canAddDraft, showAddDraft = true, addDraft, onUseDraft, onRemoved }: {
   controller: AnnouncementLibraryController; state: LibraryState; enabled: boolean; canAddDraft: boolean; showAddDraft?: boolean;
-  addDraft: (choice: TemplateChoice) => void; onRemoved: (id: string) => void;
+  addDraft: (choice: TemplateChoice) => void; onUseDraft?: (choice: TemplateChoice) => void; onRemoved: (id: string) => void;
 }) {
   const departure = useAnnouncementLibraryDeparture(controller);
   const addButton = useRef<HTMLButtonElement>(null);
@@ -17,6 +17,9 @@ export default function AnnouncementLibrary({ controller, state, enabled, canAdd
   const [armed, setArmed] = useState<string | null>(null);
   const [importErrors, setImportErrors] = useState<string[]>([]);
   function add() { const id = controller.add(); requestAnimationFrame(() => { if (id) bodyInputs.current.get(id)?.focus(); }); }
+  useEffect(() => {
+    if (enabled) controller.ensureBlank();
+  }, [controller, enabled, state.cards, state.load]);
   async function importFiles(files: FileList | null) {
     const result = await importAnnouncementLibraryFiles(controller, Array.from(files ?? []));
     if (!controller.isDisposed()) setImportErrors(result.errors);
@@ -32,28 +35,32 @@ export default function AnnouncementLibrary({ controller, state, enabled, canAdd
       <DialogContent>Unsaved or unconfirmed changes may be lost. Stay to save or retry, or discard your local changes.</DialogContent>
       <DialogActions><Button onClick={departure.stay}>Stay</Button><Button onClick={departure.discard}>Discard changes</Button></DialogActions>
     </Dialog>
-    <p>Paste previous announcements here to save them for this course. They save automatically; choose one under Format to use its style in a new draft.</p>
+    <p>Paste a previous announcement below. It saves automatically for this course and can be used as a draft format.</p>
     <p>Each announcement: at most 16,000 characters and 32 KiB of text. Labels: at most 120 characters.</p>
     {!enabled ? <p>Select a course and sign in to edit its library.</p> : <>
       <div role="status" aria-live="polite">
         {state.load === "loading" && "Loading announcements..."}
-        {state.load === "loaded" && state.cards.length === 0 && "No previous announcements saved yet. Add one to paste its text."}
+        {state.load === "loaded" && state.cards.length === 0 && "Preparing a field for your announcement."}
         {state.load === "failed" && "Could not load announcements."}
         {state.load === "timedout" && "Loading is taking longer than expected."}
       </div>
       {(state.load === "failed" || state.load === "timedout") && <Button size="small" variant="outlined" type="button" onClick={() => void controller.load()}>Retry loading announcements</Button>}
       <Button size="small" variant="outlined" type="button" ref={addButton} onClick={add}>Add previous announcement</Button>
-      <label>Import TXT or MD files <input type="file" accept=".txt,.md,text/plain,text/markdown" multiple onChange={e => { void importFiles(e.target.files); e.target.value = ""; }} /></label>
+      <Button component="label" size="small" variant="outlined">Import TXT or MD files<input hidden type="file" accept=".txt,.md,text/plain,text/markdown" multiple onChange={e => { void importFiles(e.target.files); e.target.value = ""; }} /></Button>
       {importErrors.map((error, index) => <p role="alert" key={index}>{error}</p>)}
-      {state.cards.map((card, index) => <section className={`${styles.card} ${styles.form}`} key={card.id} aria-label={`Announcement ${index + 1}`}>
-        <TextField fullWidth size="small" id={`library-label-${card.id}`} label={`Previous announcement ${index + 1} label (optional)`}
-          value={card.label} disabled={card.deleting} onChange={e => controller.edit(card.id, "label", e.target.value)} />
+      {[...state.cards].sort((a, b) => Number(!!b.local) - Number(!!a.local)).map((card, index) => <section className={`${styles.card} ${styles.form}`} key={card.id} aria-label={`Announcement ${index + 1}`}>
+        <p className={styles.fieldHint}>Paste previous announcement {index + 1}</p>
         <PreviousAnnouncementEditor label={`Paste previous announcement ${index + 1}`} value={card.exemplarText} disabled={card.deleting}
           inputRef={node => { if (node) bodyInputs.current.set(card.id, node); else bodyInputs.current.delete(card.id); }}
           onChange={value => controller.edit(card.id, "exemplarText", value)} />
+        <TextField fullWidth size="small" id={`library-label-${card.id}`} label={`Previous announcement ${index + 1} label (optional)`}
+          value={card.label} disabled={card.deleting} onChange={e => controller.edit(card.id, "label", e.target.value)} />
         <p role="status" aria-live="polite">{card.deleting ? "Removing..." : card.status}</p>
         {card.error && <p role="alert">{card.error}</p>}
         {card.status === "Could not save" && <Button size="small" variant="outlined" type="button" disabled={card.deleting} onClick={() => void controller.retry(card.id)}>Retry saving announcement {index + 1}</Button>}
+        {onUseDraft && <Button size="small" variant="outlined" type="button" disabled={card.status !== "Saved" || card.deleting} onClick={() => {
+          const entry = card.acknowledged; if (entry) onUseDraft({ kind: "saved", exemplarId: entry.id, label: entry.label || "Untitled announcement", outline: entry.outline });
+        }}>Use for weekly overview</Button>}
         {showAddDraft && <Button size="small" variant="outlined" type="button" aria-label={`Add a draft from this announcement ${index + 1}`} disabled={!canAddDraft || card.status !== "Saved" || card.deleting} onClick={() => {
           const entry = card.acknowledged; if (entry) addDraft({ kind: "saved", exemplarId: entry.id, label: entry.label || "Untitled announcement", outline: entry.outline });
         }}>Add a draft from this</Button>}

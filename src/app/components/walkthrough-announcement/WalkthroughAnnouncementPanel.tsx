@@ -524,6 +524,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       {pairPreferences.notice && <p role="status">{pairPreferences.notice}</p>}
       <AnnouncementLibrary key={library.scopeKey} controller={library.controller} state={library.state} enabled={library.enabled}
         canAddDraft={slots.length < MAX_ANNOUNCEMENT_BATCH_SIZE} addDraft={choice => addSlot(choice, "beginning-of-week")}
+        onUseDraft={slots.some(slot => slot.id === "wta-slot-1" && slot.draft.phase === "empty" && (slot.choice.kind === "default" || slot.choice.kind === "unresolved")) ? choice => pairPreferences.choose("wta-slot-1", choice) : undefined}
         onRemoved={() => { /* Keep selections visible; unavailable IDs block generation. */ }} />
 
       <fieldset className={controls.section}>

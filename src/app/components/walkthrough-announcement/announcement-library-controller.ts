@@ -3,7 +3,7 @@ import { ANNOUNCEMENT_LIBRARY_MAX_BODY_CHARS, ANNOUNCEMENT_LIBRARY_MAX_BODY_BYTE
 import type { AnnouncementLibraryEntry, AnnouncementLibrarySnapshot, SaveAnnouncementLibraryInput, AnnouncementLibraryResult } from "@/lib/announcement-library-types";
 import { recordLibraryDiagnostic, type LibraryOperation, type LibraryCode } from "./announcement-library-diagnostics";
 export type LibraryCard = { id: string; exemplarText: string; label: string; acknowledged: AnnouncementLibraryEntry | null;
-  status: "Unsaved" | "Saving" | "Saved" | "Could not save"; error: string | null; deleting: boolean };
+  status: "Unsaved" | "Saving" | "Saved" | "Could not save"; error: string | null; deleting: boolean; local?: boolean };
 export type LibraryState = { cards: readonly LibraryCard[]; load: "loading" | "loaded" | "failed" | "timedout" };
 export interface LibraryAdapters {
   list(courseId: string): Promise<AnnouncementLibraryResult<AnnouncementLibraryEntry[]>>;
@@ -90,11 +90,11 @@ export function createAnnouncementLibraryController(courseId: string, adapters: 
   function add(body = "", label = "") {
     if (disposed) return null;
     const id = (options.uuid ?? (() => crypto.randomUUID()))();
-    state = { ...state, cards: [...state.cards, { id, exemplarText: body, label, acknowledged: null, status: "Unsaved", error: body || label ? libraryValidation(body, label) : null, deleting: false }] }; emit();
+    state = { ...state, cards: [...state.cards, { id, exemplarText: body, label, acknowledged: null, status: "Unsaved", error: body || label ? libraryValidation(body, label) : null, deleting: false, local: true }] }; emit();
     if (body.trim()) schedule(id); return id;
   }
   function edit(id: string, field: "label" | "exemplarText", value: string) {
-    const card = cardFor(id); if (disposed || !card || card.deleting) return;
+    const card = cardFor(id); if (disposed || !card || card.deleting || card[field] === value) return;
     const next = { ...card, [field]: value };
     const status = pending.has(id) ? (card.status === "Could not save" ? "Could not save" : "Saving") : uncertain.has(id) ? "Could not save" : current(next) ? "Saved" : "Unsaved";
     patch(id, { [field]: value, status, error: uncertain.has(id) && !pending.has(id) ? "The last save has an unknown outcome. Retry to reconcile before drafting." : null });
@@ -112,7 +112,11 @@ export function createAnnouncementLibraryController(courseId: string, adapters: 
     if (!result.ok) { patch(id, { deleting: false, error: "Could not remove. Retry removal." }); return false; }
     deleted.add(id); state = { ...state, cards: state.cards.filter(c => c.id !== id) }; emit(); return true;
   }
-  return { getState: () => state, load, add, edit, retry: async (id: string) => {
+  function ensureBlank() {
+    if (disposed || state.load !== "loaded" || state.cards.some(card => !card.acknowledged && !card.exemplarText && !card.label && !card.deleting)) return;
+    add();
+  }
+  return { getState: () => state, load, add, ensureBlank, edit, retry: async (id: string) => {
       if (disposed || pending.has(id)) return;
       const unknown = uncertain.get(id);
       if (unknown) {

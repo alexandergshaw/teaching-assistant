@@ -88,10 +88,41 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
       </Box>
     </div>
     {draft && <Alert severity="warning" role="status">
-      Unscored provisional draft: test execution was not verified. Unexamined optional binary files: {draft.unexamined_artifacts?.map((item) => item.path).join(", ")}.
-      These files were not executed or assessed. Instructor review is required.
+      Unscored provisional draft: test coverage was not verified. {draft.unexamined_artifacts?.length ? `Unexamined optional binary files: ${draft.unexamined_artifacts.map((item) => item.path).join(", ")}. These files were not assessed.` : "No optional files were excluded."}
+      Instructor review is required.
     </Alert>}
     {draft && courseId && <RepoGradeInstructorReview key={draft.generation} courseId={courseId} generation={draft.generation} sourceSha={draft.commit} areas={(draft.rubric ?? []).map(item => item.area)} />}
+    {draft?.module12_evidence && <FeedbackDisclosure compact title="Execution observations" label={`Execution observations: ${repo.name} / ${folder}`}>
+      <Typography component="p" variant="body2">Coverage and source equivalence are unverified. Output is supplied by the submission and may be misleading.</Typography>
+      {draft.module12_evidence.sourceReceipts.map(item => <Typography component="p" variant="body2" key={item.sourcePath}>
+        {item.sourcePath}: compile {item.compileState}, exit {item.compileExit ?? "not reported"}; run {item.runState}, exit {item.runExit ?? "not reported"}.
+      </Typography>)}
+      {draft.module12_evidence.artifactReceipts.map(item => <Typography component="p" variant="body2" key={item.path}>
+        {item.path}: {item.executionStatus}; exit {item.exit ?? "not run"}.
+      </Typography>)}
+    </FeedbackDisclosure>}
+    {scored?.unexamined_artifacts?.length ? <Alert severity="warning" role="status">
+      Unexamined optional binary files: {scored.unexamined_artifacts.map((item) => item.path).join(", ")}.
+      Correctness and equivalence to source were not established. Feedback copying is unavailable for this result while the omitted files require review.
+    </Alert> : null}
+    {scored?.module12_evidence && <Alert severity="warning" role="status">
+      This is a provisional model-assessed score based on submitted source and observed execution. Test counts, coverage and binary-to-source equivalence were not independently verified; runtime failures may reflect unavailable dependencies.
+    </Alert>}
+    {scored?.module12_evidence && <FeedbackDisclosure compact title="Execution observations" label={`Execution observations: ${repo.name} / ${folder}`}>
+      {scored.module12_evidence.sourceReceipts.map(item => <Typography component="p" variant="body2" key={item.sourcePath}>
+        {item.sourcePath}: compile {item.compileState}, exit {item.compileExit ?? "not reported"}; run {item.runState}, exit {item.runExit ?? "not reported"}.
+      </Typography>)}
+      {scored.module12_evidence.artifactReceipts.map(item => <Typography component="p" variant="body2" key={item.path}>
+        {item.path}: {item.executionStatus}; exit {item.exit ?? "not run"}. Source equivalence unverified.
+      </Typography>)}
+    </FeedbackDisclosure>}
+    {scored?.execution_receipts?.length ? <FeedbackDisclosure compact title="Execution evidence" label={`Execution evidence: ${repo.name} / ${folder}`}>
+      <Typography component="p" variant="body2">Dependency completeness is unverified. Execution does not establish test count, coverage, or correctness.</Typography>
+      {scored.execution_receipts.map((receipt) => <Typography component="p" variant="body2" key={receipt.sourcePath}>
+        {receipt.sourcePath}: {receipt.language}; {receipt.compile ? `compile exit ${receipt.compile.exitCode}; ` : ""}
+        {receipt.run ? `run exit ${receipt.run.exitCode}` : "not run after compile failure"}; {receipt.compilerVersion}.
+      </Typography>)}
+    </FeedbackDisclosure> : null}
     {draft && <FeedbackDisclosure compact title="Review-only draft" label={`Review-only draft: ${repo.name} / ${folder}`}>
       <RepoResultFeedback repo={repo.name} folder={folder} source="review-only draft"
         feedback={{ overall: draft.feedback ?? "", strengths: draft.feedback_sections?.strengths ?? "", improvements: draft.feedback_sections?.improvements ?? "", resubmitNotice: draft.feedback_sections?.resubmitNotice ?? "" }} rubric={draft.rubric ?? []} />
@@ -126,7 +157,7 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
     </Typography>}
     {!scanStatus && !draft && !provenNoSubmission && !cell?.saved?.scored && cell?.saved?.latest.status !== "no-submission" &&
       <Typography variant="caption" color="text.secondary">Submission unknown</Typography>}
-    {scored && feedback && <RepoResultCopy key={scored.generation} repo={repo.name} folder={folder}
+    {scored && feedback && !scored.unexamined_artifacts?.length && !scored.module12_evidence && <RepoResultCopy key={scored.generation} repo={repo.name} folder={folder}
       source="saved" feedback={feedback} rubric={scored.rubric ?? []} distinguishSource={false} />}
   </>;
 }
@@ -166,7 +197,7 @@ function SavedMatrixResult({ result, repo, folder, feedback, showSource, part, e
             {sections && <p>Original score {sections.rawScore}</p>}
             {scored.feedback !== null && !sections && <p>Saved overall feedback may be shortened.</p>}
             {feedback && <RepoResultFeedback key={scored.generation} repo={repo} folder={folder} source="saved"
-              feedback={feedback} rubric={[]} hideCopyAll />}
+              feedback={feedback} rubric={[]} hideCopyAll disableCopy={!!scored.unexamined_artifacts?.length || !!scored.module12_evidence} />}
           </>
         )}
       </FeedbackDisclosure>}
@@ -184,4 +215,3 @@ function SavedAttemptSource({ attempt, label }: { attempt: RepoGradeSavedAttempt
     </p>
   );
 }
-

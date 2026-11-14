@@ -3,6 +3,7 @@ import "server-only";
 import { isDeepStrictEqual } from "node:util";
 import { requireAppOwner } from "@/lib/supabase/auth";
 import { createServiceClient } from "@/lib/supabase/server";
+import { validModule12Evidence, validModule12EvidenceSummary } from "@/lib/grade/module12-evidence";
 import type { RepoGradeClaimStatus, RepoGradeHistoryRow } from "@/lib/supabase/types.repo-grades-dashboard";
 import {
   isRepoGradeFeedbackField,
@@ -163,13 +164,16 @@ export async function settleRepoGrade(
     if (result.score !== null && (!Number.isFinite(result.score) || result.score < 0 || result.score > 100)) {
       throw new Error("Invalid repository evaluation score");
     }
-    if (result.unexaminedArtifacts && !validUnexaminedArtifacts(result.unexaminedArtifacts)) throw new Error("Invalid unexamined artifact provenance");
-    if ((result.unexaminedArtifacts?.length || result.reviewReason) && (settlement.outcome !== "partial" || result.reviewReason !== "execution-unverified" || !result.unexaminedArtifacts?.length)) throw new Error("Invalid review-only evaluation");
+    if (result.unexaminedArtifacts && result.unexaminedArtifacts.length > 0 && !validUnexaminedArtifacts(result.unexaminedArtifacts)) throw new Error("Invalid unexamined artifact provenance");
+    if (result.reviewReason && (settlement.outcome !== "partial" || result.reviewReason !== "execution-unverified" || !Array.isArray(result.unexaminedArtifacts))) throw new Error("Invalid review-only evaluation");
+    if (result.module12Evidence && !validModule12Evidence(result.module12Evidence, result.module12Evidence.sourceReceipts?.[0]?.repoCommit ?? "")) throw new Error("Invalid execution evidence");
+    if (result.unexaminedArtifacts?.length && !result.reviewReason && !result.module12Evidence) throw new Error("Invalid final execution evidence");
     const field = unretainedRepoGradeFeedbackField(result.feedback, result.sections, result.rubric);
     if (field) throw new Error(`Repository evaluation feedback cannot be retained (${field})`);
   }
   const retention = "feedbackRetention" in settlement ? settlement.feedbackRetention : null;
-  const response = await ledgerRpc("repo_grade_settle", {
+  const evidence = result && "module12Evidence" in result ? result.module12Evidence : undefined;
+  const response = await ledgerRpc(evidence ? (settlement.outcome === "succeeded" ? "repo_grade_settle_scored_observations" : "repo_grade_settle_partial_evidence") : "repo_grade_settle", {
     p_user_id: owner.id,
     p_generation: claim.generation,
     p_token: claim.token,
@@ -177,7 +181,7 @@ export async function settleRepoGrade(
     p_inputs_complete: "inputsComplete" in settlement && settlement.inputsComplete,
     p_score: result?.score ?? null,
     p_feedback: result?.feedback ?? null,
-    ...(result?.unexaminedArtifacts?.length ? { p_unexamined_artifacts: result.unexaminedArtifacts, p_review_reason: result.reviewReason } : {}),
+    ...(evidence ? { p_unexamined_artifacts: result?.unexaminedArtifacts ?? [], ...(settlement.outcome === "partial" && { p_review_reason: result?.reviewReason }), p_source_sha: evidence.sourceReceipts[0].repoCommit, p_evidence: evidence } : result?.reviewReason ? { p_unexamined_artifacts: result.unexaminedArtifacts ?? [], p_review_reason: result.reviewReason } : {}),
     p_rubric: result?.rubric.map(({ area, score, comment }) => ({ area, score, comment })) ?? null,
     ...(claim.mode !== "manual" && {
       p_feedback_sections: result ? {
@@ -245,7 +249,8 @@ function validHistoryRow(row: unknown): row is RepoGradeHistoryRow {
     || !validDate(row.claimed_at)
     || (row.settled_at !== null && !validDate(row.settled_at))
     || (row.reconciled_at !== null && !validDate(row.reconciled_at))) return false;
-  if (row.unexamined_artifacts != null && (row.score !== null || row.status !== "partial" || row.review_reason !== "execution-unverified" || !validUnexaminedArtifacts(row.unexamined_artifacts))) return false;
+  if (row.module12_evidence != null && (!((row.status === "partial" && row.score === null && row.review_reason === "execution-unverified") || (row.status === "succeeded" && row.score !== null && row.review_reason == null)) || !validModule12EvidenceSummary(row.module12_evidence))) return false;
+  if (row.unexamined_artifacts != null && (!Array.isArray(row.unexamined_artifacts) || (row.unexamined_artifacts.length > 0 && !validUnexaminedArtifacts(row.unexamined_artifacts)) || (row.score === null ? row.status !== "partial" || row.review_reason !== "execution-unverified" : row.status !== "succeeded" || row.module12_evidence == null))) return false;
   if (row.review_reason != null && (row.review_reason !== "execution-unverified" || row.unexamined_artifacts == null)) return false;
   if (row.feedback_retention != null
     && (row.status !== "partial" || row.score !== null || !isRepoGradeFeedbackField(row.feedback_retention))) return false;

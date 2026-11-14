@@ -278,6 +278,8 @@ export async function readRepoGradeHistoryAction(courseId: string, expectedAccou
         feedback: row.feedback,
         feedback_sections: row.feedback_sections ?? null,
         unexamined_artifacts: row.unexamined_artifacts ?? null,
+        execution_receipts: row.execution_receipts ?? null,
+        module12_evidence: row.module12_evidence ?? null,
         review_reason: row.review_reason ?? null,
         feedback_retention: row.feedback_retention ?? null,
         rubric: row.rubric,

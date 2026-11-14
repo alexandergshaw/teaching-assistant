@@ -25,6 +25,8 @@ export type RepoGradeFeedbackSections = {
 export type RepoGradeFeedbackField = keyof RepoGradeFeedbackSections | "overall" | "rubric";
 
 export type RepoGradeUnexaminedArtifact = { path: string; reason: "optional-binary-unexamined" };
+import type { Module12ExecutionReceipt } from "@/lib/grade/module12-receipt";
+import type { Module12Evidence, Module12EvidenceSummary } from "@/lib/grade/module12-evidence";
 
 export type RepoGradeResultRecord = {
   sourceExecutionSummary?: string;
@@ -32,6 +34,8 @@ export type RepoGradeResultRecord = {
   feedback: string;
   sections: RepoGradeFeedbackSections;
   unexaminedArtifacts?: RepoGradeUnexaminedArtifact[];
+  executionReceipts?: Module12ExecutionReceipt[];
+  module12Evidence?: Module12Evidence;
   reviewReason?: "execution-unverified";
   rubric: Array<{ area: string; score: string; comment: string }>;
 };
@@ -58,6 +62,8 @@ export type RepoGradeHistoryRow = {
   feedback_sections?: RepoGradeFeedbackSections | null;
   feedback_retention?: RepoGradeFeedbackField | null;
   unexamined_artifacts?: RepoGradeUnexaminedArtifact[] | null;
+  execution_receipts?: Module12ExecutionReceipt[] | null;
+  module12_evidence?: Module12EvidenceSummary | null;
   review_reason?: "execution-unverified" | null;
 };
 

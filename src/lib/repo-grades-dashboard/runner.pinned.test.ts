@@ -13,12 +13,14 @@ import { beginRepoGradeDispatch, checkRepoGradeTargetDispatch, claimRepoGrade, s
 import { captureRepoGradeProfile, resolveRepoGradeRubric } from "./profile";
 import { runRepoGradeTarget } from "./runner";
 import { runModule12SandboxSource } from "@/lib/grade/module12-vercel-sandbox";
+import { inspectModule12Binary } from "@/lib/grade/module12-binary-sandbox";
 
 vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn() }));
 vi.mock("@/lib/grade/inline-visuals", () => ({ collectInlineVisualEvidence: vi.fn() }));
 vi.mock("./ledger", () => ({ beginRepoGradeDispatch: vi.fn(), checkRepoGradeTargetDispatch: vi.fn(), claimRepoGrade: vi.fn(), settleRepoGrade: vi.fn() }));
 vi.mock("./admission-mode", () => ({ repoGradeAdmissionMode: vi.fn() }));
 vi.mock("@/lib/grade/module12-vercel-sandbox", () => ({ runModule12SandboxSource: vi.fn() }));
+vi.mock("@/lib/grade/module12-binary-sandbox", () => ({ inspectModule12Binary: vi.fn() }));
 
 const model = "gemini-test-version";
 const sha = "a".repeat(40);
@@ -179,6 +181,14 @@ beforeEach(() => {
   vi.mocked(beginRepoGradeDispatch).mockResolvedValue(60_000);
   vi.mocked(checkRepoGradeTargetDispatch).mockResolvedValue(true);
   vi.mocked(settleRepoGrade).mockResolvedValue(true);
+  vi.mocked(inspectModule12Binary).mockImplementation(async (input) => {
+    await input.beforeDispatch(input.signal);
+    const stage = { command: "test", exitCode: 0, termination: null, stdout: "", stderr: "", stdoutTruncated: false, stderrTruncated: false };
+    return { path: input.path, repoCommit: input.repoCommit, sha256: createHash("sha256").update(input.bytes).digest("hex"),
+      kind: input.path.endsWith(".pyc") ? "python-bytecode" : "java-class", image: "sandbox-image", networkPolicy: "deny-all",
+      toolVersion: stage, runtimeVersion: stage, metadata: stage, executionStatus: "observed", execution: stage,
+      sourceEquivalence: "unverified", testCoverage: "unverified" };
+  });
   vi.mocked(runModule12SandboxSource).mockImplementation(async (input) => {
     await input.beforeDispatch(input.signal);
     const language = input.path.endsWith(".py") ? "python" : input.path.endsWith(".java") ? "java" : "c++";
@@ -235,7 +245,8 @@ it.each(actualRubrics)("carries the exact reviewed rubric through evaluator, fen
   addRepoGradeSavedPage(attempts, [{ generation: 7, repo: actualRepo, folder: actualFolder, sourceRef: "main", commit: sha,
     profileFingerprint: "b".repeat(64), status: "partial", claimedAt: "2026-11-13T10:00:00Z", settledAt: "2026-11-13T10:01:00Z",
     score: null, feedback: result.feedback, feedback_sections: result.sections, rubric: result.rubric,
-    unexamined_artifacts: result.unexaminedArtifacts ?? null, review_reason: result.reviewReason ?? null, feedback_retention: null }]);
+    unexamined_artifacts: result.unexaminedArtifacts ?? null, review_reason: result.reviewReason ?? null, feedback_retention: null,
+    execution_receipts: null, module12_evidence: null }]);
   const saved = [...attempts.values()][0];
   const oldCheck = { repo: actualRepo, folder: actualFolder, sourceRef: "main", explanation: "", noSubmissionStale: true as const,
     observedSourceSha: sha, observedRunStartedAt: "2026-11-13T10:00:00Z" };
@@ -250,7 +261,7 @@ it.each(actualRubrics)("carries the exact reviewed rubric through evaluator, fen
   const unresolved = renderToStaticMarkup(createElement(RepoGradeResultDetails, { repo: repo as never, folder: actualFolder }));
   expect(unresolved).toContain("A later check used a different repository revision");
 });
-it("holds the score when process exits cannot establish that student tests ran", async () => {
+it("retains uncertainty with a source-assessed score and holds a failed execution", async () => {
   const rubric = actualRubrics[0];
   const names = [...rubric.matchAll(/^(.+?) \(25%\):/gm)].map((match) => match[1]);
   const sources = ["test_utils.py", "TestUtils.java", "test_utils.cpp", "TestUtils.class", "__pycache__/test_utils.cpython-314.pyc"].map((name) => ({ ...files.submission, path: `${actualFolder}/${name}` }));
@@ -269,7 +280,7 @@ it("holds the score when process exits cannot establish that student tests ran",
     cohortId: "8d74ee61-463c-4b3f-af5d-5fc9b55023c1", preparedReadme: { path: null, instructions: actualInstructor, template: true } })) };
   expect(await runRepoGradeTarget(actualPlan, actualTarget, { ...runtime, deadlineMs: Date.now() + 100_000 })).toMatchObject({ status: "runtime-unavailable" });
   expect(claimRepoGrade).not.toHaveBeenCalled();
-  expect(await runRepoGradeTarget(actualPlan, actualTarget, runtime)).toMatchObject({ status: "partial", reason: "execution-unverified" });
+  expect(await runRepoGradeTarget(actualPlan, actualTarget, runtime)).toMatchObject({ status: "succeeded" });
   const calls = vi.mocked(runModule12SandboxSource).mock.calls;
   expect(calls).toHaveLength(3);
   expect(calls.map(([input]) => input.path.split("/").at(-1)).sort()).toEqual(["TestUtils.java", "test_utils.cpp", "test_utils.py"]);
@@ -279,10 +290,7 @@ it("holds the score when process exits cannot establish that student tests ran",
   expect(String(modelCall?.[1].body)).toContain("Execution observations follow as JSON");
   expect(String(modelCall?.[1].body)).toContain("zero exit is not proof");
   const settlement = vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1];
-  expect(settlement).toMatchObject({ outcome: "partial", result: { score: null, reviewReason: "execution-unverified" } });
-  if (!settlement || !("result" in settlement)) throw new Error("Missing draft settlement");
-  expect(settlement.result.feedback).toContain("Unexamined binary files");
-  expect(settlement.result.feedback).toContain("__pycache__/test_utils.cpython-314.pyc");
+  expect(settlement).toMatchObject({ outcome: "succeeded", result: { module12Evidence: { coverage: { status: "unverified" }, artifactReceipts: expect.arrayContaining([expect.objectContaining({ path: `${actualFolder}/__pycache__/test_utils.cpython-314.pyc` })]) } } });
   const implementation = vi.mocked(runModule12SandboxSource).getMockImplementation()!;
   vi.mocked(runModule12SandboxSource).mockImplementationOnce(async (input) => {
     const value = await implementation(input);

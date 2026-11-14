@@ -127,13 +127,14 @@ export function RepoResultCopy({ repo, folder, source, feedback, distinguishSour
   );
 }
 
-export function RepoResultFeedback({ repo, folder, source, feedback, rubric, hideCopyAll = false }: {
+export function RepoResultFeedback({ repo, folder, source, feedback, rubric, hideCopyAll = false, disableCopy = false }: {
   repo: string;
   folder: string;
   source: string;
   feedback: FeedbackBoxesEdit;
   rubric: readonly Readonly<RepoGradeCellEdit["rubricAreas"][number]>[];
   hideCopyAll?: boolean;
+  disableCopy?: boolean;
 }) {
   const hasComment = Object.values(feedback).some((value) => value.trim() !== "");
   const target = `${source} feedback for ${repo}, ${folder || "repository root"}`;
@@ -141,7 +142,7 @@ export function RepoResultFeedback({ repo, folder, source, feedback, rubric, hid
   if (!hasComment && rubric.length === 0) return null;
   return (
     <>
-      {hasComment && !hideCopyAll && (
+      {hasComment && !hideCopyAll && !disableCopy && (
         <Button type="button" size="small" aria-label={`Copy ${target}`}
           onClick={() => void copy("all", copyAllFeedbackText(feedback), "all")}>
           {copiedKey === "all" ? "Copied" : "Copy feedback"}
@@ -161,20 +162,20 @@ export function RepoResultFeedback({ repo, folder, source, feedback, rubric, hid
         {feedback.overall && (
           <>
             <p className={styles.feedbackText}>{feedback.overall}</p>
-            <Button type="button" size="small" aria-label={`Copy overall ${target}`}
+            {!disableCopy && <Button type="button" size="small" aria-label={`Copy overall ${target}`}
               onClick={() => void copy("overall", formatFeedback(feedback.overall), "overall")}>
               {copiedKey === "overall" ? "Copied" : "Copy overall feedback"}
-            </Button>
+            </Button>}
           </>
         )}
         {FEEDBACK_FIELDS.map((field) => feedback[field] && (
           <div key={field}>
             <p>{FEEDBACK_FIELD_META[field].fieldLabel}</p>
             <p className={styles.feedbackText}>{feedback[field]}</p>
-            <Button type="button" size="small" aria-label={`Copy ${FEEDBACK_FIELD_META[field].descriptorLower} from ${target}`}
+            {!disableCopy && <Button type="button" size="small" aria-label={`Copy ${FEEDBACK_FIELD_META[field].descriptorLower} from ${target}`}
               onClick={() => void copy(field, formatFeedback(feedback[field]), field)}>
               {copiedKey === field ? "Copied" : `Copy ${FEEDBACK_FIELD_META[field].fieldLabel}`}
-            </Button>
+            </Button>}
           </div>
         ))}
       </FeedbackDisclosure>

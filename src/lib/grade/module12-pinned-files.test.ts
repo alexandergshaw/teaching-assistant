@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({ tree: vi.fn(), bytes: vi.fn() }));
 vi.mock("@/lib/github.repos", () => ({ getRepoCommitTree: api.tree }));
 vi.mock("@/lib/github-grade-archive", () => ({ makePinnedArchiveBytesReader: () => api.bytes }));
-import { readModule12PinnedFiles } from "./module12-pinned-files";
+import { readModule12PinnedFiles, readModule12PinnedArtifacts } from "./module12-pinned-files";
 
 const folder = "assignments/module_12";
 const paths = ["test_utils.py", "TestUtils.java", "test_utils.cpp", "helper.txt", "TestUtils.class"].map((name) => `${folder}/${name}`);
@@ -30,4 +30,16 @@ it("holds unreadable files and missing raw bytes rather than executing a subset"
   await expect(readModule12PinnedFiles({ ...input, inventory: { ...input.inventory, files: input.inventory.files.map((file, i) => i === 3 ? { ...file, content: "unsupported" as const } : file) } })).rejects.toThrow("unreadable");
   api.bytes.mockResolvedValueOnce(new Map());
   await expect(readModule12PinnedFiles(input)).rejects.toThrow("bytes are incomplete");
+});
+it("reads only exact pinned artifact entries after validating the complete tree", async () => {
+  const files = await readModule12PinnedArtifacts(input);
+  expect(files).toEqual([{ path: paths[4], bytes: Buffer.from("x") }]);
+  expect(api.bytes).toHaveBeenCalledWith([entries[4]], input.signal);
+  api.tree.mockResolvedValueOnce({ entries, truncated: true });
+  await expect(readModule12PinnedArtifacts(input)).rejects.toThrow("Incomplete pinned repository tree");
+});
+it("rejects mismatched inventory or missing pinned artifact bytes", async () => {
+  await expect(readModule12PinnedArtifacts({ ...input, inventory: { ...input.inventory, files: input.inventory.files.slice(0, 4) } })).rejects.toThrow("inventory does not match");
+  api.bytes.mockResolvedValueOnce(new Map());
+  await expect(readModule12PinnedArtifacts(input)).rejects.toThrow("bytes are incomplete");
 });

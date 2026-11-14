@@ -10,6 +10,7 @@ import { createGradeCallSink } from "@/lib/grade/grade-item-diagnostic";
 import type { LlmExecutionPolicy } from "@/lib/llm";
 import { parseEarnedPossibleScore } from "@/lib/grade/parsing";
 import { isUngraded } from "@/lib/grade/types";
+import { validModule12Evidence } from "@/lib/grade/module12-evidence";
 import { requireAppOwner } from "@/lib/supabase/auth";
 import { table } from "@/lib/supabase/courses.row";
 import type {
@@ -208,6 +209,15 @@ function classifyEvaluation(
   if (response.rubric !== rubric) {
     return { status: "unknown", settlement: { outcome: "unknown" } };
   }
+  const rawEvidence = "module12Evidence" in response ? response.module12Evidence : undefined;
+  if (rawEvidence !== undefined && !validModule12Evidence(rawEvidence, sourceCommit)) {
+    return { status: "partial", reason: "execution-unverified", settlement: { outcome: "partial" } };
+  }
+  const observationEligible = !!rawEvidence && response.assessmentMode === "source-model-with-observations"
+    && rawEvidence.sourceReceipts.every(item => (!item.compile || (item.compile.exitCode === 0 && !item.compile.signal && !item.compile.timedOut))
+      && item.run?.exitCode === 0 && !item.run.signal && !item.run.timedOut)
+    && rawEvidence.artifactReceipts.every(item => (item.executionStatus === "unsupported-platform" && item.kind === "pe")
+      || (item.executionStatus === "observed" && item.execution?.exitCode === 0 && !item.execution.termination));
   const [grade] = response.run.results;
   if (response.run.results.length !== 1 || !grade) {
     return { status: "unknown", settlement: { outcome: "unknown" } };
@@ -224,11 +234,23 @@ function classifyEvaluation(
   if (!fraction || fraction.earned < 0 || fraction.earned > fraction.possible || grade.determination) {
     return { status: "ungraded", settlement: { outcome: "failed" } };
   }
+  const allowedAreas = [
+    ["Function Implementation", "Test Coverage Quantity", "Test Case Quality", "Code Organization and Testing Practice"],
+    ["Function Implementation", "Test Suite Completeness", "Test Coverage (Normal/Edge/Invalid)", "Code Structure and Style"],
+  ];
+  const scores = grade.rubricAreas.map(item => /^([0-9]+(?:\.[0-9]+)?)\s*\/\s*25(?:\.0+)?$/.exec(item.score));
+  const rubricTotal = scores.reduce((sum, match) => sum + (match ? Number(match[1]) : 0), 0);
+  const modelAssessmentEligible = observationEligible && fraction.possible === 100
+    && allowedAreas.some(areas => rubric.includes(`${areas[1]} (25%)`) && JSON.stringify(areas) === JSON.stringify(grade.rubricAreas.map(item => item.area)))
+    && scores.every(match => match && Number(match[1]) <= 25)
+    && Math.abs(rubricTotal - fraction.earned) < 1e-8;
   const result: RepoGradeResultRecord = {
     score: (fraction.earned / fraction.possible) * 100,
     feedback: grade.overallComment,
     ...(response.sourceExecutionSummary ? { sourceExecutionSummary: response.sourceExecutionSummary } : {}),
-    ...(response.unexaminedArtifacts?.length ? { unexaminedArtifacts: response.unexaminedArtifacts, ...(response.reviewReason && { reviewReason: response.reviewReason }) } : {}),
+    ...(rawEvidence ? { unexaminedArtifacts: response.unexaminedArtifacts ?? [], module12Evidence: rawEvidence,
+      ...(!modelAssessmentEligible && { reviewReason: "execution-unverified" as const }) }
+      : response.reviewReason ? { unexaminedArtifacts: response.unexaminedArtifacts ?? [], reviewReason: response.reviewReason } : {}),
     sections: {
       strengths: grade.strengths, improvements: grade.improvements,
       resubmitNotice: grade.resubmitNotice, rawScore: grade.totalScore,
@@ -242,10 +264,10 @@ function classifyEvaluation(
       settlement: { outcome: "partial", feedbackRetention },
     };
   }
-  if (result.reviewReason === "execution-unverified" && result.unexaminedArtifacts?.length) {
+  if (result.reviewReason === "execution-unverified" && Array.isArray(result.unexaminedArtifacts)) {
     const draft = buildUnverifiedExecutionDraft(result);
     if (!draft) return { status: "partial", reason: "unsupported-submission", settlement: { outcome: "partial" } };
-    return { status: "partial", reason: "execution-unverified", settlement: { outcome: "partial", inputsComplete: true, result: draft } };
+    return { status: "partial", reason: "execution-unverified", settlement: { outcome: "partial", inputsComplete: true, result: { ...draft, ...(rawEvidence && { module12Evidence: rawEvidence }) } } };
   }
   return {
     status: "succeeded",

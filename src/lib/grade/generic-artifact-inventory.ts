@@ -5,7 +5,8 @@ export function genericArtifactInventory(files: readonly {path:string;bytes:Uint
     const b=file.bytes;
     let invalidUtf8=false;
     try { new TextDecoder("utf-8", {fatal:true}).decode(b); } catch { invalidUtf8=true; }
-    const kind=b.length>=4 && b[0]===0x7f && b[1]===0x45 && b[2]===0x4c && b[3]===0x46 ? "elf"
+    const kind=b.length>=8 && b[0]===0 && b[1]===0x61 && b[2]===0x73 && b[3]===0x6d && b[4]===1 && b[5]===0 && b[6]===0 && b[7]===0 ? "wasm"
+      : b.length>=4 && b[0]===0x7f && b[1]===0x45 && b[2]===0x4c && b[3]===0x46 ? "elf"
       : b.length>=4 && b[0]===0xca && b[1]===0xfe && b[2]===0xba && b[3]===0xbe ? "java-class"
         : b.length>=2 && b[0]===0x4d && b[1]===0x5a ? "pe"
           : /\.pyc$/i.test(file.path) ? "python-bytecode"

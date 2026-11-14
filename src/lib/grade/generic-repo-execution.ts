@@ -18,12 +18,12 @@ export async function executeGenericPinnedInventory(input:{folder:string;files:r
   const manifest=input.files.map(f=>({path:f.path,sha256:createHash('sha256').update(f.bytes).digest('hex')}));
   const originalArtifacts=genericArtifactInventory(input.files);
   assertGenericEvidenceCapacity({manifest,plan,artifacts:originalArtifacts});
-  const supported=input.files.flatMap<{file:{path:string;bytes:Uint8Array};kind:'pe'|'elf'|'java-class'|'python-bytecode'}>(file=>{
+  const supported=input.files.flatMap<{file:{path:string;bytes:Uint8Array};kind:'pe'|'elf'|'java-class'|'python-bytecode'|'wasm'}>(file=>{
     const artifact=originalArtifacts.find(a=>a.path===file.path);
     if(!artifact) return [];
     if(artifact.kind==='pe') return isSupportedWindowsPe(file.bytes) ? [{file,kind:'pe' as const}] : [];
-    if(artifact.kind==='elf'||artifact.kind==='java-class'||artifact.kind==='python-bytecode') return isSupportedNativeArtifact(artifact.kind,file.bytes)
-      && (artifact.kind!=='java-class' || !!resolveJavaClass(file.bytes,file.path.slice(input.folder ? input.folder.length+1 : 0))) ? [{file,kind:artifact.kind as 'elf'|'java-class'|'python-bytecode'}] : [];
+    if(artifact.kind==='elf'||artifact.kind==='java-class'||artifact.kind==='python-bytecode'||artifact.kind==='wasm') return isSupportedNativeArtifact(artifact.kind,file.bytes)
+      && (artifact.kind!=='java-class' || !!resolveJavaClass(file.bytes,file.path.slice(input.folder ? input.folder.length+1 : 0))) ? [{file,kind:artifact.kind as 'elf'|'java-class'|'python-bytecode'|'wasm'}] : [];
     return [];
   });
   const controller=new AbortController(),signal=AbortSignal.any([input.signal,controller.signal]);let failure:unknown;

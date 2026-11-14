@@ -11,7 +11,7 @@ export type GeneralExecutionEvidence = {
   coverage: { status: "unverified" };
   /** Supported artifacts not started because the current tick lacked time. */
   continuation?: { manifestSha256: string; paths: string[]; sources?: Array<{entryPoint:string;language:"python" | "javascript" | "java" | "c" | "c++";planSha256:string}> };
-  artifacts: Array<{ path: string; sha256: string; kind: string; status: "unexamined" | "unsupported" } | { path: string; sha256: string; kind: "pe" | "elf" | "java-class" | "python-bytecode"; status: "observed"; repoCommit: string; architecture: "x86_64" | "unknown"; image: string; runtime: "wine" | "native" | "java" | "python"; runtimeVersion: string; networkPolicy: "deny-all"; execution: GeneralStage; sourceEquivalence: "unverified"; coverage: "unverified" }>;
+  artifacts: Array<{ path: string; sha256: string; kind: string; status: "unexamined" | "unsupported" } | { path: string; sha256: string; kind: "pe" | "elf" | "java-class" | "python-bytecode" | "wasm"; status: "observed"; repoCommit: string; architecture: "x86_64" | "unknown"; image: string; runtime: "wine" | "native" | "java" | "python" | "wasi"; runtimeVersion: string; networkPolicy: "deny-all"; execution: GeneralStage; sourceEquivalence: "unverified"; coverage: "unverified" }>;
 };
 export type GeneralExecutionSummary = { policy?: "source-only"; coverage: { status: "unverified" }; held: Array<{ language: string; reason: "ambiguous" | "no-entry-point" }>; runs: Array<{ language: string; entryPoint: string; status: string; compileExit: number | null; runExit: number | null; compileState: string; runState: string }>; artifacts: Array<{ path: string; kind: string; status: string; runtime: string | null; executionExit: number | null; executionState: string }> };
 export type GeneralSourceReview = { overall: string; rubric: Array<{ area: string; comment: string }> };
@@ -52,7 +52,7 @@ export function validGeneralExecutionEvidence(value: unknown): value is GeneralE
   if (e.policy === "source-only" && (e.runs.length || e.held.length || e.artifacts.length)) return false;
   if (new Set(e.runs.map(r => `${r.language}\u0000${r.entryPoint.toLowerCase()}`)).size !== e.runs.length || e.runs.some(r => e.held.some(h => h.language === r.language))) return false;
   return e.artifacts.every(a => a && path(a.path) && hex(a.sha256,64) && e.inputManifest.some(f => f.path === a.path && f.sha256 === a.sha256) && typeof a.kind === "string" && a.kind.length > 0 && a.kind.length <= 64
-    && (a.status === "observed" ? ((a.kind === "pe" && a.runtime === "wine" && a.architecture === "x86_64") || (a.kind === "elf" && a.runtime === "native" && a.architecture === "unknown") || (a.kind === "java-class" && a.runtime === "java" && a.architecture === "unknown") || (a.kind === "python-bytecode" && a.runtime === "python" && a.architecture === "unknown")) && a.repoCommit === e.repoCommit && typeof a.image === "string" && a.image.length > 0 && a.image.length <= 512
+    && (a.status === "observed" ? ((a.kind === "pe" && a.runtime === "wine" && a.architecture === "x86_64") || (a.kind === "elf" && a.runtime === "native" && a.architecture === "unknown") || (a.kind === "java-class" && a.runtime === "java" && a.architecture === "unknown") || (a.kind === "python-bytecode" && a.runtime === "python" && a.architecture === "unknown") || (a.kind === "wasm" && a.runtime === "wasi" && a.architecture === "unknown")) && a.repoCommit === e.repoCommit && typeof a.image === "string" && a.image.length > 0 && a.image.length <= 512
       && typeof a.runtimeVersion === "string" && a.runtimeVersion.length > 0 && a.runtimeVersion.length <= 512 && a.networkPolicy === "deny-all"
       && a.sourceEquivalence === "unverified" && a.coverage === "unverified" && a.execution !== null && stage(a.execution)
       : ["unexamined","unsupported"].includes(a.status)))
@@ -66,7 +66,7 @@ export function validGeneralExecutionSummary(value: unknown): value is GeneralEx
     && e.runs.every(r => r && ["python","javascript","java","c","c++"].includes(r.language) && path(r.entryPoint) && ["observed","unsupported","ambiguous","unavailable"].includes(r.status)
       && exit(r.compileExit) && exit(r.runExit) && ["not-recorded","timed-out","signalled","unknown","completed"].includes(r.compileState) && ["not-recorded","timed-out","signalled","unknown","completed"].includes(r.runState))
     && Array.isArray(e.artifacts) && e.artifacts.length <= 40 && e.artifacts.every(a => a && path(a.path) && typeof a.kind === "string" && a.kind.length <= 64
-      && ["unexamined","unsupported","observed"].includes(a.status) && (a.runtime === null || ["wine","native","java","python"].includes(a.runtime)) && exit(a.executionExit)
+      && ["unexamined","unsupported","observed"].includes(a.status) && (a.runtime === null || ["wine","native","java","python","wasi"].includes(a.runtime)) && exit(a.executionExit)
       && ["not-recorded","timed-out","signalled","unknown","completed"].includes(a.executionState));
 }
 

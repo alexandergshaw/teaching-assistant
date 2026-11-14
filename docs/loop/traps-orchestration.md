@@ -164,6 +164,23 @@ where supported, poll running work without blocking communication for more than
 60 seconds, and report when a tool cannot be interrupted or bounded. These are
 operational instructions, not automatic enforcement.
 
+**Bound a stuck instrument, then return to the request.** In the repository
+grader continuation recorded in `docs/repo-grader-continuation-rca.md`, clean
+database creation calls hung and the owner had to ask again while the general
+grader remained unfinished. For a long-running operation, use a yield or
+timeout of at most 60 seconds where the instrument supports it; retain its
+cell or session identifier and poll rather than starting a duplicate. Report
+meaningful changes and advance the requested implementation or an independent
+required gate while it runs. If a call cannot be bounded or
+interrupted, report that limitation and return to work as soon as it yields.
+For a write whose outcome is unknown, inspect the target state before retrying;
+do not infer failure from elapsed time or repeat a rejected action indirectly.
+If an instrument remains unavailable after a focused alternate route, name the
+exact missing evidence and continue the portions that do not depend on it.
+Before ending the turn, apply the requested-outcome checklist below: a tool
+wait, status update, process note, or additional control is not delivery.
+This is host practice, not an automatic stop hook or a background wakeup.
+
 **A status report is not a completion boundary.** In the 2026-11-08 Codex
 session, the owner asked to finish in-flight work and then add Auto Build. The
 host ended one turn with the first task still running and ended the next after

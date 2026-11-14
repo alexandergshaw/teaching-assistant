@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { Writable } from "node:stream";
+import { finished } from "node:stream/promises";
+import { StringDecoder } from "node:string_decoder";
 import { Sandbox } from "@vercel/sandbox";
 
 /** One fresh VM per source. This returns process evidence, never a grade. */
@@ -65,19 +67,34 @@ export async function runModule12SandboxSource(input: {
     await sandbox.writeFiles(sourceFiles, { signal: input.signal });
     const stage = async (command: readonly [string, readonly string[]]) => {
       let out = "", err = "", outCut = false, errCut = false;
-      const capture = (which: "out" | "err") => new Writable({ write(chunk: Buffer, _enc, done) {
-        const text = chunk.toString("utf8");
-        if (which === "out") { outCut ||= out.length + text.length > 10_000; out = (out + text).slice(0, 10_000); }
-        else { errCut ||= err.length + text.length > 10_000; err = (err + text).slice(0, 10_000); }
-        done();
-      } });
+      const capture = (which: "out" | "err") => {
+        const decoder = new StringDecoder("utf8");
+        const append = (text: string) => {
+          if (which === "out" ? outCut : errCut) return;
+          const previous = which === "out" ? out : err;
+          const combined = previous + text;
+          let next = combined.slice(0, 10_000);
+          // Do not retain half of a supplementary Unicode character.
+          if (next.length && /[\uD800-\uDBFF]/.test(next.at(-1)!)) next = next.slice(0, -1);
+          if (which === "out") { outCut ||= combined.length > next.length; out = next; }
+          else { errCut ||= combined.length > next.length; err = next; }
+        };
+        return new Writable({
+          write(chunk: Buffer, _enc, done) { append(decoder.write(chunk)); done(); },
+          final(done) { append(decoder.end()); done(); },
+        });
+      };
       phase = "dispatch-authorization";
       await input.beforeDispatch(input.signal);
       input.signal.throwIfAborted();
       // writeFiles resolves relative paths against the session's own cwd.
       // Leave cwd unspecified here so commands use that same directory.
       phase = "source-command";
-      const result = await sandbox.runCommand({ cmd: command[0], args: [...command[1]], timeoutMs: 15_000, signal: input.signal, stdout: capture("out"), stderr: capture("err") });
+      const stdout = capture("out"), stderr = capture("err");
+      const result = await sandbox.runCommand({ cmd: command[0], args: [...command[1]], timeoutMs: 15_000, signal: input.signal, stdout, stderr });
+      const streamsFinished = Promise.all([finished(stdout), finished(stderr)]);
+      stdout.end(); stderr.end();
+      await streamsFinished;
       // Exit codes in the signal range are ambiguous (including timeout kills).
       // Keep them unverified rather than presenting them as ordinary failures.
       const signal = result.exitCode >= 128 ? "unknown termination" : null;

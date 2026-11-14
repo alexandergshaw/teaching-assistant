@@ -48,6 +48,10 @@ const opts = (overrides: Partial<SelectDigestFilesOpts> = {}): SelectDigestFiles
 });
 
 describe("selectDigestFiles", () => {
+  it("selects CSV and TSV data within the same scoped limits as source", () => {
+    const result = selectDigestFiles([blob("lab/data.csv", 20), blob("lab/data.tsv", 30)], opts({ pathPrefix: "lab", requireCompleteSubmission: true }));
+    expect(result.selected.map((entry) => entry.path).sort()).toEqual(["lab/data.csv", "lab/data.tsv"]);
+  });
   it("includes .text files without weakening the existing file budgets", () => {
     const result = selectDigestFiles([blob("lab/output.text", 20), blob("lab/too-large.text", 500)], opts({ pathPrefix: "lab", requireCompleteSubmission: true, maxBlobBytes: 500 }));
     expect(result.selected.map((entry) => entry.path)).toEqual(["lab/output.text"]);

@@ -18,6 +18,7 @@ import { runGenericRepoSandbox } from "@/lib/grade/generic-repo-sandbox";
 import { runGenericWindowsArtifact } from "@/lib/grade/generic-windows-sandbox";
 
 vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn() }));
+vi.mock("@vercel/sandbox", () => ({ Sandbox: { create: vi.fn() } }));
 vi.mock("@/lib/grade/inline-visuals", () => ({ collectInlineVisualEvidence: vi.fn() }));
 vi.mock("./ledger", () => ({ beginRepoGradeDispatch: vi.fn(), checkRepoGradeTargetDispatch: vi.fn(), claimRepoGrade: vi.fn(), settleRepoGrade: vi.fn() }));
 vi.mock("./admission-mode", () => ({ repoGradeAdmissionMode: vi.fn() }));
@@ -406,6 +407,27 @@ describe("admitted pinned repository evaluator", () => {
     expect(modelCall?.[1].body).toContain("# submission helper lab/schema");
     expect(modelCall?.[1].body).toContain("# submission helper lab/output.text");
   });
+
+  it("includes pinned CSV and TSV content when grading", async () => {
+    const csv = { ...files.submission, path: "lab/data.csv" };
+    const tsv = { ...files.submission, path: "lab/data.tsv" };
+    const fetcher = fetchRepo({ tree: [files.readme, files.submission, csv, tsv], contentOverrides: {
+      [csv.path]: "name,value\nAda,1\n", [tsv.path]: "name\tvalue\nAda\t2\n",
+    } });
+    await expect(runRepoGradeTarget(plan, target, preparedRuntime())).resolves.toEqual({ status: "succeeded" });
+    const modelCall = fetcher.mock.calls.find(([url]) => url === modelUrl);
+    expect(modelCall?.[1].body).toContain("Ada,1");
+    expect(modelCall?.[1].body).toContain("Ada\\t2");
+  });
+
+  it.each(["not\0text", "%PDF-1.7\nprintable body", "value\x01binary"]) (
+    "does not send a pinned binary-like CSV to the model (%j)", async (payload) => {
+      const csv = { ...files.submission, path: "lab/data.csv" };
+      const fetcher = fetchRepo({ tree: [files.submission, csv], contentOverrides: { [csv.path]: payload } });
+      expect((await runRepoGradeTarget(plan, target, preparedRuntime())).status).toBe("partial");
+      expect(fetcher.mock.calls.some(([url]) => url === modelUrl)).toBe(false);
+    },
+  );
 
   it.each(["not\0text", "%PDF-1.7\nexample printable body", "value\x01binary", "%!PS-Adobe-3.0\n"]) (
     "does not dispatch a model for extensionless binary-like verified bytes (%j)", async (payload) => {

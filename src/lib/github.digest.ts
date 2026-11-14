@@ -31,7 +31,7 @@ const TEXT_EXT = new Set([
   "html", "htm", "css", "scss", "sass", "less", "vue", "svelte",
   // Data / config (text, not binary)
   "json", "jsonc", "yml", "yaml", "toml", "ini", "cfg", "conf", "properties",
-  "sql", "graphql", "gql", "proto", "gradle", "cmake",
+  "sql", "csv", "tsv", "graphql", "gql", "proto", "gradle", "cmake",
   // Notebooks
   "ipynb",
   // Named without a leading dot elsewhere in this file (dockerfile has no
@@ -469,8 +469,8 @@ export async function ingestRepo(
       signal?.throwIfAborted();
       const text = archiveReader ? verifiedFiles?.get(f.path) : await getFileText(owner, repo, f.path, readRef, signal);
       if (text === undefined) throw new Error("Missing verified repository file.");
-      if (archiveReader && !fileExt(f.path) && !isSafeVerifiedExtensionlessText(text)) {
-        throw new Error("Extensionless repository file is not supported text.");
+      if (((archiveReader && !fileExt(f.path)) || ["csv", "tsv"].includes(fileExt(f.path))) && !isSafeVerifiedExtensionlessText(text)) {
+        throw new Error("Repository file is not supported text.");
       }
       body = text;
     } catch {

@@ -15,10 +15,13 @@ export function genericArtifactInventory(files: readonly {path:string;bytes:Uint
     const extension=basename.includes(".") ? basename.split(".").at(-1)!.toLowerCase() : "";
     // Unknown files are retained as unsupported rather than silently
     // assuming they are data or that their behavior was exercised.
-    const knownText=new Set(["py","js","java","c","cpp","cc","cxx","h","hpp","sql","txt","csv","tsv","json","dat","md","xml","yaml","yml","ini","toml","in"]);
-    const unsupportedSource=!knownText.has(extension);
+    const knownText=new Set(["py","js","mjs","cjs","java","c","cpp","cc","cxx","h","hpp","sql","txt","csv","tsv","json","dat","md","xml","yaml","yml","ini","toml","in"]);
+    const knownProjectFile=/^(readme|dockerfile|makefile|license|licence|procfile|rakefile|gemfile|vagrantfile|jenkinsfile|changelog|notice|authors|contributors)$/i.test(basename);
+    const projectText=new TextDecoder().decode(b);
+    const unsafeProjectText=!extension && knownProjectFile && (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/.test(projectText) || (projectText.slice(0,1024).includes("%PDF-") || projectText.startsWith("%!PS-Adobe-")));
+    const unsupportedSource=!knownText.has(extension) && !knownProjectFile;
     return kind ? [{path:file.path,sha256:createHash("sha256").update(b).digest("hex"),kind,status:"unexamined" as const}]
-      : unsupportedSource ? [{path:file.path,sha256:createHash("sha256").update(b).digest("hex"),kind:"unsupported-source",status:"unsupported" as const}] : [];
+      : (unsupportedSource || unsafeProjectText) ? [{path:file.path,sha256:createHash("sha256").update(b).digest("hex"),kind:"unsupported-source",status:"unsupported" as const}] : [];
   });
   if(artifacts.length>40)throw new Error("Artifact inventory exceeds supported bounds");
   return artifacts;

@@ -1,3 +1,15 @@
+- id: 'REPO-GRADE-GENERAL-EXECUTION'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'grading-setup-interaction-cost'
+  title: 'Finish general repository grading, including Windows executables.'
+  owns: ['src/lib/repo-grade-evaluator.ts', 'src/lib/grade/', 'src/lib/repo-grades-dashboard/', 'src/app/components/repo-grades/', 'supabase/migrations/']
+  verify: null
+  blocked_by: []
+  instrument: 'Run actual repo-grader assignments beyond Module 12 through the saved-rubric workflow. Exercise representative source and Windows executable submissions in isolated execution; retain source revisions, evidence and honest uncertainty; verify numerical results and prior history in the browser. Independently review, run required tests, and verify the delivered commit on main and the live deployment. Record unsupported formats and any unverified criteria explicitly.'
+  from: 'Owner request 2026-11-13 to generalize execution, test coverage and compiled-artifact grading to all repo-grader assignments, including Windows, with full-flow verification and push to main; reiterated 2026-11-14.'
+  note: 'Owner: main session. The general candidate is uncommitted in .worktrees/wncc-execution-audit and is not delivery. Its migrations and synthetic settlement, partial-review, fence and checkpoint cases passed on a clean hosted branch; multi-session concurrency, live Windows SDK and end-to-end browser checks remain unproven. Earlier disposable-branch mutation was rejected by automatic review and must not be bypassed. Local synthetic tests with stubbed authorization do not establish hosted security or concurrency.'
+  question: null
 - id: 'REPO-GRADE-MODULE12-SOURCE-ONLY'
   state: 'unscoped'
   kind: 'bug'

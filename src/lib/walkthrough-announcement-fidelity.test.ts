@@ -22,3 +22,29 @@ it("does not group factual, list, or ambiguous closing content", () => {
   const input = "Welcome!\n\nIf you have questions about the quiz, reach out.\n\n- Submit the work\n\nKeep focusing on progress.";
   expect(applyWalkthroughFidelity(input, outline)).toBe(input);
 });
+
+it("groups the reported interspersed closing into three paragraphs without losing or reordering facts", () => {
+  const outline = { ...deriveAnnouncementOutline("Welcome to class!"), closingParagraphs: 3, opensWithWelcome: false };
+  const input = [
+    "As you finalize your project, remember that clear communication is as important as technical accuracy. Focus on providing actionable insights.",
+    "I look forward to seeing your analysis. Please reach out with questions.",
+    "Finalizing your submission requires careful documentation. Ensure that your reasoning is clear.",
+    "This week is a great opportunity to apply the concepts. Your ability to distinguish threats matters.",
+    "I encourage you to use the provided questions. They are not graded.",
+    "Good luck. I am available if you need help.",
+  ].join("\n\n");
+  const result = applyWalkthroughFidelity(input, outline);
+  expect(result.split("\n\n")).toHaveLength(3);
+  expect(result.replace(/\s+/g, " ")).toBe(input.replace(/\s+/g, " "));
+  expect(result).toContain("They are not graded.");
+  expect(applyWalkthroughFidelity(result, outline)).toBe(result);
+});
+it("never regroups code, list steps or unanchored endings", () => {
+  const outline = { ...deriveAnnouncementOutline("Welcome!"), opensWithWelcome: false, closingParagraphs: 1 };
+  const examples = [
+    "Example:\n\n```\nI look forward to testing.\n\nGood luck.\n```",
+    "I look forward to the results.\n\n1. Complete the assignment.\n2. Submit the file.\n\nGood luck.",
+    "I look forward to your analysis.\n\nFactual paragraph.\n\nA final unrecognized statement.",
+  ];
+  for (const input of examples) expect(applyWalkthroughFidelity(input, outline)).toBe(input);
+});

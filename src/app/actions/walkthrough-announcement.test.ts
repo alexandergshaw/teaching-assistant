@@ -747,3 +747,16 @@ describe("deterministic announcement response validation", () => {
     expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("error", "Generated announcement is empty after removing unverified links. Try again.");
   });
 });
+
+it("enforces quiz bullets for the unchanged reviewed prompt without overriding edits", async () => {
+  const outline = deriveAnnouncementOutline("Quiz Details:\n- Due Sunday\n- Points 20");
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current quiz information", outline, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "beginning-of-week" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  const message = "Quiz Details\n1. Due: Thursday\n2. Points: 10";
+  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Quiz", message }) } as never);
+  const preview = await prepareWalkthroughAnnouncementPromptAction(input);
+  if (!("prompt" in preview)) throw new Error("Missing prompt");
+  const unchanged = await draftWalkthroughAnnouncementAction({ ...input, promptOverride: preview.prompt, promptPreparedFor: preview.preparedFor });
+  expect(unchanged).toHaveProperty("message", "Quiz Details\n- Due: Thursday\n- Points: 10");
+  const edited = await draftWalkthroughAnnouncementAction({ ...input, promptOverride: preview.prompt + "\nUse numbered quiz details.", promptPreparedFor: preview.preparedFor });
+  expect(edited).toHaveProperty("message", message);
+});

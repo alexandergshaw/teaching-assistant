@@ -4,7 +4,7 @@ import type { AnnouncementOutline } from "./announcement-outline-types";
 // or contain instructions; neither belongs in a new drafting request.
 const LABELS = ["Complete", "Also Review", "Before You Submit", "Help", "Due Dates", "Quiz Details", "This Week", "Next Steps", "Resources"];
 function headingRole(heading: string | null, prior?: "focus" | "consider" | "assessment" | "general") {
-  if (!heading) return prior ?? "general";
+  if (!heading) return prior === "focus" || prior === "consider" || prior === "assessment" ? prior : "general";
   if (/\b(?:focus on|pay particular attention|key concepts)\b/i.test(heading)) return "focus" as const;
   if (/\b(?:consider|reflect)\b/i.test(heading)) return "consider" as const;
   if (/\b(?:quiz|assessment|exam|test)\b/i.test(heading)) return "assessment" as const;

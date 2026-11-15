@@ -947,3 +947,19 @@ it("accepts a single generated section for an unheaded example with a styled bul
   expect(result.message).toContain("Current introduction.");
   expect(result.message).toContain("Current task.");
 });
+
+it("preserves safe section content and the saved list kind when the model changes a heading", async () => {
+  const outline = deriveAnnouncementOutline("## Complete\n1. Old task.");
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current introduction and task.", outline, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", sections: [{ index: 1, heading: null, paragraphs: ["Current introduction."], items: ["Current task."], emojis: [] }] }) } as never);
+  const result = await draftWalkthroughAnnouncementAction(input);
+  expect(result).toHaveProperty("message", "Current introduction.\n\n1. Current task.");
+  expect(result).toHaveProperty("formatFallback", true);
+});
+
+it("explains when unmatched section emoji cannot be recovered", async () => {
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current content.", outline: EMPTY_ANNOUNCEMENT_OUTLINE, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "requested" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  const icon = String.fromCodePoint(0x1f4cc);
+  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", sections: [{ index: 1, heading: null, paragraphs: ["Current content."], items: [], emojis: [{ target: "paragraph", index: 0, position: "prefix", value: icon }] }] }) } as never);
+  expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("error", "The draft's emoji positions could not be matched to the saved format. Try again or turn off emoji.");
+});

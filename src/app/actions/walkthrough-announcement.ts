@@ -43,7 +43,7 @@ import { containsEmoji } from "@/lib/announcement-emoji";
 import { renderRichTemplate, validRichTemplate } from "@/lib/announcement-rich-template";
 import { renderRichTree, richTreePlan } from "@/lib/announcement-rich-tree";
 import { projectRichTemplate } from "@/lib/walkthrough-rich-projection";
-import { announcementStructurePlan, assembleAnnouncementSections, announcementContentSignature, announcementSectionBody, hasMeaningfulAnnouncementContent } from "@/lib/walkthrough-structured-announcement";
+import { announcementStructurePlan, assembleAnnouncementSections, recoverAnnouncementSections, announcementContentSignature, announcementSectionBody, hasMeaningfulAnnouncementContent } from "@/lib/walkthrough-structured-announcement";
 import { verifiedStyledAnnouncement } from "@/lib/walkthrough-styled-announcement";
 import { applyWalkthroughFidelity } from "@/lib/walkthrough-announcement-fidelity";
 import { matchQuizDetailsBullets } from "@/lib/walkthrough-quiz-list";
@@ -569,7 +569,13 @@ export async function draftWalkthroughAnnouncementAction(
         structuredMessage = stripUnpermittedUrls(assembled, permitted).text;
         if (message && announcementContentSignature(structuredMessage) !== announcementContentSignature(permittedMessage)) return { error: "The draft sections did not match the complete message. Try again.", diag: diagBase };
       } else if (sections !== undefined) {
-        return { error: "The draft did not match the requested section structure. Try again.", diag: diagBase };
+        const recovered = recoverAnnouncementSections(sections, input.outline);
+        if (!recovered && input.emojiPolicy === "requested" && Array.isArray(sections) && sections.some(section => section && typeof section === "object" && !Array.isArray(section) && Array.isArray(section.emojis) && section.emojis.length > 0)) return { error: "The draft's emoji positions could not be matched to the saved format. Try again or turn off emoji.", diag: diagBase };
+        if (!recovered || message) return { error: "The draft did not match the requested section structure. Try again.", diag: diagBase };
+        const retainedBody = stripUnpermittedUrls(announcementSectionBody(sections), permitted).text;
+        if (!hasMeaningfulAnnouncementContent(retainedBody)) return { error: "Generated announcement has no content after removing unverified links. Try again.", diag: diagBase };
+        structuredMessage = stripUnpermittedUrls(recovered, permitted).text;
+        formatFallback = true;
       } else if (message) {
         if (input.emojiPolicy !== "requested" && containsEmoji(permittedMessage)) return { error: "The draft included unsupported emoji. Try again.", diag: diagBase };
         // A returned freeform message may contain information absent from sections.

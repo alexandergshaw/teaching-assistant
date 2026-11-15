@@ -21,6 +21,33 @@ function plainLine(value: unknown): value is string {
 }
 function slotKey(slot: { target: string; index: number; position: string }): string { return `${slot.target}:${slot.index}:${slot.position}`; }
 
+/** Preserve a valid model response when it does not fit the example's shape. */
+export function recoverAnnouncementSections(value: unknown, outline: AnnouncementOutline): string | null {
+  if (!Array.isArray(value) || !value.length || value.length > 100) return null;
+  const plan = announcementStructurePlan(outline);
+  let previous = 0;
+  const blocks: string[] = [];
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+    const section = candidate as Record<string, unknown>;
+    if (Object.keys(section).some(key => !["index", "heading", "paragraphs", "items", "emojis"].includes(key)) ||
+      !Number.isInteger(section.index) || (section.index as number) <= previous || (section.index as number) > 100 ||
+      !(section.heading === null || plainLine(section.heading)) || !Array.isArray(section.paragraphs) || !Array.isArray(section.items) ||
+      section.paragraphs.length > 40 || section.items.length > 100 || !section.paragraphs.every(plainLine) || !section.items.every(plainLine) ||
+      (section.emojis !== undefined && (!Array.isArray(section.emojis) || section.emojis.length !== 0)) ||
+      (!section.heading && !section.paragraphs.length && !section.items.length)) return null;
+    previous = section.index as number;
+    if (section.heading) blocks.push(`## ${section.heading}`);
+    blocks.push(...section.paragraphs);
+    if (section.items.length) {
+      const kind = plan[(section.index as number) - 1]?.listKind;
+      if (!kind) return null;
+      blocks.push(section.items.map((item, index) => `${kind === "ordered" ? `${index + 1}.` : "-"} ${item}`).join("\n"));
+    }
+  }
+  return blocks.join("\n\n");
+}
+
 /** Deterministically assemble model-supplied content and validated emoji slots. */
 export function assembleAnnouncementSections(value: unknown, outline: AnnouncementOutline, emojiRequested = false): string | null {
   const plan = announcementStructurePlan(outline);

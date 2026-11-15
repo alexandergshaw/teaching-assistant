@@ -60,6 +60,8 @@ export interface AnnouncementOutline {
    * start cold should not suddenly be given a greeting. */
   hasGreeting: boolean;
   opensWithWelcome?: boolean;
+  /** Number of recognizable closing paragraphs, with no exemplar wording. */
+  closingParagraphs?: number;
   /** Whether it closes with a sign-off. Same reasoning as hasGreeting. */
   hasSignOff: boolean;
   /** The 1-based section index holding the due-date block, or null when the

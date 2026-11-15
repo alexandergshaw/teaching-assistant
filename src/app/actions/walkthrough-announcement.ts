@@ -38,6 +38,7 @@ import { EMPTY_ANNOUNCEMENT_OUTLINE, type AnnouncementOutline } from "@/lib/anno
 import { buildWalkthroughAnnouncementPrompt, type AnnouncementTiming } from "@/lib/walkthrough-announcement-prompt";
 import { walkthroughAnnouncementMaxOutputTokens } from "@/lib/walkthrough-announcement-bounds";
 import { composeWalkthroughScriptPrompt } from "@/lib/walkthrough-script-prompt";
+import { applyWalkthroughFidelity } from "@/lib/walkthrough-announcement-fidelity";
 import { matchQuizDetailsBullets } from "@/lib/walkthrough-quiz-list";
 import { collectPermittedUrls, stripUnpermittedUrls } from "@/lib/walkthrough-announcement-link-guard";
 import {
@@ -526,7 +527,9 @@ export async function draftWalkthroughAnnouncementAction(
     });
     const { text: permittedMessage } = stripUnpermittedUrls(message, permitted);
     const useDefaultPrompt = input.promptOverride === undefined || input.promptOverride === composeProviderPrompt(input, styleBlock);
-    const enforcedMessage = input.matchExample && useDefaultPrompt ? matchQuizDetailsBullets(permittedMessage, input.outline) : permittedMessage;
+    const enforcedMessage = input.matchExample && useDefaultPrompt
+      ? applyWalkthroughFidelity(matchQuizDetailsBullets(permittedMessage, input.outline), input.outline)
+      : permittedMessage;
     const { text: enforcedTitle } = stripUnpermittedUrls(title, permitted);
     if (!enforcedTitle.trim() || !enforcedMessage.trim()) {
       return { error: "Generated announcement is empty after removing unverified links. Try again.", diag: diagBase };

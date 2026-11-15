@@ -1,3 +1,4 @@
+import { closingParagraphCount } from "./announcement-closing-shape";
 // NAMED FOR WHAT IT PRODUCES, not for what it reads, and that was a rename.
 // It landed as announcement-exemplar.ts (singular), one character away from
 // announcement-exemplars.ts (plural) - the Supabase store for the table that
@@ -297,6 +298,7 @@ export function deriveAnnouncementOutline(text: string): AnnouncementOutline {
   const hasGreeting = afterGreeting.hasGreeting;
   const opensWithWelcome = /^welcome\b/i.test((afterGreeting.blocks[0]?.[0] ?? "").replace(/^#{1,6}\s*/, "").replace(/^\*\*/, ""));
   const hasSignOff = afterSignOff.hasSignOff;
+  const closingParagraphs = closingParagraphCount(blocks);
 
   const sections: OutlineSection[] = [];
   let dueDateSectionIndex: number | null = null;
@@ -360,6 +362,7 @@ export function deriveAnnouncementOutline(text: string): AnnouncementOutline {
     sections,
     hasGreeting,
     ...(opensWithWelcome && { opensWithWelcome }),
+    ...(closingParagraphs && { closingParagraphs }),
     hasSignOff,
     dueDateSectionIndex,
     todoSectionIndex,

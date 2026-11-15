@@ -760,3 +760,17 @@ it("enforces quiz bullets for the unchanged reviewed prompt without overriding e
   const edited = await draftWalkthroughAnnouncementAction({ ...input, promptOverride: preview.prompt + "\nUse numbered quiz details.", promptPreparedFor: preview.preparedFor });
   expect(edited).toHaveProperty("message", message);
 });
+
+it("preserves the reviewed prompt while applying a welcome only when it is unchanged", async () => {
+  const outline = deriveAnnouncementOutline("Welcome to Week Twelve!\nCurrent topic.");
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current topic", outline, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "beginning-of-week" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message: "Current topic details." }) } as never);
+  const prepared = await prepareWalkthroughAnnouncementPromptAction(input);
+  if (!("prompt" in prepared)) throw new Error("Missing prompt");
+  const unchanged = await draftWalkthroughAnnouncementAction({ ...input, promptOverride: prepared.prompt, promptPreparedFor: prepared.preparedFor });
+  expect(unchanged).toHaveProperty("message", "Welcome!\n\nCurrent topic details.");
+  const editedPrompt = prepared.prompt + "\nDo not add a welcome.";
+  const edited = await draftWalkthroughAnnouncementAction({ ...input, promptOverride: editedPrompt, promptPreparedFor: prepared.preparedFor });
+  expect(edited).toHaveProperty("message", "Current topic details.");
+  expect((vi.mocked(callLlm).mock.calls.at(-1)?.[0].contents[0].parts[0] as { text: string }).text).toBe(editedPrompt);
+});

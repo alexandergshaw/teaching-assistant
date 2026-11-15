@@ -16,6 +16,7 @@ export function promptSafeAnnouncementOutline(outline: AnnouncementOutline): Ann
   return {
     hasGreeting: !!outline.hasGreeting, hasSignOff: !!outline.hasSignOff,
     ...(outline.opensWithWelcome && { opensWithWelcome: true }),
+    ...(Number.isInteger(outline.closingParagraphs) && outline.closingParagraphs! >= 1 && outline.closingParagraphs! <= 5 ? { closingParagraphs: outline.closingParagraphs } : {}),
     hasLinks: !!outline.hasLinks,
     ...(outline.hasBold && { hasBold: true }), ...(outline.hasItalic && { hasItalic: true }),
     dueDateSectionIndex: sectionIndex(outline.dueDateSectionIndex),

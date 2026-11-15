@@ -245,12 +245,14 @@ function renderOutlineSection(section: OutlineSection): string {
  * producing no guidance at all.
  */
 export function renderOutlineBlock(outline: AnnouncementOutline, matchExample = false): string {
-  if (outline.sections.length === 0) {
+  const safeOutline = promptSafeAnnouncementOutline(outline);
+  if (safeOutline.sections.length === 0) {
     if (matchExample) return `The example has no headings or lists. Use plain prose. ${outline.opensWithWelcome ? "Open with a welcome using current course context." : ""} ${outline.hasGreeting ? "Include a greeting." : outline.opensWithWelcome ? "Do not add a separate salutation." : "Do not add a greeting."} ${outline.hasSignOff ? "Include a sign-off." : "Do not add a sign-off."}`;
     return "The exemplar had no discernible structure (a single unheaded paragraph, or an empty document). Write the announcement as plain paragraphs, with no headings and no lists (bold and italic emphasis are still fine where the content warrants it) - THE ANNOUNCEMENT FLOOR above still governs how many paragraphs: one per distinct item, plus the greeting and sign-off.";
   }
 
-  const lines = promptSafeAnnouncementOutline(outline).sections.map(renderOutlineSection);
+  const lines = safeOutline.sections.map(renderOutlineSection);
+  if (matchExample && safeOutline.closingParagraphs) lines.push(`The example ends with approximately ${safeOutline.closingParagraphs} closing paragraph(s).`);
   if (matchExample && outline.opensWithWelcome) lines.unshift("Open with a welcome using the current course context, never an old week or date.");
   if (matchExample) lines.push(outline.hasGreeting ? "The example opens with a greeting." : outline.opensWithWelcome ? "The example has no separate salutation." : "The example does not open with a greeting.", outline.hasSignOff ? "The example closes with a sign-off." : "The example does not close with a sign-off.");
   lines.push(

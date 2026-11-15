@@ -50,10 +50,19 @@ describe("probeLmsCredential - classifying the response", () => {
   it.each([401, 403])("logs only the allowlisted status and outcome for %s", async status => {
     const log = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
-      canvasFetchMock.mockResolvedValueOnce({ ok: true, status, headers: { secret: "private-header" }, body: Buffer.from("private-body") });
+      canvasFetchMock.mockResolvedValueOnce({ ok: true, status, headers: { secret: "private-header", "x-canvas-meta": "private-canvas-value", "www-authenticate": "private-auth-value", "x-amz-cf-id": "private-cf-value", "x-amzn-waf-action": "private-waf-value" }, body: Buffer.from("private-body") });
       expect(await probeLmsCredential(CREDENTIAL)).toEqual({ kind: "rejected" });
-      expect(log).toHaveBeenCalledExactlyOnceWith("Canvas credential probe", { status, outcome: "rejected" });
+      expect(log).toHaveBeenCalledExactlyOnceWith("Canvas credential probe", { status, outcome: "rejected", provenance: { canvasMetaPresent: true, authenticatePresent: true, cloudFrontIdPresent: true, wafActionPresent: true } });
       expect(JSON.stringify(log.mock.calls)).not.toMatch(/private|canvas\.example|abc123/);
+    } finally { log.mockRestore(); }
+  });
+
+  it("reports absent provenance headers without inferring their origin", async () => {
+    const log = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      canvasFetchMock.mockResolvedValueOnce({ ok: true, status: 403, headers: {}, body: Buffer.from("") });
+      await probeLmsCredential(CREDENTIAL);
+      expect(log).toHaveBeenCalledExactlyOnceWith("Canvas credential probe", { status: 403, outcome: "rejected", provenance: { canvasMetaPresent: false, authenticatePresent: false, cloudFrontIdPresent: false, wafActionPresent: false } });
     } finally { log.mockRestore(); }
   });
 

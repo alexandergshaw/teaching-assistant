@@ -104,6 +104,12 @@ export async function probeLmsCredential(
   );
   const outcome = classifyCanvasProbeOutcome(toProbeExchange(result));
   const status = result.ok && (result.status === 401 || result.status === 403) ? result.status : "other";
-  console.info("Canvas credential probe", { status, outcome: outcome.kind });
+  const provenance = result.ok && (result.status === 401 || result.status === 403) ? {
+    canvasMetaPresent: result.headers["x-canvas-meta"] !== undefined,
+    authenticatePresent: result.headers["www-authenticate"] !== undefined,
+    cloudFrontIdPresent: result.headers["x-amz-cf-id"] !== undefined,
+    wafActionPresent: result.headers["x-amzn-waf-action"] !== undefined,
+  } : undefined;
+  console.info("Canvas credential probe", { status, outcome: outcome.kind, ...(provenance && { provenance }) });
   return outcome;
 }

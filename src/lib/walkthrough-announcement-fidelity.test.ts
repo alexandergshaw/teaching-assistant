@@ -54,3 +54,42 @@ it("does not add a second welcome when an emoji precedes the generated welcome",
   const input = `${icon} Welcome to the course!\n\nCurrent details.`;
   expect(applyWalkthroughFidelity(input, { ...deriveAnnouncementOutline("Welcome!"), opensWithWelcome: true })).toBe(input);
 });
+
+it("moves a self-contained early help offer after later instructional sections without changing its wording", () => {
+  const outline = { ...deriveAnnouncementOutline("If you have questions, reach out."), opensWithWelcome: false, closingParagraphs: 1 };
+  const help = "If you have questions, please reach out. I am available during office hours.";
+  const input = ["Current introduction.", help, "## Career considerations\n\n- Explore security roles", "Keep focusing on your progress."].join("\n\n");
+  const result = applyWalkthroughFidelity(input, outline);
+  expect(result.indexOf("Career considerations")).toBeLessThan(result.indexOf(help));
+  expect(result).toContain("- Explore security roles");
+  expect(result.match(/office hours/g)).toHaveLength(1);
+  expect(applyWalkthroughFidelity(result, outline)).toBe(result);
+});
+
+it("does not move a mixed-content or explicitly headed support block", () => {
+  const outline = { ...deriveAnnouncementOutline("Welcome!"), opensWithWelcome: false, closingParagraphs: 1 };
+  const examples = [
+    "If you have questions, reach out. Submit your report by Sunday.\n\n## Next\n\n- Work",
+    "## Help\n\nIf you have questions, reach out.\n\n## Next\n\n- Work",
+    "If you have questions, reach out at https://example.edu/help.\n\n## Next\n\n- Work",
+  ];
+  for (const input of examples) expect(applyWalkthroughFidelity(input, outline)).toBe(input);
+});
+
+it("keeps a sign-off and signature last when moving an earlier help offer", () => {
+  const outline = { ...deriveAnnouncementOutline("Welcome!"), opensWithWelcome: false, closingParagraphs: 1 };
+  const input = "Current course content.\n\nIf you have questions, please reach out.\n\n## Careers\n\n- Explore security roles\n\nBest,\nProfessor Lee";
+  const output = applyWalkthroughFidelity(input, outline);
+  expect(output.endsWith("If you have questions, please reach out.\n\nBest,\nProfessor Lee")).toBe(true);
+  expect(output.indexOf("Careers")).toBeLessThan(output.indexOf("If you have questions"));
+});
+it("keeps a separate sign-off and signature at the end", () => {
+  const outline = { ...deriveAnnouncementOutline("Welcome!"), opensWithWelcome: false, closingParagraphs: 1 };
+  const input = "If you have questions, please reach out.\n\n## Careers\n\n- Explore roles\n\nBest,\n\nProfessor Lee";
+  expect(applyWalkthroughFidelity(input, outline).endsWith("If you have questions, please reach out.\n\nBest,\n\nProfessor Lee")).toBe(true);
+});
+it("does not move content after an unrecognized possible signature", () => {
+  const outline = { ...deriveAnnouncementOutline("Welcome!"), opensWithWelcome: false, closingParagraphs: 1 };
+  const input = "If you have questions, please reach out.\n\n## Careers\n\n- Explore roles\n\nProfessor Lee";
+  expect(applyWalkthroughFidelity(input, outline)).toBe(input);
+});

@@ -68,14 +68,27 @@ describe("attribution review", () => {
   it("retains the warning across edits and a failed regeneration, then replaces it on success", () => {
     let state: readonly DraftSlot[] = [makeSlot("a", { kind: "none" }, "beginning-of-week")];
     state = slotsReducer(state, { type: "generate-started", ids: ["a"] });
-    state = slotsReducer(state, { type: "result", id: "a", result: { ...DRAFTED, attributionWarning: true } });
+    state = slotsReducer(state, { type: "result", id: "a", result: { ...DRAFTED, attributionWarning: true, attributionSuggestion: { title: "Suggested", message: "Alternative" } } });
     state = slotsReducer(state, { type: "edit", id: "a", field: "message", value: "Edited" });
     state = slotsReducer(state, { type: "regenerate-started", id: "a" });
     state = slotsReducer(state, { type: "result", id: "a", result: { error: "failed" } });
     expect(state[0].draft.phase === "drafted" && state[0].draft.draft.attributionWarning).toBe(true);
+    expect(state[0].draft.phase === "drafted" && state[0].draft.draft.attributionSuggestion).toBeUndefined();
+    expect(state[0].draft.phase === "drafted" && state[0].draft.draft.message).toBe("Edited");
     state = slotsReducer(state, { type: "regenerate-started", id: "a" });
     state = slotsReducer(state, { type: "result", id: "a", result: DRAFTED });
     expect(state[0].draft.phase === "drafted" && state[0].draft.draft.attributionWarning).toBeUndefined();
+    expect(state[0].draft.phase === "drafted" && state[0].draft.draft.attributionSuggestion).toBeUndefined();
+  });
+});
+describe("suggestion invalidation", () => {
+  it.each(["title", "message", "richMessage"] as const)("clears the suggestion after editing %s while retaining the warning", field => {
+    const original = { ...DRAFTED, attributionWarning: true, attributionSuggestion: { title: "Suggested", message: "Alternative" } };
+    const state = [drafted("a", { draft: { phase: "drafted", draft: original, error: null } })];
+    const result = slotsReducer(state, { type: "edit", id: "a", field, value: "Updated" });
+    if (result[0].draft.phase !== "drafted") throw new Error("missing draft");
+    expect(result[0].draft.draft.attributionSuggestion).toBeUndefined();
+    expect(result[0].draft.draft.attributionWarning).toBe(true);
   });
 });
 describe("rich draft edits", () => {

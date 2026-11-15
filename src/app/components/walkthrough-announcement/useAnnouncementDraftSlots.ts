@@ -235,7 +235,7 @@ export function useAnnouncementDraftSlots(args: {
     ctx: AnnouncementDraftDispatchContext,
     outline: AnnouncementOutline,
     isCurrent?: () => boolean
-  ) => Promise<{ title: string; message: string; researchNotice: ResearchNotice; compareTemplate?: boolean; richHtml?: string; richSourceMessage?: string; richExtraNotice?: boolean; formatFallback?: boolean; attributionWarning?: boolean } | { error: string }>;
+  ) => Promise<{ title: string; message: string; researchNotice: ResearchNotice; compareTemplate?: boolean; richHtml?: string; richSourceMessage?: string; richExtraNotice?: boolean; formatFallback?: boolean; attributionWarning?: boolean; attributionSuggestion?: { title: string; message: string; richHtml?: string } } | { error: string }>;
   /**
    * `null`: no Canvas-linked course is selected. Checked BEFORE dispatching
    * `posting`, so there is no `posting: true` flash - dispatches

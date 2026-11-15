@@ -228,6 +228,13 @@ export default function AnnouncementDraftSlot({
       {phase === "drafted" && slot.draft.phase === "drafted" && (
         <>
           {slot.draft.draft.templateOutline?.richTemplateUnsupported && <Alert severity="info">This saved example contains formatting that cannot yet be reproduced. The draft uses Markdown formatting.</Alert>}
+          {slot.draft.draft.attributionSuggestion && (
+            <Alert severity="info">
+              <p>A suggested correction is available for review. Its activity details are unverified; the original draft remains below.</p>
+              <TextField label="Suggested title" value={slot.draft.draft.attributionSuggestion.title} fullWidth slotProps={{ input: { readOnly: true } }} />
+              <TextField label="Suggested correction" value={slot.draft.draft.attributionSuggestion.message} multiline minRows={4} fullWidth slotProps={{ input: { readOnly: true } }} />
+            </Alert>
+          )}
           {slot.draft.draft.attributionWarning && <Alert severity="warning">Check whether the optional or extra-credit label and instructions apply to each activity mentioned here.</Alert>}
           {slot.draft.draft.formatFallback && <Alert severity="warning">The saved format could not be applied completely. The full draft is available below; review its formatting before copying or posting.</Alert>}
           {slot.draft.draft.richHtml !== undefined && slot.draft.draft.richSourceMessage !== slot.draft.draft.message && <Alert severity="info">The edited draft uses Markdown formatting. Regenerate to apply the saved example formatting again.</Alert>}

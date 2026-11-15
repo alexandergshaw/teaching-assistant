@@ -2,11 +2,13 @@ import { expect, it } from "vitest";
 import { possibleCrossActivityAttribution } from "./walkthrough-attribution-review";
 
 const materials = "## Linux command practice\nOptional extra credit: practice commands.\n\n## Investigation log\nSubmit the investigation log as required coursework.";
+const observedMaterials = "## Extra Credit: Going Further with the Linux Command Line\nTurn In\nSubmit one file (screenshots showing your commands and their output, plus about 150 words of write-up) as a .docx or PDF.\nContext\nThis assignment is optional... use the same CoCalc terminal ... looking at what a system is actually doing right now, and how tasks get scheduled to run on their own.\n\n## Questions to Guide Your Investigation\nThe following questions ... not be graded on answering ... Using the log files and your bash skills, determine ... counts auth.log alerts.log audit.log ... brute force...";
 
 it("flags an optional label spanning separately captured activities", () => {
   expect(possibleCrossActivityAttribution(materials, "Optional extra credit: complete Linux command practice and submit the Investigation log.")).toBe(true);
   expect(possibleCrossActivityAttribution(materials, "Optional extra credit: use the Linux command line and submit your log file.")).toBe(true);
   expect(possibleCrossActivityAttribution(materials, "To successfully complete the extra credit, please follow these steps:\n\n1. Conduct your investigation of the system logs using bash commands.")).toBe(true);
+  expect(possibleCrossActivityAttribution(observedMaterials, "To successfully complete the extra credit, please follow these steps:\n\n1. Conduct your investigation of the system logs using bash commands.")).toBe(true);
 });
 
 it("does not flag separately described activities or two optional activities", () => {

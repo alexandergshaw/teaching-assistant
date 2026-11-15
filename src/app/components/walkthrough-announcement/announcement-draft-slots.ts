@@ -85,6 +85,7 @@ export interface Drafted {
   readonly richExtraNotice?: boolean;
   readonly formatFallback?: boolean;
   readonly attributionWarning?: boolean;
+  readonly attributionSuggestion?: { readonly title: string; readonly message: string; readonly richHtml?: string };
   readonly builtFrom: ResolvedTemplate;
   /** Safe template shape pinned to the generation, if structure matching was requested. */
   readonly templateOutline?: AnnouncementOutline;
@@ -494,7 +495,7 @@ export function slotsReducer(state: readonly DraftSlot[], action: SlotsAction): 
         if (slot.draft.phase !== "drafted") return slot;
         const safeHtml = action.field === "richMessage" ? sanitizeRecordingAnnouncementHtml(action.value) : null;
         const message = safeHtml === null ? null : htmlToMarkdown(safeHtml);
-        const draft = safeHtml === null ? { ...slot.draft.draft, [action.field]: action.value } : { ...slot.draft.draft, message: message!, richHtml: safeHtml, richSourceMessage: message! };
+        const draft = safeHtml === null ? { ...slot.draft.draft, [action.field]: action.value, attributionSuggestion: undefined } : { ...slot.draft.draft, message: message!, richHtml: safeHtml, richSourceMessage: message!, attributionSuggestion: undefined };
         return {
           ...slot,
           draft: { ...slot.draft, draft },

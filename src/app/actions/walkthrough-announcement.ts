@@ -48,7 +48,7 @@ import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown";
 import { announcementStructurePlan, assembleAnnouncementSections, recoverAnnouncementSections, sectionsFromPlaceholderMap, plainPlaceholderFailure, normalizeAnnouncementEmoji, normalizeAnnouncementSectionText, validAnnouncementEmojiChoice, announcementSectionFailure, announcementContentSignature, announcementSectionBody, hasMeaningfulAnnouncementContent } from "@/lib/walkthrough-structured-announcement";
 import { verifiedStyledAnnouncement } from "@/lib/walkthrough-styled-announcement";
 import { applyWalkthroughFidelity } from "@/lib/walkthrough-announcement-fidelity";
-import { possibleCrossActivityAttribution } from "@/lib/walkthrough-attribution-review";
+import { possibleCrossActivityAttribution, preservesImplicatedActivityTerms } from "@/lib/walkthrough-attribution-review";
 import { matchQuizDetailsBullets } from "@/lib/walkthrough-quiz-list";
 import { collectPermittedUrls, stripUnpermittedUrls } from "@/lib/walkthrough-announcement-link-guard";
 import {
@@ -501,10 +501,12 @@ export async function prepareWalkthroughAnnouncementPromptAction(input: Walkthro
 export async function draftWalkthroughAnnouncementAction(
   input: WalkthroughAnnouncementDraftInput
 ): Promise<
-  ({ title: string; message: string; researchNotice: ResearchNotice; richHtml?: string; richExtraNotice?: boolean; formatFallback?: boolean; attributionWarning?: boolean } | { error: string }) & {
+  ({ title: string; message: string; researchNotice: ResearchNotice; richHtml?: string; richExtraNotice?: boolean; formatFallback?: boolean; attributionWarning?: boolean; attributionSuggestion?: { title: string; message: string; richHtml?: string } } | { error: string }) & {
     diag: ScriptGenerationLlmDiag;
   }
-> {
+> { return draftWalkthroughAnnouncementAttempt(input, false); }
+
+async function draftWalkthroughAnnouncementAttempt(input: WalkthroughAnnouncementDraftInput, attributionRepair: boolean): ReturnType<typeof draftWalkthroughAnnouncementAction> {
   const provider: LlmProvider = input.provider ?? "gemini";
   try {
     const user = await requireUser();
@@ -520,7 +522,8 @@ export async function draftWalkthroughAnnouncementAction(
       return { error: "The prompt must contain text and be at most 160,000 characters.", diag: unattemptedLlmDiag(provider) };
     }
     const defaultPrompt = composeProviderPrompt(input, styleBlock);
-    const prompt = input.promptOverride ?? defaultPrompt;
+    const reviewedPrompt = input.promptOverride ?? defaultPrompt;
+    const prompt = attributionRepair ? `${reviewedPrompt}\n\nCORRECTION: The previous draft may have combined instructions or optional status from distinct captured activities. Re-read each captured section separately. Keep each activity and its own submission and optionality details distinct; include all supported activities. Return the same requested output format.` : reviewedPrompt;
     const signedPrompt = input.promptOverride !== undefined && hasValidPromptSignature(input.promptOverride, user.id, input.promptSignature);
     if (signedPrompt && !hasValidContextSignature(input, user.id)) return { error: "The reviewed prompt has expired or its inputs changed. Prepare it again.", diag: unattemptedLlmDiag(provider) };
     const useDefaultPrompt = input.promptOverride === undefined || input.promptOverride === defaultPrompt || signedPrompt;
@@ -537,7 +540,7 @@ export async function draftWalkthroughAnnouncementAction(
       provider
     );
 
-    if (r.ok && input.matchExample && useDefaultPrompt && !r.text.trim()) {
+    if (r.ok && input.matchExample && useDefaultPrompt && !attributionRepair && !r.text.trim()) {
       console.warn("Walkthrough draft response empty; retrying once");
       r = await callLlm({ contents: [{ role: "user", parts: [{ text: `${prompt}\n\nReturn a complete JSON object with a nonempty title and the requested placeholders object. Do not return a partial object or prose outside JSON.` }] }], generationConfig: config }, provider);
     }
@@ -723,7 +726,12 @@ export async function draftWalkthroughAnnouncementAction(
     const researchNotice = researchNoticeFor(input.researchOutcome);
 
     const attributionWarning = possibleCrossActivityAttribution(input.materialsText, enforcedMessage);
-    return { title: enforcedTitle.trim(), message: enforcedMessage, researchNotice, diag: diagBase, ...(richHtml && { richHtml }), ...(richExtraNotice && { richExtraNotice }), ...(formatFallback && { formatFallback: true }), ...(attributionWarning && { attributionWarning: true }) };
+    let attributionSuggestion: { title: string; message: string; richHtml?: string } | undefined;
+    if (attributionWarning && useDefaultPrompt && !attributionRepair) {
+      const repaired = await draftWalkthroughAnnouncementAttempt(input, true);
+      if (!("error" in repaired) && repaired.title === enforcedTitle.trim() && !repaired.attributionWarning && preservesImplicatedActivityTerms(input.materialsText, enforcedMessage, repaired.message)) attributionSuggestion = { title: repaired.title, message: repaired.message, ...(repaired.richHtml && { richHtml: repaired.richHtml }) };
+    }
+    return { title: enforcedTitle.trim(), message: enforcedMessage, researchNotice, diag: diagBase, ...(richHtml && { richHtml }), ...(richExtraNotice && { richExtraNotice }), ...(formatFallback && { formatFallback: true }), ...(attributionWarning && { attributionWarning: true }), ...(attributionSuggestion && { attributionSuggestion }) };
   } catch {
     return {
       error: "Could not draft the announcement. Try again.",

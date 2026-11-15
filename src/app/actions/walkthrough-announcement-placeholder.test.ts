@@ -111,6 +111,52 @@ it("flags possible cross-activity optionality without changing the draft", async
   expect(result).toHaveProperty("attributionWarning", true);
 });
 
+it("presents a possible correction separately without replacing the original draft", async () => {
+  const materialsText = "## Extra Credit: Going Further with the Linux Command Line\nTurn In\nSubmit screenshots and a short write-up as a document or PDF. This assignment is optional.\n\n## Questions to Guide Your Investigation\nUsing the log files and bash skills, determine relevant counts.";
+  const initial = "To successfully complete the extra credit, please follow these steps:\n\n1. Conduct your investigation of the system logs using bash commands.";
+  const corrected = "Complete the extra credit: use bash commands and follow the steps.\n\n1. Conduct your investigation of the system logs.";
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText, outline: EMPTY_ANNOUNCEMENT_OUTLINE, matchExample: false, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message: initial }) } as never).mockResolvedValueOnce({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message: corrected }) } as never);
+  const result = await draftWalkthroughAnnouncementAction(input);
+  expect(result).toHaveProperty("message", initial);
+  expect(result).toHaveProperty("attributionWarning", true);
+  expect(result).toHaveProperty("attributionSuggestion.message", corrected);
+  expect(callLlm).toHaveBeenCalledTimes(2);
+});
+
+it("does not replace the original when a proposed correction changes negation or dates", async () => {
+  const materialsText = "## Linux command practice\nOptional extra credit.\n\n## Investigation log\nReview system logs.";
+  const initial = "Optional extra credit: use Linux commands for the investigation log by Thursday.\n\nComplete the peer reply by Friday.";
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText, outline: EMPTY_ANNOUNCEMENT_OUTLINE, matchExample: false, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  for (const candidate of ["Do not use Linux commands for the investigation log by Thursday; optional extra credit.\n\nComplete the peer reply by Friday.", "Optional extra credit: use Linux commands for the investigation log by Friday.\n\nComplete the peer reply by Thursday."]) {
+    vi.mocked(callLlm).mockReset().mockResolvedValueOnce({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message: initial }) } as never).mockResolvedValueOnce({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message: candidate }) } as never);
+    expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("message", initial);
+  }
+});
+
+it("keeps the first draft if repair removes a deadline or an unrelated activity", async () => {
+  const materialsText = "## Linux command practice\nOptional extra credit.\n\n## Investigation log\nReview system logs.\n\n## Peer discussion\nReply by Friday.";
+  const initial = "Optional extra credit: use Linux commands for the investigation log by Thursday.\n\nReply to the peer discussion by Friday.";
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText, outline: EMPTY_ANNOUNCEMENT_OUTLINE, matchExample: false, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  for (const candidate of ["Optional Linux commands; investigation log.\n\nReply to the peer discussion by Friday.", "Optional Linux commands; investigation log by Thursday."]) {
+    vi.mocked(callLlm).mockReset().mockResolvedValueOnce({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message: initial }) } as never).mockResolvedValueOnce({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message: candidate }) } as never);
+    const result = await draftWalkthroughAnnouncementAction(input);
+    expect(result).toHaveProperty("message", initial);
+    expect(result).toHaveProperty("attributionWarning", true);
+  }
+});
+
+it("keeps the original editable draft with a warning if repair omits an activity", async () => {
+  const materialsText = "## Linux command practice\nOptional extra credit.\n\n## Investigation log\nReview system logs.";
+  const initial = "Optional extra credit: use Linux commands for the investigation log.";
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText, outline: EMPTY_ANNOUNCEMENT_OUTLINE, matchExample: false, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message: initial }) } as never).mockResolvedValueOnce({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message: "Optional Linux commands are available." }) } as never);
+  const result = await draftWalkthroughAnnouncementAction(input);
+  expect(result).toHaveProperty("message", initial);
+  expect(result).toHaveProperty("attributionWarning", true);
+  expect(callLlm).toHaveBeenCalledTimes(2);
+});
+
 it("accepts a flat top-level placeholder map without dropping unknown fields", async () => {
   const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current content.", outline: EMPTY_ANNOUNCEMENT_OUTLINE, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
   vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, status: 200, text: JSON.stringify({ title: "Update", s1_p0: "Current content." }) } as never);

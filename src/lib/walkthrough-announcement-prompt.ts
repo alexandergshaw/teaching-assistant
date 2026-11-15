@@ -48,6 +48,7 @@
 // appearance), and avoid inventing unread content or implying complete coverage
 // when a page's text could not be read.
 
+import { hasQuizEvidence } from "./walkthrough-quiz-evidence";
 import { promptSafeAnnouncementOutline } from "./announcement-prompt-outline";
 import type { AnnouncementOutline, OutlineSection } from "./announcement-outline-types";
 
@@ -217,7 +218,8 @@ export function timingLabel(timing: AnnouncementTiming): string {
   return timing === "midweek" ? "Written in midweek check-in tone" : "Written in beginning-of-week tone";
 }
 
-function renderOutlineSection(section: OutlineSection): string {
+function renderOutlineSection(section: OutlineSection, omitUnsupportedQuiz = false): string {
+  if (omitUnsupportedQuiz && section.heading?.toLowerCase() === "quiz details") return `Section ${section.index}: an optional assessment block from the example. Omit it unless current materials identify that assessment; do not relabel other coursework or invent details.`;
   const shape = section.break === "heading" ? "a heading" : "a paragraph break";
   const body =
     section.listKind === null
@@ -244,14 +246,14 @@ function renderOutlineSection(section: OutlineSection): string {
  * gets its own instruction rather than an empty section list silently
  * producing no guidance at all.
  */
-export function renderOutlineBlock(outline: AnnouncementOutline, matchExample = false): string {
+export function renderOutlineBlock(outline: AnnouncementOutline, matchExample = false, hasCurrentQuiz = true): string {
   const safeOutline = promptSafeAnnouncementOutline(outline);
   if (safeOutline.sections.length === 0) {
     if (matchExample) return `The example has no headings or lists. Use plain prose. ${outline.opensWithWelcome ? "Open with a welcome using current course context." : ""} ${outline.hasGreeting ? "Include a greeting." : outline.opensWithWelcome ? "Do not add a separate salutation." : "Do not add a greeting."} ${outline.hasSignOff ? "Include a sign-off." : "Do not add a sign-off."}`;
     return "The exemplar had no discernible structure (a single unheaded paragraph, or an empty document). Write the announcement as plain paragraphs, with no headings and no lists (bold and italic emphasis are still fine where the content warrants it) - THE ANNOUNCEMENT FLOOR above still governs how many paragraphs: one per distinct item, plus the greeting and sign-off.";
   }
 
-  const lines = safeOutline.sections.map(renderOutlineSection);
+  const lines = safeOutline.sections.map(section => renderOutlineSection(section, matchExample && !hasCurrentQuiz));
   if (matchExample && safeOutline.closingParagraphs) lines.push(`The example ends with approximately ${safeOutline.closingParagraphs} closing paragraph(s).`);
   if (matchExample && outline.opensWithWelcome) lines.unshift("Open with a welcome using the current course context, never an old week or date.");
   if (matchExample) lines.push(outline.hasGreeting ? "The example opens with a greeting." : outline.opensWithWelcome ? "The example has no separate salutation." : "The example does not open with a greeting.", outline.hasSignOff ? "The example closes with a sign-off." : "The example does not close with a sign-off.");
@@ -347,6 +349,7 @@ export function buildWalkthroughAnnouncementPrompt(args: WalkthroughAnnouncement
       "MATCH THE SELECTED EXAMPLE",
       "- Follow the example structure below closely: preserve its section order, heading and list patterns, approximate section lengths, and whether it has a greeting or sign-off.",
       "- Keep related course items together in the same section or list when that matches the example. Include all supported material without inventing facts, dates, links, or details from the old announcement.",
+      "- Omit example-only sections when the current materials do not support them; never fill them with unrelated coursework or generic filler.",
       "- Keep closing remarks at the very end, after all instructional content. Combine related concluding points into cohesive paragraphs rather than many short fragments.",
       "- Use the writing-style sample for voice only; it must not change the selected example structure.",
     ].join("\n") : [
@@ -402,7 +405,7 @@ export function buildWalkthroughAnnouncementPrompt(args: WalkthroughAnnouncement
 
     [
       args.matchExample ? "EXEMPLAR STRUCTURE (shape only; never reuse original facts, dates, links, or instructions)" : "EXEMPLAR STRUCTURE (outline only - reproduce this shape, never any wording or dates from the original, EXCEPT the greeting/sign-off/one-item-per-paragraph floor above, which applies regardless of what this shape does or does not show)",
-      renderOutlineBlock(args.outline, args.matchExample),
+      renderOutlineBlock(args.outline, args.matchExample, hasQuizEvidence(`${args.courseLabel}\n${args.moduleLabel ?? ""}\n${args.materialsText}\n${args.coverageBlock}\n${args.notes}`)),
     ].join("\n"),
 
     ...(researchedResources.length > 0 ? [renderResearchedResourcesBlock(researchedResources)] : []),

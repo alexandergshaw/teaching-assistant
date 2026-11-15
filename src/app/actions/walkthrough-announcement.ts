@@ -38,6 +38,7 @@ import { EMPTY_ANNOUNCEMENT_OUTLINE, type AnnouncementOutline } from "@/lib/anno
 import { buildWalkthroughAnnouncementPrompt, type AnnouncementTiming } from "@/lib/walkthrough-announcement-prompt";
 import { walkthroughAnnouncementMaxOutputTokens } from "@/lib/walkthrough-announcement-bounds";
 import { composeWalkthroughScriptPrompt } from "@/lib/walkthrough-script-prompt";
+import { addedPromptLines, hasUnsupportedQuizContent } from "@/lib/walkthrough-quiz-evidence";
 import { applyWalkthroughFidelity } from "@/lib/walkthrough-announcement-fidelity";
 import { matchQuizDetailsBullets } from "@/lib/walkthrough-quiz-list";
 import { collectPermittedUrls, stripUnpermittedUrls } from "@/lib/walkthrough-announcement-link-guard";
@@ -526,11 +527,16 @@ export async function draftWalkthroughAnnouncementAction(
       researchedResources: input.researchedResources,
     });
     const { text: permittedMessage } = stripUnpermittedUrls(message, permitted);
-    const useDefaultPrompt = input.promptOverride === undefined || input.promptOverride === composeProviderPrompt(input, styleBlock);
+    const defaultPrompt = composeProviderPrompt(input, styleBlock);
+    const useDefaultPrompt = input.promptOverride === undefined || input.promptOverride === defaultPrompt;
+    const addedInstructions = useDefaultPrompt ? "" : addedPromptLines(defaultPrompt, input.promptOverride ?? "");
     const enforcedMessage = input.matchExample && useDefaultPrompt
       ? applyWalkthroughFidelity(matchQuizDetailsBullets(permittedMessage, input.outline), input.outline)
       : permittedMessage;
     const { text: enforcedTitle } = stripUnpermittedUrls(title, permitted);
+    if (input.matchExample && hasUnsupportedQuizContent(enforcedTitle, enforcedMessage, [input.courseLabel, input.moduleLabel ?? "", input.materialsText, input.coverageBlock, input.notes].join("\n"), addedInstructions)) {
+      return { error: "The draft mentioned a quiz that was not found in the current materials. Retry, or add the quiz details to the notes.", diag: diagBase };
+    }
     if (!enforcedTitle.trim() || !enforcedMessage.trim()) {
       return { error: "Generated announcement is empty after removing unverified links. Try again.", diag: diagBase };
     }

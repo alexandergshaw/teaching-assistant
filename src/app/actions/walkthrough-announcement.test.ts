@@ -774,3 +774,31 @@ it("preserves the reviewed prompt while applying a welcome only when it is uncha
   expect(edited).toHaveProperty("message", "Current topic details.");
   expect((vi.mocked(callLlm).mock.calls.at(-1)?.[0].contents[0].parts[0] as { text: string }).text).toBe(editedPrompt);
 });
+
+describe("quiz grounding for selected examples", () => {
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Complete the current project.", outline: deriveAnnouncementOutline("Quiz Details:\n- Due Sunday\n- Points 20"), matchExample: true, coverageBlock: "Project overview", notes: "", emojiPolicy: "forbidden" as const, timing: "beginning-of-week" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  it("rejects an invented quiz section instead of relabeling a project", async () => {
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Weekly update", message: "Quiz Details\n- Complete the project." }) } as never);
+    expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("error", expect.stringContaining("not found in the current materials"));
+  });
+  it("does not infer a quiz from a filename or a negative edit, and permits project time limits", async () => {
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Weekly update", message: "Quiz 2 is due Friday." }) } as never);
+    const preview = await prepareWalkthroughAnnouncementPromptAction({ ...input, materialsText: "Review quiz.pdf and complete the project." });
+    if (!("prompt" in preview)) throw new Error("Missing prompt");
+    const edited = await draftWalkthroughAnnouncementAction({ ...input, materialsText: "Review quiz.pdf and complete the project.", promptOverride: preview.prompt + "\nDo not invent Quiz 2 due Friday.", promptPreparedFor: preview.preparedFor });
+    expect(edited).toHaveProperty("error", expect.stringContaining("not found in the current materials"));
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Project", message: "The project has a 30 minute time limit." }) } as never);
+    expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("message", "The project has a 30 minute time limit.");
+  });
+  it("allows an actual current quiz and preserves instructor prompt edits", async () => {
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Weekly update", message: "Quiz 2 is due Thursday." }) } as never);
+    const actual = await draftWalkthroughAnnouncementAction({ ...input, materialsText: "Quiz 2 is due Thursday." });
+    expect(actual).toHaveProperty("message", "Quiz 2 is due Thursday.");
+    const preview = await prepareWalkthroughAnnouncementPromptAction(input);
+    if (!("prompt" in preview)) throw new Error("Missing prompt");
+    const editedPrompt = preview.prompt + "\nQuiz 2 is due Thursday.";
+    const edited = await draftWalkthroughAnnouncementAction({ ...input, promptOverride: editedPrompt, promptPreparedFor: preview.preparedFor });
+    expect(edited).toHaveProperty("message", "Quiz 2 is due Thursday.");
+    expect((vi.mocked(callLlm).mock.calls.at(-1)?.[0].contents[0].parts[0] as { text: string }).text).toBe(editedPrompt);
+  });
+});

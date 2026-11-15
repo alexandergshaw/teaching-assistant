@@ -26,9 +26,23 @@ export type VideoAudioOutcome = { status: "complete"; text: string; chunks: numb
 /** Level is a review signal only; it never discards a quiet recording. */
 export function lowAudioLevel(samples: Float32Array): boolean {
   if (!samples.length) return false;
-  let power = 0;
-  for (const sample of samples) { if (!Number.isFinite(sample)) return true; power += sample * sample; }
-  return Math.sqrt(power / samples.length) < Math.pow(10, -50 / 20);
+  // Brief clicks can mask several seconds of near-silence in a whole-chunk RMS.
+  // Measure one-second windows and flag when at least half are low-level.
+  const threshold = Math.pow(10, -50 / 20);
+  let lowWindows = 0;
+  let windows = 0;
+  for (let start = 0; start < samples.length; start += LIVE_SAMPLE_RATE) {
+    const end = Math.min(start + LIVE_SAMPLE_RATE, samples.length);
+    let power = 0;
+    for (let i = start; i < end; i++) {
+      const sample = samples[i];
+      if (!Number.isFinite(sample)) return true;
+      power += sample * sample;
+    }
+    if (Math.sqrt(power / (end - start)) < threshold) lowWindows++;
+    windows++;
+  }
+  return lowWindows * 2 >= windows;
 }
 
 /** Map only fixed server responses; never propagate provider or account text. */

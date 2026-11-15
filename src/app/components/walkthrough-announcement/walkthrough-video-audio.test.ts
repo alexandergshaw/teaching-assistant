@@ -28,6 +28,13 @@ describe("uploaded narration production adapter", () => {
     expect(result).toEqual({ status: "complete", text: Array(13).fill("spoken fact").join(" "), chunks: 13, lowLevelChunks: 13 });
     expect(h.adapters.transcribe).toHaveBeenCalledTimes(13);
   });
+  it("flags mostly low-level audio even when a brief transient masks its overall RMS", () => {
+    const samples = new Float32Array(10 * LIVE_SAMPLE_RATE).fill(0.00006);
+    samples.fill(0.1, 5 * LIVE_SAMPLE_RATE, 6 * LIVE_SAMPLE_RATE);
+    expect(lowAudioLevel(samples)).toBe(true);
+    samples.fill(0.1, 0, 6 * LIVE_SAMPLE_RATE);
+    expect(lowAudioLevel(samples)).toBe(false);
+  });
   it("flags a quiet chunk while retaining text from both chunks", async () => {
     const h = harness();
     const samples = new Float32Array(20 * LIVE_SAMPLE_RATE);

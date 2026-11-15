@@ -64,6 +64,20 @@ const SRC_EMPTY: TemplateOptionSource = {
 // every such table test to pick it up.
 const ALL_SAVED_FORMATS_STATES: readonly SavedFormatsState[] = ["loading", "loaded", "failed", "timedout"];
 
+describe("attribution review", () => {
+  it("retains the warning across edits and a failed regeneration, then replaces it on success", () => {
+    let state: readonly DraftSlot[] = [makeSlot("a", { kind: "none" }, "beginning-of-week")];
+    state = slotsReducer(state, { type: "generate-started", ids: ["a"] });
+    state = slotsReducer(state, { type: "result", id: "a", result: { ...DRAFTED, attributionWarning: true } });
+    state = slotsReducer(state, { type: "edit", id: "a", field: "message", value: "Edited" });
+    state = slotsReducer(state, { type: "regenerate-started", id: "a" });
+    state = slotsReducer(state, { type: "result", id: "a", result: { error: "failed" } });
+    expect(state[0].draft.phase === "drafted" && state[0].draft.draft.attributionWarning).toBe(true);
+    state = slotsReducer(state, { type: "regenerate-started", id: "a" });
+    state = slotsReducer(state, { type: "result", id: "a", result: DRAFTED });
+    expect(state[0].draft.phase === "drafted" && state[0].draft.draft.attributionWarning).toBeUndefined();
+  });
+});
 describe("rich draft edits", () => {
   it("keeps rich mode through delete all, typing and formatted paste", () => {
     let state = [drafted("a")];

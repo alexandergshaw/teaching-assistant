@@ -101,6 +101,16 @@ const REALISTIC_OUTLINE = deriveAnnouncementOutline(
 const NO_RESEARCH = { kind: "off" as const };
 const NO_RESEARCHED_RESOURCES: ReadonlyArray<{ title: string; url: string }> = [];
 
+it("flags possible cross-activity optionality without changing the draft", async () => {
+  const materialsText = "## Linux command practice\nOptional extra credit.\n\n## Investigation log\nSubmit the required investigation log.";
+  const message = "Optional extra credit: use the Linux command line and submit your log file.";
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText, outline: EMPTY_ANNOUNCEMENT_OUTLINE, matchExample: false, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message }) } as never);
+  const result = await draftWalkthroughAnnouncementAction(input);
+  expect(result).toHaveProperty("message", message);
+  expect(result).toHaveProperty("attributionWarning", true);
+});
+
 it("accepts a flat top-level placeholder map without dropping unknown fields", async () => {
   const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current content.", outline: EMPTY_ANNOUNCEMENT_OUTLINE, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
   vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, status: 200, text: JSON.stringify({ title: "Update", s1_p0: "Current content." }) } as never);

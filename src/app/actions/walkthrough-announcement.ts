@@ -48,6 +48,7 @@ import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown";
 import { announcementStructurePlan, assembleAnnouncementSections, recoverAnnouncementSections, sectionsFromPlaceholderMap, plainPlaceholderFailure, normalizeAnnouncementEmoji, normalizeAnnouncementSectionText, validAnnouncementEmojiChoice, announcementSectionFailure, announcementContentSignature, announcementSectionBody, hasMeaningfulAnnouncementContent } from "@/lib/walkthrough-structured-announcement";
 import { verifiedStyledAnnouncement } from "@/lib/walkthrough-styled-announcement";
 import { applyWalkthroughFidelity } from "@/lib/walkthrough-announcement-fidelity";
+import { possibleCrossActivityAttribution } from "@/lib/walkthrough-attribution-review";
 import { matchQuizDetailsBullets } from "@/lib/walkthrough-quiz-list";
 import { collectPermittedUrls, stripUnpermittedUrls } from "@/lib/walkthrough-announcement-link-guard";
 import {
@@ -500,7 +501,7 @@ export async function prepareWalkthroughAnnouncementPromptAction(input: Walkthro
 export async function draftWalkthroughAnnouncementAction(
   input: WalkthroughAnnouncementDraftInput
 ): Promise<
-  ({ title: string; message: string; researchNotice: ResearchNotice; richHtml?: string; richExtraNotice?: boolean; formatFallback?: boolean } | { error: string }) & {
+  ({ title: string; message: string; researchNotice: ResearchNotice; richHtml?: string; richExtraNotice?: boolean; formatFallback?: boolean; attributionWarning?: boolean } | { error: string }) & {
     diag: ScriptGenerationLlmDiag;
   }
 > {
@@ -721,7 +722,8 @@ export async function draftWalkthroughAnnouncementAction(
 
     const researchNotice = researchNoticeFor(input.researchOutcome);
 
-    return { title: enforcedTitle.trim(), message: enforcedMessage, researchNotice, diag: diagBase, ...(richHtml && { richHtml }), ...(richExtraNotice && { richExtraNotice }), ...(formatFallback && { formatFallback: true }) };
+    const attributionWarning = possibleCrossActivityAttribution(input.materialsText, enforcedMessage);
+    return { title: enforcedTitle.trim(), message: enforcedMessage, researchNotice, diag: diagBase, ...(richHtml && { richHtml }), ...(richExtraNotice && { richExtraNotice }), ...(formatFallback && { formatFallback: true }), ...(attributionWarning && { attributionWarning: true }) };
   } catch {
     return {
       error: "Could not draft the announcement. Try again.",

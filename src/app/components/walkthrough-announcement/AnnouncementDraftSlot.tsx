@@ -228,6 +228,7 @@ export default function AnnouncementDraftSlot({
       {phase === "drafted" && slot.draft.phase === "drafted" && (
         <>
           {slot.draft.draft.templateOutline?.richTemplateUnsupported && <Alert severity="info">This saved example contains formatting that cannot yet be reproduced. The draft uses Markdown formatting.</Alert>}
+          {slot.draft.draft.attributionWarning && <Alert severity="warning">Check whether the optional or extra-credit label and instructions apply to each activity mentioned here.</Alert>}
           {slot.draft.draft.formatFallback && <Alert severity="warning">The saved format could not be applied completely. The full draft is available below; review its formatting before copying or posting.</Alert>}
           {slot.draft.draft.richHtml !== undefined && slot.draft.draft.richSourceMessage !== slot.draft.draft.message && <Alert severity="info">The edited draft uses Markdown formatting. Regenerate to apply the saved example formatting again.</Alert>}
           {slot.draft.draft.richExtraNotice && <Alert severity="info">Some current material was added after the saved format. Review its placement before copying or posting.</Alert>}

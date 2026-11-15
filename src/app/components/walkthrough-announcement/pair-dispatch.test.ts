@@ -262,3 +262,12 @@ describe("restored choices reach the real runner and safe prompt", () => {
     expect(createPairPreferenceStore("scope", { getItem: () => { throw new Error("denied"); }, setItem: writes }).load().error).toBe("storage-unavailable");
   });
 });
+
+it("carries selected-example fidelity to the provider without enabling it for no format", async () => {
+  const h = harness(false);
+  await h.runner.retry("wta-slot-1");
+  expect(h.draftOne.mock.calls[0][0].matchExample).toBe(true);
+  h.dispatch({ type: "choose", id: "wta-slot-2", choice: { kind: "none" } });
+  await h.runner.retry("wta-slot-2");
+  expect(h.draftOne.mock.calls[1][0].matchExample).toBe(false);
+});

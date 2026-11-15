@@ -2,13 +2,14 @@ import type { AnnouncementOutline } from "./announcement-outline-types";
 
 // Allow only canonical structural labels. Unknown headings may name old facts
 // or contain instructions; neither belongs in a new drafting request.
-const LABELS = ["Complete", "Also Review", "Before You Submit", "Help", "Due Dates", "This Week", "Next Steps", "Resources"];
+const LABELS = ["Complete", "Also Review", "Before You Submit", "Help", "Due Dates", "Quiz Details", "This Week", "Next Steps", "Resources"];
 function bounded(value: unknown): number { return Math.max(1, Math.min(100, Math.round(Number(value)) || 1)); }
 function sectionIndex(value: unknown): number | null { return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null; }
 export function promptSafeAnnouncementOutline(outline: AnnouncementOutline): AnnouncementOutline {
   return {
     hasGreeting: !!outline.hasGreeting, hasSignOff: !!outline.hasSignOff,
     hasLinks: !!outline.hasLinks,
+    ...(outline.hasBold && { hasBold: true }), ...(outline.hasItalic && { hasItalic: true }),
     dueDateSectionIndex: sectionIndex(outline.dueDateSectionIndex),
     todoSectionIndex: sectionIndex(outline.todoSectionIndex),
     sections: outline.sections.map((section, i) => ({

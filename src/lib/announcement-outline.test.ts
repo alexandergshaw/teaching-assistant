@@ -247,3 +247,25 @@ describe("deriveAnnouncementOutline - greeting and sign-off", () => {
     expect(outline.hasSignOff).toBe(false);
   });
 });
+
+it("recognizes compact section labels with no blank lines", () => {
+  const outline = deriveAnnouncementOutline("Hello class,\nWelcome to the module.\nComplete:\n- Read chapter 3\n- Submit the lab\nAlso Review:\nReview the reference material.\nThanks,");
+  expect(outline.hasGreeting).toBe(true);
+  expect(outline.hasSignOff).toBe(true);
+  expect(outline.sections.map(section => [section.heading, section.listKind])).toEqual([[null, null], ["Complete", "unordered"], ["Also Review", null]]);
+});
+
+it("extracts section and paragraph layout from a compact LMS announcement", () => {
+  const outline = deriveAnnouncementOutline("Welcome to Week Twelve!\nThis week, we are building on earlier concepts.\nWe will also explore careers.\nComplete:\n- Review the current chapter.\n- Complete the quiz.\nAlso review:\n- The overview video.\nAs you work through this week's material, focus on:\n- Identifying threats.\n- Evaluating risks.\nRemember these concepts are connected.\nQuiz Details:\n- Due: Sunday\n- Points: 20\nBefore beginning, review the chapter.");
+  expect(outline.sections.slice(0, 3).every(section => section.break === "paragraph-break")).toBe(true);
+  expect(outline.sections.filter(section => section.listKind === "unordered")).toHaveLength(4);
+  expect(outline.sections.map(section => section.heading)).toContain("Quiz Details");
+  expect(outline.sections.map(section => section.heading)).toContain("As you work through this week's material, focus on");
+});
+
+it("records emphasis style without carrying the old wording", () => {
+  const outline = deriveAnnouncementOutline("**Secret old title** and *private old note*.");
+  expect(outline.hasBold).toBe(true);
+  expect(outline.hasItalic).toBe(true);
+  expect(JSON.stringify(outline)).not.toContain("Secret old title");
+});

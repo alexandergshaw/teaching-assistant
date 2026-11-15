@@ -345,6 +345,17 @@ describe("announcement library storage", () => {
     const entries = await listAnnouncementLibraryEntries(db.client, "u1", "c1");
     expect(entries[0].exemplarText).toBe(body);
   });
+  it("persists and rederives rich emphasis for saved and legacy examples", async () => {
+    const db = libraryDatabase([]);
+    const body = encodePreviousAnnouncementHtml('<p><strong>Old details</strong> <span style="font-style:italic">old dates</span></p>');
+    const saved = await saveAnnouncementLibraryEntry(db.client, "u1", { ...libraryInput, exemplarText: body });
+    expect(saved.ok).toBe(true);
+    expect(db.rows[0].outline).toMatchObject({ hasBold: true, hasItalic: true });
+    db.rows[0].outline = {} as Json;
+    const [reopened] = await listAnnouncementLibraryEntries(db.client, "u1", "c1");
+    expect(reopened.outline).toMatchObject({ hasBold: true, hasItalic: true });
+    expect(JSON.stringify(reopened.outline)).not.toContain("Old details");
+  });
   it("never acknowledges a foreign owner/course collision or different create payload", async () => {
     for (const existing of [row({ user_id: "foreign" }), row({ course_id: "foreign" }), row()]) {
       const db = libraryDatabase([existing]);

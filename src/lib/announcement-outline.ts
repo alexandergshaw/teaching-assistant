@@ -108,6 +108,7 @@ const UNORDERED_LIST_RE = /^[-*]\s+\S/;
 const ORDERED_LIST_RE = /^\d+[.)]\s+\S/;
 const LIST_MARKER_RE = /^(?:[-*]|\d+[.)])\s+/;
 const MARKDOWN_HEADING_RE = /^#{1,6}\s+(.*)$/;
+const STRUCTURAL_HEADING_RE = /^(?:\*\*)?(?:complete|also review|before you submit|help|due dates|this week|next steps|resources):?(?:\*\*)?:?$/i;
 const TERMINAL_PUNCTUATION_RE = /[.!?]$/;
 const SENTENCE_END_RE = /[.!?]+(?:\s|$)/g;
 
@@ -131,8 +132,10 @@ function buildBlocks(text: string): string[][] {
   const blocks: string[][] = [];
   let current: string[] = [];
 
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex].trim();
+    const nextLine = lines[lineIndex + 1]?.trim() ?? "";
+    const listLead = line.endsWith(":") && line.length <= HEADING_MAX_CHARS && isListLine(nextLine);
     if (line.length === 0) {
       if (current.length > 0) {
         blocks.push(current);
@@ -142,7 +145,7 @@ function buildBlocks(text: string): string[][] {
     }
     // Markdown headings and transitions between prose and lists are structural
     // breaks even when the pasted text has no blank lines.
-    if (current.length && (MARKDOWN_HEADING_RE.test(line) || MARKDOWN_HEADING_RE.test(current[0]) || isListLine(line) != isListLine(current[current.length - 1]))) {
+    if (current.length && (MARKDOWN_HEADING_RE.test(line) || MARKDOWN_HEADING_RE.test(current[0]) || STRUCTURAL_HEADING_RE.test(line) || STRUCTURAL_HEADING_RE.test(current[0]) || listLead || (current.length === 1 && current[0].endsWith(":")) || (!isListLine(line) && !isListLine(current[current.length - 1]) && TERMINAL_PUNCTUATION_RE.test(current[current.length - 1])) || isListLine(line) != isListLine(current[current.length - 1]))) {
       blocks.push(current);
       current = [];
     }
@@ -157,7 +160,7 @@ function buildBlocks(text: string): string[][] {
  * stripped - the marker is a formatting hint, not part of the label. */
 function headingTextOf(line: string): string {
   const md = line.match(MARKDOWN_HEADING_RE);
-  return (md ? md[1] : line).trim();
+  return (md ? md[1] : line).replace(/\*\*/g, "").replace(/:$/, "").trim();
 }
 
 /**
@@ -202,7 +205,7 @@ function isHeadingCandidateBlock(block: string[]): boolean {
 function tryExtractHeading(block: string[], nextBlock: string[] | undefined): string | null {
   if (!nextBlock) return null;
   if (!isHeadingCandidateBlock(block)) return null;
-  if (isHeadingCandidateBlock(nextBlock)) return null;
+  if (isHeadingCandidateBlock(nextBlock) && !STRUCTURAL_HEADING_RE.test(block[0]) && !block[0].endsWith(":")) return null;
   return headingTextOf(block[0]);
 }
 
@@ -332,6 +335,8 @@ export function deriveAnnouncementOutline(text: string): AnnouncementOutline {
   }
 
   const hasLinks = LINK_RE.test(text);
+  const hasBold = /(?:\*\*|__)[^\n]+?(?:\*\*|__)/.test(text);
+  const hasItalic = /(?:^|[^*])\*[^*\n]+\*(?!\*)|(?:^|[^_])_[^_\n]+_(?!_)/m.test(text);
 
   // A single, unheaded, otherwise-uninteresting paragraph carries no
   // structure worth reporting - collapse it to the canonical empty value
@@ -348,7 +353,7 @@ export function deriveAnnouncementOutline(text: string): AnnouncementOutline {
     dueDateSectionIndex === null &&
     todoSectionIndex === null &&
     !hasLinks;
-  if (isTriviallyEmpty) return EMPTY_ANNOUNCEMENT_OUTLINE;
+  if (isTriviallyEmpty) return hasBold || hasItalic ? { ...EMPTY_ANNOUNCEMENT_OUTLINE, hasBold, hasItalic } : EMPTY_ANNOUNCEMENT_OUTLINE;
 
   return {
     sections,
@@ -357,5 +362,7 @@ export function deriveAnnouncementOutline(text: string): AnnouncementOutline {
     dueDateSectionIndex,
     todoSectionIndex,
     hasLinks,
+    ...(hasBold && { hasBold }),
+    ...(hasItalic && { hasItalic }),
   };
 }

@@ -922,3 +922,20 @@ describe("A18 7.1/7.4/7.6: mutants proving the instruments above can go RED", ()
     expect(a18RecordFamilyMatches(FROZEN_ANNOUNCEMENT_FRAMING)).toEqual(["record"]);
   });
 });
+
+it("honors a selected example's greeting and structure without importing old facts", () => {
+  const outline = baseOutline({ hasGreeting: false, hasSignOff: false, sections: [section({ heading: "Complete", listKind: "unordered" })] });
+  const prompt = buildWalkthroughAnnouncementPrompt(baseArgs({ outline, matchExample: true, materialsText: "Read the current module." }));
+  expect(prompt).toContain("The example does not open with a greeting.");
+  expect(prompt).toContain("The example does not close with a sign-off.");
+  expect(prompt).toContain("body is an unordered list");
+  expect(prompt).not.toContain("THE ANNOUNCEMENT FLOOR");
+  expect(prompt).toContain("do not invent missing content");
+});
+
+it("matches emphasis and groups current facts by selected example sections", () => {
+  const prompt = buildWalkthroughAnnouncementPrompt(baseArgs({ matchExample: true, outline: baseOutline({ hasBold: true, hasItalic: false }) }));
+  expect(prompt).toContain("example uses bold and does not use italic");
+  expect(prompt).toContain("Group current course information according to the example structure");
+  expect(prompt).not.toContain("Cover the walkthrough content in the order the materials below list it");
+});

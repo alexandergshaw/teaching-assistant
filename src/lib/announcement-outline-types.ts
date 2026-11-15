@@ -70,6 +70,9 @@ export interface AnnouncementOutline {
    * not the links themselves: the URLs in last term's announcement are
    * CONTENT, and reproducing them would send students to last term's pages. */
   hasLinks: boolean;
+  /** Whether the example uses Markdown emphasis; content is not retained. */
+  hasBold?: boolean;
+  hasItalic?: boolean;
 }
 
 /** The outline of a document with no discernible structure - a single

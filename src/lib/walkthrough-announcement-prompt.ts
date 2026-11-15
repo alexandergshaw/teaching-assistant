@@ -242,12 +242,14 @@ function renderOutlineSection(section: OutlineSection): string {
  * gets its own instruction rather than an empty section list silently
  * producing no guidance at all.
  */
-export function renderOutlineBlock(outline: AnnouncementOutline): string {
+export function renderOutlineBlock(outline: AnnouncementOutline, matchExample = false): string {
   if (outline.sections.length === 0) {
+    if (matchExample) return `The example has no headings or lists. Use plain prose. ${outline.hasGreeting ? "Include a greeting." : "Do not add a greeting."} ${outline.hasSignOff ? "Include a sign-off." : "Do not add a sign-off."}`;
     return "The exemplar had no discernible structure (a single unheaded paragraph, or an empty document). Write the announcement as plain paragraphs, with no headings and no lists (bold and italic emphasis are still fine where the content warrants it) - THE ANNOUNCEMENT FLOOR above still governs how many paragraphs: one per distinct item, plus the greeting and sign-off.";
   }
 
   const lines = promptSafeAnnouncementOutline(outline).sections.map(renderOutlineSection);
+  if (matchExample) lines.push(outline.hasGreeting ? "The example opens with a greeting." : "The example does not open with a greeting.", outline.hasSignOff ? "The example closes with a sign-off." : "The example does not close with a sign-off.");
   lines.push(
     outline.dueDateSectionIndex !== null
       ? `Has a due-date block, in section ${outline.dueDateSectionIndex}.`
@@ -277,6 +279,7 @@ export interface WalkthroughAnnouncementPromptArgs {
   /** The exemplar's derived structure (AC2). NEVER the exemplar's raw text -
    * see this file's header. */
   outline: AnnouncementOutline;
+  matchExample?: boolean;
   /** A pre-rendered per-captured-page coverage block (e.g. numbered page
    * markers and their headings, in the spirit of renderPageMarkers in
    * knowledge-overview-prompt.ts), so the model can avoid inventing unread material or claiming completeness. Built from the same page-heading data as the
@@ -335,7 +338,12 @@ export function buildWalkthroughAnnouncementPrompt(args: WalkthroughAnnouncement
   const blocks: string[] = [
     `Draft a direct announcement for students in ${scope}. Explain the course information in the materials, reproducing the STRUCTURE of a previous announcement (described below as an outline).`,
 
-    [
+    args.matchExample ? [
+      "MATCH THE SELECTED EXAMPLE",
+      "- Follow the example structure below closely: preserve its section order, heading and list patterns, approximate section lengths, and whether it has a greeting or sign-off.",
+      "- Keep related course items together in the same section or list when that matches the example. Include all supported material without inventing facts, dates, links, or details from the old announcement.",
+      "- Use the writing-style sample for voice only; it must not change the selected example structure.",
+    ].join("\n") : [
       "FORMAT VERSUS VOICE",
       "- The outline below governs FORMAT: section order, whether each section opens with a heading or a paragraph break, whether its body is prose or a list (and if a list, ordered or unordered), and roughly how long each section runs.",
       "- The writing-style sample at the end (if present) governs VOICE: word choice, sentence rhythm, and tone.",
@@ -343,25 +351,31 @@ export function buildWalkthroughAnnouncementPrompt(args: WalkthroughAnnouncement
       "- Markdown emphasis (bold/italic) is FORMAT, not wording; a style sample that happens to contain none does not cancel it.",
     ].join("\n"),
 
-    [
+    args.matchExample ? "WRITE IN MARKDOWN\n- Use headings and list types only where the selected example structure calls for them." : [
       "WRITE IN MARKDOWN",
       "- Use Markdown headings, bullet lists, and ordered lists wherever the outline below calls for them. This is a formatted document that should visibly match the outline's structure, not a plain-text paragraph - a section split into more paragraphs than the outline shows, solely to give each distinct item its own paragraph per THE ANNOUNCEMENT FLOOR, still counts as matching that structure.",
     ].join("\n"),
 
-    [
+    ...(args.matchExample ? [] : [[
       "THE ANNOUNCEMENT FLOOR (applies on every branch, and outranks the outline below on these three points only)",
       "- Open with a greeting to the students.",
       "- Close with a sign-off.",
       "- Give each distinct item, topic, or piece of news its own paragraph - never run more than one item together in the same paragraph.",
       "- The outline below still governs section order, headings, and whether a section is prose or a list. It does NOT override the three rules above: if following the outline's own paragraph/section count would merge two distinct items into one paragraph, split them anyway. A section may be rendered as MORE paragraphs than the outline's own section count for this reason alone.",
-    ].join("\n"),
+    ].join("\n")]),
 
-    [
+    args.matchExample ? [
+      "EMPHASIS",
+      `- The example ${args.outline.hasBold ? "uses" : "does not use"} bold and ${args.outline.hasItalic ? "uses" : "does not use"} italic. Match that emphasis style; never emphasize unsupported claims.`,
+    ].join("\n") : [
       "EMPHASIS",
       "- Where the content genuinely has something worth marking (a due date, a key term, an urgent change), use Markdown bold (**text**) or italic (*text*) to mark it. Do not force emphasis into a sentence that has nothing worth marking.",
     ].join("\n"),
 
-    [
+    args.matchExample ? [
+      "COVERAGE ORDER (AC4)",
+      "- Group current course information according to the example structure. Within each matching group, preserve the order of the current materials and do not duplicate repeated pages.",
+    ].join("\n") : [
       "COVERAGE ORDER (AC4)",
       "- Cover the walkthrough content in the order the materials below list it - that is the order the pages were actually walked. Never reorder to module order or syllabus order.",
       "- If a page was walked more than once, cover it only once, at its first appearance.",
@@ -381,8 +395,8 @@ export function buildWalkthroughAnnouncementPrompt(args: WalkthroughAnnouncement
     UNTRUSTED_CONTENT_FRAMING,
 
     [
-      "EXEMPLAR STRUCTURE (outline only - reproduce this shape, never any wording or dates from the original, EXCEPT the greeting/sign-off/one-item-per-paragraph floor above, which applies regardless of what this shape does or does not show)",
-      renderOutlineBlock(args.outline),
+      args.matchExample ? "EXEMPLAR STRUCTURE (shape only; never reuse original facts, dates, links, or instructions)" : "EXEMPLAR STRUCTURE (outline only - reproduce this shape, never any wording or dates from the original, EXCEPT the greeting/sign-off/one-item-per-paragraph floor above, which applies regardless of what this shape does or does not show)",
+      renderOutlineBlock(args.outline, args.matchExample),
     ].join("\n"),
 
     ...(researchedResources.length > 0 ? [renderResearchedResourcesBlock(researchedResources)] : []),

@@ -317,6 +317,7 @@ export interface WalkthroughAnnouncementDraftInput {
   /** The exemplar's DERIVED outline (AC2) - never its raw text (P11). Pass
    * EMPTY_ANNOUNCEMENT_OUTLINE when no exemplar was pasted or picked. */
   outline: AnnouncementOutline;
+  matchExample?: boolean;
   /** Pre-rendered by the caller via renderWalkthroughCoverageBlock
    * (walkthrough-announcement-coverage.ts) from the same joined blocks
    * reduceCaptureToMaterials returned - "" when there is nothing to name. */
@@ -373,6 +374,7 @@ function composeProviderPrompt(input: WalkthroughAnnouncementDraftInput, styleBl
     moduleLabel: input.moduleLabel,
     materialsText: input.materialsText,
     outline: input.outline,
+    matchExample: input.matchExample,
     coverageBlock: input.coverageBlock,
     notes: input.notes,
     styleBlock,

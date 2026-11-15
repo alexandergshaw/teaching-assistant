@@ -88,6 +88,7 @@ export function useWalkthroughGenerationAdapters(selectedCourse: WtaCourseOption
         moduleLabel: ctx.moduleLabel,
         materialsText: ctx.materialsText,
         outline,
+        matchExample: ctx.matchExample,
         coverageBlock: ctx.coverageBlock,
         notes: ctx.notes,
         provider: ctx.provider,

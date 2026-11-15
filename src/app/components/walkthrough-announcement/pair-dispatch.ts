@@ -7,7 +7,7 @@ import { recordWalkthroughDiagnostic } from "./walkthrough-diagnostics";
 type DraftAdapter = (ctx: AnnouncementDraftDispatchContext, outline: AnnouncementOutline, isCurrent?: () => boolean) => Promise<{ title: string; message: string; researchNotice: ResearchNotice } | { error: string }>;
 export async function dispatchResolvedAnnouncementDraft(ctx: AnnouncementDraftDispatchContext, resolved: ReturnType<typeof resolveChoice>, draftOne: DraftAdapter) {
   if (resolved.error) return { error: resolved.error };
-  const result = await draftOne(ctx, promptSafeAnnouncementOutline(resolved.outline));
+  const result = await draftOne({ ...ctx, matchExample: resolved.template.kind !== "none" }, promptSafeAnnouncementOutline(resolved.outline));
   return "error" in result ? result : { ...result, builtFrom: resolved.template, timing: ctx.timing, sourceCourseId: ctx.courseId ?? null };
 }
 export interface PairDraftAdapters {

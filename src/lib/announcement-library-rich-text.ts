@@ -54,3 +54,18 @@ export function previousAnnouncementHtml(value: string): string {
   return value.split(/\r?\n/).map(line => `<div>${line ? escape(line) : "<br>"}</div>`).join("");
 }
 export function previousAnnouncementText(value: string): string { return value.startsWith(PREFIX) ? htmlToMarkdown(sanitizePreviousAnnouncementHtml(value.slice(PREFIX.length))) : value; }
+
+/** Return only visual emphasis flags from sanitized saved HTML, never content. */
+export function previousAnnouncementEmphasis(value: string): { hasBold: boolean; hasItalic: boolean } {
+  if (!value.startsWith(PREFIX)) return { hasBold: false, hasItalic: false };
+  const root = parse(sanitizePreviousAnnouncementHtml(value.slice(PREFIX.length)));
+  let hasBold = false, hasItalic = false;
+  for (const node of root.querySelectorAll("*")) {
+    if (!node.text.trim()) continue;
+    const tag = node.rawTagName?.toLowerCase();
+    const style = node.getAttribute("style") ?? "";
+    if (tag === "strong" || tag === "b" || /(?:^|;)\s*font-weight\s*:\s*(?:bold|[6-9]00)\s*(?:;|$)/i.test(style)) hasBold = true;
+    if (tag === "em" || tag === "i" || /(?:^|;)\s*font-style\s*:\s*(?:italic|oblique)\s*(?:;|$)/i.test(style)) hasItalic = true;
+  }
+  return { hasBold, hasItalic };
+}

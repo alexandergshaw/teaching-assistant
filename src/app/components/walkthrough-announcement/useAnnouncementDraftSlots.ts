@@ -51,6 +51,7 @@ export interface AnnouncementDraftRequestContext {
  * field. */
 export interface AnnouncementDraftDispatchContext extends AnnouncementDraftRequestContext {
   readonly researchOutcome: ResourceOutcome;
+  readonly matchExample?: boolean;
   /** A19: the SLOT's own timing, not a shared/batch value (AC-5) - there is
    * no `timing` on AnnouncementDraftRequestContext above; it is per-slot,
    * read from `slot.timing` at each dispatch site, never from `ctx`. */

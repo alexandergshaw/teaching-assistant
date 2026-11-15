@@ -101,6 +101,77 @@ const REALISTIC_OUTLINE = deriveAnnouncementOutline(
 const NO_RESEARCH = { kind: "off" as const };
 const NO_RESEARCHED_RESOURCES: ReadonlyArray<{ title: string; url: string }> = [];
 
+it("uses the reviewed placeholder contract even if the writing style changes afterwards", async () => {
+  vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "test-signing-key");
+  try {
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current content.", outline: EMPTY_ANNOUNCEMENT_OUTLINE, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  vi.mocked(getWritingStyleBlock).mockResolvedValueOnce("old style").mockResolvedValueOnce("new style");
+  const prepared = await prepareWalkthroughAnnouncementPromptAction(input);
+  if (!("prompt" in prepared)) throw new Error("Missing prompt");
+  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", placeholders: { s1_p0: "Current content." } }) } as never);
+  const result = await draftWalkthroughAnnouncementAction({ ...input, promptOverride: prepared.prompt, promptPreparedFor: prepared.preparedFor, promptSignature: prepared.promptSignature, promptContextSignature: prepared.promptContextSignature });
+  expect(result).toHaveProperty("message", "Current content.");
+  expect((vi.mocked(callLlm).mock.calls[0][0].contents[0].parts[0] as { text: string }).text).toBe(prepared.prompt);
+  } finally { vi.unstubAllEnvs(); }
+});
+
+it("retries an empty default response once", async () => {
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current content.", outline: EMPTY_ANNOUNCEMENT_OUTLINE, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, status: 200, text: "" } as never).mockResolvedValueOnce({ ok: true, status: 200, text: JSON.stringify({ title: "Update", placeholders: { s1_p0: "Current content." } }) } as never);
+  expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("message", "Current content.");
+  expect(callLlm).toHaveBeenCalledTimes(2);
+});
+
+it("does not retry an instructor-edited prompt", async () => {
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current content.", outline: EMPTY_ANNOUNCEMENT_OUTLINE, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH, promptOverride: "Instructor prompt", promptPreparedFor: USER.id };
+  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: "not json" } as never);
+  expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("error");
+  expect(callLlm).toHaveBeenCalledTimes(1);
+});
+
+it("does not treat an edited prompt as unchanged using a prior signature", async () => {
+  vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "test-signing-key");
+  try {
+    const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current content.", outline: EMPTY_ANNOUNCEMENT_OUTLINE, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+    const prepared = await prepareWalkthroughAnnouncementPromptAction(input);
+    if (!("prompt" in prepared)) throw new Error("Missing prompt");
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: "not json" } as never);
+    await draftWalkthroughAnnouncementAction({ ...input, promptOverride: prepared.prompt + "\nInstructor edit", promptPreparedFor: prepared.preparedFor, promptSignature: prepared.promptSignature, promptContextSignature: prepared.promptContextSignature });
+    expect(callLlm).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(callLlm).mock.calls[0][0].generationConfig?.responseMimeType).toBeUndefined();
+  } finally { vi.unstubAllEnvs(); }
+});
+
+it("rejects a signed reviewed prompt after its inputs change or it expires", async () => {
+  vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "test-signing-key");
+  try {
+    const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current content.", outline: EMPTY_ANNOUNCEMENT_OUTLINE, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+    const prepared = await prepareWalkthroughAnnouncementPromptAction(input);
+    if (!("prompt" in prepared)) throw new Error("Missing prompt");
+    const reviewed = { promptOverride: prepared.prompt, promptPreparedFor: prepared.preparedFor, promptSignature: prepared.promptSignature, promptContextSignature: prepared.promptContextSignature };
+    for (const changed of [{ ...input, materialsText: "Changed content." }, { ...input, emojiPolicy: "requested" as const }, { ...input, matchExample: false }]) {
+      expect(await draftWalkthroughAnnouncementAction({ ...changed, ...reviewed })).toHaveProperty("error", "The reviewed prompt has expired or its inputs changed. Prepare it again.");
+    }
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 31 * 60_000);
+    expect(await draftWalkthroughAnnouncementAction({ ...input, ...reviewed })).toHaveProperty("error", "The reviewed prompt has expired or its inputs changed. Prepare it again.");
+    expect(callLlm).not.toHaveBeenCalled();
+  } finally { vi.useRealTimers(); vi.unstubAllEnvs(); }
+});
+
+it("rejects mixing a signed prompt with another preparation's context", async () => {
+  vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "test-signing-key");
+  try {
+    const input = { courseLabel: "Course", moduleLabel: null, materialsText: "First material.", outline: EMPTY_ANNOUNCEMENT_OUTLINE, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+    const otherInput = { ...input, materialsText: "Second material." };
+    const first = await prepareWalkthroughAnnouncementPromptAction(input);
+    const second = await prepareWalkthroughAnnouncementPromptAction(otherInput);
+    if (!("prompt" in first) || !("prompt" in second)) throw new Error("Missing prompt");
+    expect(await draftWalkthroughAnnouncementAction({ ...otherInput, promptOverride: first.prompt, promptPreparedFor: first.preparedFor, promptSignature: first.promptSignature, promptContextSignature: second.promptContextSignature })).toHaveProperty("error", "The reviewed prompt has expired or its inputs changed. Prepare it again.");
+    expect(callLlm).not.toHaveBeenCalled();
+  } finally { vi.unstubAllEnvs(); }
+});
+
 it("assembles supported template sections deterministically and rejects content omitted by section data", async () => {
   const outline = deriveAnnouncementOutline("Introduction.\nComplete:\n- Read the source.\n- Submit the work.\nQuiz Details:\n- Due Sunday\n- Points 20");
   const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current project and reading.", outline, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "beginning-of-week" as const, researchedResources: [], researchOutcome: NO_RESEARCH };

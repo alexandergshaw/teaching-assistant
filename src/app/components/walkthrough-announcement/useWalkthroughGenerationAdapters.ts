@@ -103,7 +103,7 @@ export function useWalkthroughGenerationAdapters(selectedCourse: WtaCourseOption
       if (!isCurrent()) return { error: "Draft was cancelled before prompt review." };
       const promptOverride = await reviewPrompt(prepared.prompt, scopeKey);
       if (promptOverride === null || !isCurrent()) return { error: "Draft cancelled before sending the prompt." };
-      const result = await draftWalkthroughAnnouncementAction({ ...input, promptOverride, promptPreparedFor: prepared.preparedFor });
+      const result = await draftWalkthroughAnnouncementAction({ ...input, promptOverride, promptPreparedFor: prepared.preparedFor, promptSignature: prepared.promptSignature, promptContextSignature: prepared.promptContextSignature });
       if ("error" in result) return { error: result.error };
       return { title: result.title, message: result.message, researchNotice: result.researchNotice, ...(result.richHtml && { richHtml: result.richHtml, richSourceMessage: result.message }), ...(result.richExtraNotice && { richExtraNotice: true }), ...(result.formatFallback && { formatFallback: true }), compareTemplate: promptOverride === prepared.prompt };
     },

@@ -23,6 +23,7 @@
 // keeps this file honest about what it actually checks.
 
 import { createServiceClient } from "@/lib/supabase/server";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { requireUser } from "@/lib/supabase/auth";
 import { callLlm, type LlmProvider } from "@/lib/llm";
 import { getGeminiModel } from "@/lib/gemini";
@@ -377,6 +378,8 @@ export interface WalkthroughAnnouncementDraftInput {
   /** Exact instructor-reviewed provider prompt, if supplied. */
   promptOverride?: string;
   promptPreparedFor?: string;
+  promptSignature?: string;
+  promptContextSignature?: string;
 }
 
 function composeProviderPrompt(input: WalkthroughAnnouncementDraftInput, styleBlock: string): string {
@@ -407,16 +410,19 @@ function composeProviderPrompt(input: WalkthroughAnnouncementDraftInput, styleBl
     bodyInstruction,
     input.matchExample && richTreePlan(input.outline.richTree) ? [
       "Return ONLY valid JSON with title and placeholders, a flat object mapping IDs to current text.",
+      'Shape example only; use only IDs present in the layout: {"title":"Current update","placeholders":{"s0":"Current information","extra_0":"Additional current information"}}',
       `The content-free layout is ${JSON.stringify(richTreePlan(input.outline.richTree)!.shape)}. Use key s followed by the slot number.`,
       "Fill every slot in an included top-level branch; omit unsupported branches. Keep Markdown links within one value. Never reuse example facts. Put additional supported paragraphs in optional extra_0 through extra_39 keys, in order. Do not return any other fields.",
       input.emojiPolicy === "requested" ? "Slots marked emoji accept one selected emoji; do not put emoji in other slots." : "Omit slots marked emoji; do not put emoji in other slots.",
     ].join("\n") : input.matchExample && validRichTemplate(input.outline.richTemplate) ? [
       "Return ONLY valid JSON with title and placeholders, where placeholders is an object mapping placeholder IDs to current text. Generate content once.",
+      'Shape example only; use only IDs present in the layout: {"title":"Current update","placeholders":{"b0_e0_r0":"Current information","extra_0":"Additional current information"}}',
       `The content-free blocks and grouped placeholder IDs are: ${JSON.stringify(input.outline.richTemplate.blocks.map((block, index) => ({ kind: block.tag, entries: richTemplatePlaceholders(input.outline.richTemplate!)[index].map((entry, e) => entry.map((id, r) => ({ id, kind: block.entries[e].runs[r].emoji ? "emoji" : "text" }))) })))}.`,
       "Fill every ID in an included entry; omit unsupported blocks. Within a list block include a consecutive prefix of entries, with no gaps. Keep each Markdown link entirely within one placeholder. Never use example facts or invent facts to fill a block. Put additional supported paragraphs in optional extra_0 through extra_39 keys, in order. Do not return any other fields.",
       input.emojiPolicy === "requested" ? "For each emoji placeholder choose one relevant emoji; do not put emoji in text placeholders." : "Omit emoji placeholders and do not put emoji in text placeholders.",
     ].join("\n") : input.matchExample ? [
       "Return ONLY JSON with title and placeholders, a flat map of IDs to current text. No other fields.",
+      '{"title":"Current update","placeholders":{"s1_p0":"Current information"}}',
       `The section positions and shapes are ${JSON.stringify(announcementStructurePlan(input.outline))}.`,
       "For section N, use sN_p0, sN_p1 and so on for paragraphs; sN_i0, sN_i1 and so on for list items. Number each kind consecutively from zero without gaps. For a heading with no canonical heading use sN_heading. Omit sections unsupported by current materials. The last section is optional extra prose. Keep each value one line, and do not include Markdown block prefixes.",
       input.emojiPolicy === "requested" ? "For each saved emoji position, use sN_emoji0, sN_emoji1 and so on in its listed order; each value is one selected emoji. Do not put emoji in text values." : "Do not include emoji.",
@@ -437,11 +443,39 @@ function composeProviderPrompt(input: WalkthroughAnnouncementDraftInput, styleBl
 }
 
 /** Prepare the exact provider input for instructor review after slot research. */
-export async function prepareWalkthroughAnnouncementPromptAction(input: WalkthroughAnnouncementDraftInput): Promise<{ prompt: string; preparedFor: string } | { error: string }> {
+function promptSignature(prompt: string, userId: string): string | undefined {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  return key ? createHmac("sha256", key).update("walkthrough-prompt-v1\0").update(userId).update("\0").update(prompt).digest("hex") : undefined;
+}
+function hasValidPromptSignature(prompt: string, userId: string, signature: string | undefined): boolean {
+  const expected = promptSignature(prompt, userId);
+  if (!expected || !signature || !/^[0-9a-f]{64}$/.test(signature)) return false;
+  return timingSafeEqual(Buffer.from(signature, "hex"), Buffer.from(expected, "hex"));
+}
+function canonicalPromptContext(input: WalkthroughAnnouncementDraftInput): string {
+  const { promptOverride: _override, promptPreparedFor: _owner, promptSignature: _signature, promptContextSignature: _context, ...context } = input;
+  const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, entry]) => [key, canonical(entry)])) : value;
+  return JSON.stringify(canonical(context));
+}
+function contextSignature(input: WalkthroughAnnouncementDraftInput, userId: string, expires: number, prompt: string): string | undefined {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  return key ? `${expires}.${createHmac("sha256", key).update("walkthrough-context-v2\0").update(userId).update("\0").update(String(expires)).update("\0").update(prompt).update("\0").update(canonicalPromptContext(input)).digest("hex")}` : undefined;
+}
+function hasValidContextSignature(input: WalkthroughAnnouncementDraftInput, userId: string): boolean {
+  const token = input.promptContextSignature;
+  if (!token || !/^\d{13}\.[0-9a-f]{64}$/.test(token)) return false;
+  const expires = Number(token.slice(0, 13));
+  if (!Number.isSafeInteger(expires) || expires < Date.now() || expires > Date.now() + 30 * 60_000) return false;
+  if (input.promptOverride === undefined) return false;
+  const expected = contextSignature(input, userId, expires, input.promptOverride);
+  return !!expected && timingSafeEqual(Buffer.from(token), Buffer.from(expected));
+}
+export async function prepareWalkthroughAnnouncementPromptAction(input: WalkthroughAnnouncementDraftInput): Promise<{ prompt: string; preparedFor: string; promptSignature?: string; promptContextSignature?: string } | { error: string }> {
   try {
     const user = await requireUser();
     if (!input.materialsText.trim()) return { error: "No captured material is available. Capture a walkthrough first." };
-    return { prompt: composeProviderPrompt(input, await getWritingStyleBlock(user.id)), preparedFor: user.id };
+    const prompt = composeProviderPrompt(input, await getWritingStyleBlock(user.id));
+    return { prompt, preparedFor: user.id, promptSignature: promptSignature(prompt, user.id), promptContextSignature: contextSignature(input, user.id, Date.now() + 30 * 60_000, prompt) };
   } catch { return { error: "Could not prepare the announcement prompt. Try again." }; }
 }
 
@@ -486,7 +520,9 @@ export async function draftWalkthroughAnnouncementAction(
     }
     const defaultPrompt = composeProviderPrompt(input, styleBlock);
     const prompt = input.promptOverride ?? defaultPrompt;
-    const useDefaultPrompt = input.promptOverride === undefined || input.promptOverride === defaultPrompt;
+    const signedPrompt = input.promptOverride !== undefined && hasValidPromptSignature(input.promptOverride, user.id, input.promptSignature);
+    if (signedPrompt && !hasValidContextSignature(input, user.id)) return { error: "The reviewed prompt has expired or its inputs changed. Prepare it again.", diag: unattemptedLlmDiag(provider) };
+    const useDefaultPrompt = input.promptOverride === undefined || input.promptOverride === defaultPrompt || signedPrompt;
 
     // THE COMPUTED TOKEN BUDGET (P7) - sized from the outline, never a fixed
     // 1024 (draftAnnouncementAction's own budget, deliberately not
@@ -494,10 +530,16 @@ export async function draftWalkthroughAnnouncementAction(
     const tokenBudget = input.matchExample && useDefaultPrompt
       ? Math.min(8192, walkthroughAnnouncementMaxOutputTokens(input.outline) * 2)
       : walkthroughAnnouncementMaxOutputTokens(input.outline);
-    const r = await callLlm(
-      { contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: 0.5, maxOutputTokens: tokenBudget } },
+    const config = { temperature: 0.5, maxOutputTokens: tokenBudget, ...(input.matchExample && useDefaultPrompt ? { responseMimeType: "application/json" } : {}) };
+    let r = await callLlm(
+      { contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: config },
       provider
     );
+
+    if (r.ok && input.matchExample && useDefaultPrompt && !r.text.trim()) {
+      console.warn("Walkthrough draft response empty; retrying once");
+      r = await callLlm({ contents: [{ role: "user", parts: [{ text: `${prompt}\n\nReturn a complete JSON object with a nonempty title and the requested placeholders object. Do not return a partial object or prose outside JSON.` }] }], generationConfig: config }, provider);
+    }
 
     const diagBase = {
       attempted: true as const,

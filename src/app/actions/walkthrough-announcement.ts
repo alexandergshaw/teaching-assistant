@@ -576,6 +576,7 @@ export async function draftWalkthroughAnnouncementAction(
     const title = parsed.title.trim();
     const message = "message" in parsed && typeof parsed.message === "string" ? parsed.message.trim() : "";
     if (!title || (!message && !(input.matchExample && useDefaultPrompt && ("sections" in parsed || "richSlots" in parsed || "placeholders" in parsed)))) {
+      console.warn("Walkthrough draft validation", !title ? "missing-title" : !input.matchExample ? "missing-body-no-template" : !useDefaultPrompt ? "missing-body-custom-prompt" : "missing-template-content");
       return { error: "Generated announcement is empty. Try again.", diag: diagBase };
     }
 
@@ -619,19 +620,19 @@ export async function draftWalkthroughAnnouncementAction(
         const contentMap = placeholderMap && Object.fromEntries(Object.entries(placeholderMap).filter(([key]) => !extraKeys.includes(key)));
         if (treePlan && "placeholders" in parsed) {
           const treeSlots = richTreeSlotsFromMap(input.outline.richTree, contentMap);
-          if (!treeSlots || treeSlots.some(slot => treePlan.emojiSlots.includes(slot.slot) ? !isSingleEmoji(slot.text) : containsEmoji(slot.text)) || extra.some(value => containsEmoji(value))) return { error: "The draft could not be matched safely to the saved formatting. Try again.", diag: diagBase };
+          if (!treeSlots || treeSlots.some(slot => treePlan.emojiSlots.includes(slot.slot) ? !isSingleEmoji(slot.text) : containsEmoji(slot.text)) || extra.some(value => containsEmoji(value))) { console.warn("Walkthrough draft validation", !treeSlots ? "tree-map-invalid" : "tree-emoji-invalid"); return { error: "The draft could not be matched safely to the saved formatting. Try again.", diag: diagBase }; }
           if (input.emojiPolicy === "requested" && treePlan.emojiSlots.some(id => !treeSlots.some(slot => slot.slot === id))) formatFallback = true;
           const cleanedTree = treeSlots.filter(slot => input.emojiPolicy === "requested" || !treePlan.emojiSlots.includes(slot.slot)).map(slot => ({ ...slot, text: stripUnpermittedUrls(slot.text, permitted).text }));
           const cleanedExtra = extra.map(value => stripUnpermittedUrls(value, permitted).text).filter(value => value.trim());
           singleSourceRich = renderRichTree(input.outline.richTree!, cleanedTree, cleanedExtra);
-          if (!singleSourceRich) return { error: "The draft could not be matched safely to the saved formatting. Try again.", diag: diagBase };
+          if (!singleSourceRich) { console.warn("Walkthrough draft validation", "tree-render-invalid"); return { error: "The draft could not be matched safely to the saved formatting. Try again.", diag: diagBase }; }
           structuredMessage = htmlToMarkdown(singleSourceRich);
           if (cleanedExtra.length) formatFallback = true;
         } else {
         const rawSlots = ("placeholders" in parsed ? richTemplateSlotsFromMap(input.outline.richTemplate!, contentMap) : "richSlots" in parsed ? parsed.richSlots : null) as Parameters<typeof renderRichTemplate>[1] | null;
-        if (!rawSlots) return { error: "The draft could not be matched safely to the saved formatting. Try again.", diag: diagBase };
+        if (!rawSlots) { console.warn("Walkthrough draft validation", "rich-map-invalid"); return { error: "The draft could not be matched safely to the saved formatting. Try again.", diag: diagBase }; }
         const rawHtml = rawSlots.length ? renderRichTemplate(input.outline.richTemplate!, rawSlots) : "";
-        if (rawHtml === null || (!rawHtml && !extra.length)) return { error: "The draft could not be matched safely to the saved formatting. Try again.", diag: diagBase };
+        if (rawHtml === null || (!rawHtml && !extra.length)) { console.warn("Walkthrough draft validation", rawHtml === null ? "rich-render-invalid" : "rich-map-empty"); return { error: "The draft could not be matched safely to the saved formatting. Try again.", diag: diagBase }; }
         if (input.emojiPolicy === "requested" && rawSlots.some(slot => slot.entries.some((entry, e) => entry.some((fragment, r) => input.outline.richTemplate!.blocks[slot.index]?.entries[e]?.runs[r]?.emoji && !fragment)))) formatFallback = true;
         if (extra.some(value => containsEmoji(value))) return { error: "The draft included emoji that could not be positioned safely. Try again.", diag: diagBase };
         const cleanedSlots = rawSlots.map(slot => ({ index: slot.index, entries: slot.entries.map((entry, e) => entry.map((fragment, r) => input.emojiPolicy !== "requested" && input.outline.richTemplate!.blocks[slot.index].entries[e].runs[r].emoji ? "" : stripUnpermittedUrls(fragment, permitted).text)) }));

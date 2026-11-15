@@ -101,6 +101,17 @@ const REALISTIC_OUTLINE = deriveAnnouncementOutline(
 const NO_RESEARCH = { kind: "off" as const };
 const NO_RESEARCHED_RESOURCES: ReadonlyArray<{ title: string; url: string }> = [];
 
+it("logs only a fixed validation category without model content", async () => {
+  const log = vi.spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current content.", outline: EMPTY_ANNOUNCEMENT_OUTLINE, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "", placeholders: { s1_p0: "private content" } }) } as never);
+    expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("error");
+    expect(log).toHaveBeenCalledWith("Walkthrough draft validation", "missing-title");
+    expect(JSON.stringify(log.mock.calls)).not.toContain("private content");
+  } finally { log.mockRestore(); }
+});
+
 it("uses the reviewed placeholder contract even if the writing style changes afterwards", async () => {
   vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "test-signing-key");
   try {

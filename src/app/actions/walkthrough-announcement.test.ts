@@ -725,3 +725,25 @@ describe("A18 AC-2: the empty-input error strings stop saying \"record a walkthr
     expect(source).toContain("the instructor reads it, edits it, and re-records");
   });
 });
+
+describe("deterministic announcement response validation", () => {
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Read https://example.edu/current", outline: EMPTY_ANNOUNCEMENT_OUTLINE, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "beginning-of-week" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  it("enforces the same source-backed link rules in the title and body", async () => {
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Current https://example.edu/current and https://evil.test/old", message: "Read https://example.edu/current, not https://evil.test/old" }) } as never);
+    const result = await draftWalkthroughAnnouncementAction(input);
+    expect(result).toHaveProperty("title");
+    if (!("title" in result)) throw new Error("Expected a draft");
+    expect(result.title).toContain("https://example.edu/current");
+    expect(result.title).not.toContain("evil.test");
+    expect(result.message).not.toContain("evil.test");
+  });
+  it.each([{ title: 42, message: "Body" }, { title: "Title", message: null }, { title: {}, message: "Body" }])("rejects malformed fields as a parse error", async value => {
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify(value) } as never);
+    const result = await draftWalkthroughAnnouncementAction(input);
+    expect(result).toMatchObject({ error: "Could not parse the draft from the model response.", diag: { attempted: true } });
+  });
+  it("refuses a title consisting only of an unsupported URL", async () => {
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "https://evil.test/old", message: "Body" }) } as never);
+    expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("error", "Generated announcement is empty after removing unverified links. Try again.");
+  });
+});

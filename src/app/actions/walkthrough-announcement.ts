@@ -488,15 +488,20 @@ export async function draftWalkthroughAnnouncementAction(
     const jsonText = jsonObjectSlice(r.text);
     if (!jsonText) return { error: "Could not parse the draft from the model response.", diag: diagBase };
 
-    let parsed: { title?: string; message?: string };
+    let parsed: unknown;
     try {
-      parsed = JSON.parse(jsonText) as { title?: string; message?: string };
+      parsed = JSON.parse(jsonText) as unknown;
     } catch {
       return { error: "Could not parse the draft from the model response.", diag: diagBase };
     }
 
-    const title = (parsed.title ?? "").trim();
-    const message = (parsed.message ?? "").trim();
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) ||
+      !("title" in parsed) || !("message" in parsed) ||
+      typeof parsed.title !== "string" || typeof parsed.message !== "string") {
+      return { error: "Could not parse the draft from the model response.", diag: diagBase };
+    }
+    const title = parsed.title.trim();
+    const message = parsed.message.trim();
     if (!title || !message) {
       return { error: "Generated announcement is empty. Try again.", diag: diagBase };
     }
@@ -519,10 +524,14 @@ export async function draftWalkthroughAnnouncementAction(
       researchedResources: input.researchedResources,
     });
     const { text: enforcedMessage } = stripUnpermittedUrls(message, permitted);
+    const { text: enforcedTitle } = stripUnpermittedUrls(title, permitted);
+    if (!enforcedTitle.trim() || !enforcedMessage.trim()) {
+      return { error: "Generated announcement is empty after removing unverified links. Try again.", diag: diagBase };
+    }
 
     const researchNotice = researchNoticeFor(input.researchOutcome);
 
-    return { title, message: enforcedMessage, researchNotice, diag: diagBase };
+    return { title: enforcedTitle.trim(), message: enforcedMessage, researchNotice, diag: diagBase };
   } catch {
     return {
       error: "Could not draft the announcement. Try again.",

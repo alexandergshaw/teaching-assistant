@@ -12,7 +12,7 @@
 // test in this repo renders this component.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Autocomplete, Button, MenuItem, TextField } from "@mui/material";
+import { Alert, Autocomplete, Button, MenuItem, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
 import ConfirmArmButtons from "../ui/ConfirmArmButtons";
@@ -32,6 +32,7 @@ import {
   type TemplateChoice,
   type TemplateOptionSource,
 } from "./announcement-draft-slots";
+import { hasCaptureProcessReference } from "./announcement-review";
 import { pairRole } from "./pair-preferences";
 import { resolveScheduledVisibility } from "./scheduled-visibility";
 
@@ -220,6 +221,7 @@ export default function AnnouncementDraftSlot({
 
       {phase === "drafted" && slot.draft.phase === "drafted" && (
         <>
+          {hasCaptureProcessReference(slot.draft.draft.title, slot.draft.draft.message) && <Alert severity="warning">This draft may refer to the recording process. Review the wording; a course video mentioned as an assignment may be intentional.</Alert>}
           <p className={styles.fieldHint}>{receiptLabel(slot.draft.draft.builtFrom)}</p>
           <p className={styles.fieldHint}>{timingLabel(slot.draft.draft.timing)}</p>
           {/* G3 Ruling 5/14/30: "off", "found", "ran and found nothing", and

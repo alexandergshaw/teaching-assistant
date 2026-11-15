@@ -18,3 +18,18 @@ it("flags a large section-count difference without changing content", () => {
   const outline = { sections, hasGreeting: false, hasSignOff: false, hasLinks: false, dueDateSectionIndex: null, todoSectionIndex: null };
   expect(reviewTemplateStructure("Review the material.", outline).muchShorter).toBe(true);
 });
+
+it("flags a fragmented closing with factual paragraphs interspersed without altering the text", () => {
+  const outline = { sections: [], hasGreeting: false, hasSignOff: false, hasLinks: false, dueDateSectionIndex: null, todoSectionIndex: null, closingParagraphs: 3 };
+  const message = [
+    "As you finalize the project, remember that clear communication matters.",
+    "I look forward to seeing your analysis. Please reach out for help.",
+    "Finalizing your submission requires careful documentation. Keep your evidence clear.",
+    "This week is a great opportunity to apply the concepts.",
+    "I encourage you to use the provided questions. They are not graded.",
+    "Good luck. I am available if you need help.",
+  ].join("\n\n");
+  expect(reviewTemplateStructure(message, outline).fragmentedClosing).toBe(true);
+  expect(message).toContain("They are not graded.");
+  expect(reviewTemplateStructure("## Instructions\n1. Open the editor.\n2. Submit.\n\nGood luck.", outline).fragmentedClosing).toBe(false);
+});

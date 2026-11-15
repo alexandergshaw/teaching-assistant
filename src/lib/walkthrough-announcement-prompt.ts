@@ -351,7 +351,8 @@ export function buildWalkthroughAnnouncementPrompt(args: WalkthroughAnnouncement
       "- Keep related course items together in the same section or list when that matches the example. Include all supported material without inventing facts, dates, links, or details from the old announcement.",
       "- Omit example-only sections when the current materials do not support them; never fill them with unrelated coursework or generic filler.",
       "- Preserve every distinct supported assignment, activity, resource and requirement; do not replace them with vague summaries such as review the material. Keep their details grouped in the relevant example section without inventing new ones.",
-      "- Keep closing remarks at the very end, after all instructional content. Combine related concluding points into cohesive paragraphs rather than many short fragments.",
+      "- Keep closing remarks at the very end, after all instructional content. Preserve substantive facts and instructions before the closing. Combine related encouragement and offers of help into one cohesive closing, rather than repeating them across many short paragraphs.",
+      "- Follow the example list type for non-sequential details. Reserve numbering for genuinely ordered procedures where sequence matters; do not turn labeled details into numbered steps merely because there are several items.",
       "- Use the writing-style sample for voice only; it must not change the selected example structure.",
     ].join("\n") : [
       "FORMAT VERSUS VOICE",

@@ -225,6 +225,7 @@ export default function AnnouncementDraftSlot({
         <>
           {structureReview?.orderChanged && <Alert severity="warning">Named sections appear in a different order from the saved example. Review their sequence.</Alert>}
           {structureReview?.muchShorter && <Alert severity="warning">This draft has far fewer sections than the saved example. Check that it covers the relevant material.</Alert>}
+          {structureReview?.fragmentedClosing && <Alert severity="warning">The ending may have more paragraphs than the saved example. Review the grouping and keep any relevant details.</Alert>}
           {hasCaptureProcessReference(slot.draft.draft.title, slot.draft.draft.message) && <Alert severity="warning">This draft may refer to the recording process. Review the wording; a course video mentioned as an assignment may be intentional.</Alert>}
           <p className={styles.fieldHint}>{receiptLabel(slot.draft.draft.builtFrom)}</p>
           <p className={styles.fieldHint}>{timingLabel(slot.draft.draft.timing)}</p>

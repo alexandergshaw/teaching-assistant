@@ -30,3 +30,8 @@ it("does not change quoted, fenced, or indented code examples", () => {
     "Quiz Details\n    1. Due: Thursday\n    2. Points: 10",
   ]) expect(matchQuizDetailsBullets(input, outline)).toBe(input);
 });
+
+it("retains numbered assignment procedures from the reported draft", () => {
+  const input = "Assignment Details and Requirements\n1. Complete the extra credit using the provided workspace.\n2. Submit a single file containing screenshots.\n3. Include a write-up explaining your work.";
+  expect(matchQuizDetailsBullets(input, outline)).toBe(input);
+});

@@ -977,3 +977,10 @@ it("does not direct the model to reproduce a quiz-only heading when current mate
   expect(prompt).toContain("Omit it unless current materials identify that assessment");
   expect(prompt).toContain("never fill them with unrelated coursework");
 });
+
+it("requests a cohesive ending without erasing facts or changing real sequences", () => {
+  const prompt = buildWalkthroughAnnouncementPrompt(baseArgs({ matchExample: true }));
+  expect(prompt).toContain("Preserve substantive facts and instructions before the closing");
+  expect(prompt).toContain("one cohesive closing");
+  expect(prompt).toContain("Reserve numbering for genuinely ordered procedures");
+});

@@ -27,6 +27,10 @@ describe("uploaded narration production adapter", () => {
     expect(transcriptionFailureCode("Transcription failed: HTTP 404")).toBe("transcription-request-rejected");
     expect(transcriptionFailureCode("Transcription failed: HTTP 413")).toBe("transcription-request-rejected");
     expect(transcriptionFailureCode("Transcription failed: HTTP 999")).toBe("transcription-failed");
+    expect(transcriptionFailureCode("Transcription failed: HTTP 0")).toBe("transcription-transport-failed");
+    expect(transcriptionFailureCode("Missing environment variable: GEMINI_API_KEY")).toBe("transcription-not-configured");
+    expect(transcriptionFailureCode("Not authorized. Sign in with an approved account.")).toBe("transcription-sign-in-required");
+    expect(transcriptionFailureCode("The account service is temporarily unavailable. Please try again in a moment.")).toBe("transcription-account-unavailable");
     expect(transcriptionFailureCode("PRIVATE_PROVIDER_ERROR 403")).toBe("transcription-failed");
   });
   it.each(["context", "prepare", "decode", "transcribe"] as const)("classifies an untyped %s failure without exposing its message", async phase => {
@@ -35,7 +39,7 @@ describe("uploaded narration production adapter", () => {
     if (phase === "prepare") vi.mocked(h.adapters.prepare).mockRejectedValue(new Error("PRIVATE_DETAIL"));
     if (phase === "decode") vi.mocked(h.adapters.decode).mockRejectedValue(new Error("PRIVATE_DETAIL"));
     if (phase === "transcribe") vi.mocked(h.adapters.transcribe).mockRejectedValue(new Error("PRIVATE_DETAIL"));
-    const codes = { context: "audio-context-failed", prepare: "audio-prepare-failed", decode: "audio-decode-failed", transcribe: "transcription-failed" };
+    const codes = { context: "audio-context-failed", prepare: "audio-prepare-failed", decode: "audio-decode-failed", transcribe: "transcription-call-failed" };
     await expect(h.run()).rejects.toMatchObject({ code: codes[phase] });
   });
   it("decodes a supported video directly without real-time preparation", async () => {

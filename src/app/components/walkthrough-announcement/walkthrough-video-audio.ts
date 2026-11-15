@@ -21,6 +21,11 @@ export type VideoAudioOutcome = { status: "complete"; text: string; chunks: numb
 
 /** Map only fixed server responses; never propagate provider or account text. */
 export function transcriptionFailureCode(error: string): string {
+  if (error === "Transcription failed: HTTP 0") return "transcription-transport-failed";
+  if (error === "Missing environment variable: GEMINI_API_KEY") return "transcription-not-configured";
+  if (error === "Not authorized. Sign in with an approved account.") return "transcription-sign-in-required";
+  if (error === "The account service is temporarily unavailable. Please try again in a moment.") return "transcription-account-unavailable";
+  if (error === "No audio was captured to transcribe.") return "transcription-empty-audio";
   const status = /^Transcription failed: HTTP (\d{3})$/.exec(error)?.[1];
   if (status === "400" || status === "404" || status === "413") return "transcription-request-rejected";
   if (status === "401" || status === "403") return "transcription-access-denied";
@@ -79,7 +84,7 @@ export async function readVideoAudio(blob: Blob, duration: number, provider: Llm
       failurePhase = "audio-chunk-failed";
       const wav = base64FromArrayBuffer(encodeWav(sliceMonoSamples(mono, LIVE_SAMPLE_RATE, plan), LIVE_SAMPLE_RATE));
       if (!checkWireBudget(wav.length, "Narration chunk").ok) throw new VideoReadError("audio-wire-limit");
-      failurePhase = "transcription-failed";
+      failurePhase = "transcription-call-failed";
       const result = await videoWait(() => adapters.transcribe(wav, { provider }), signal, VIDEO_PROVIDER_WAIT_MS, "transcription-timeout");
       if ("error" in result) throw new VideoReadError(transcriptionFailureCode(result.error));
       parts.push(result.text);

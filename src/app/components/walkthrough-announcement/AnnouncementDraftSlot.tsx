@@ -11,8 +11,8 @@
 // CLAIM - vitest here is node-env and collects only src/**/*.test.ts, so no
 // test in this repo renders this component.
 
-import { useEffect, useMemo, useRef } from "react";
-import { Button, MenuItem, TextField } from "@mui/material";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Autocomplete, Button, MenuItem, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
 import ConfirmArmButtons from "../ui/ConfirmArmButtons";
@@ -95,9 +95,14 @@ export default function AnnouncementDraftSlot({
   onRemove,
   onRetry,
 }: AnnouncementDraftSlotProps) {
-  const options = optionsForSlot(slot, optionSource);
+  const options = useMemo(() => optionsForSlot(slot, optionSource), [slot, optionSource]);
   const selectedOption = options.find((o) => o.id === choiceId(slot.choice)) ?? options[0];
   const phase = slot.draft.phase;
+  const [formatInput, setFormatInput] = useState(selectedOption.label);
+  const searching = useRef(false);
+  const selectedFormatLabel = selectedOption.unavailable ? `${selectedOption.label} (no longer available)` : selectedOption.label;
+  const selectedFormatRef = useRef(selectedFormatLabel);
+  useEffect(() => { selectedFormatRef.current = selectedFormatLabel; }, [selectedFormatLabel]);
 
   const previewHtml = useMemo(() => {
     if (phase !== "drafted") return "";
@@ -141,23 +146,26 @@ export default function AnnouncementDraftSlot({
       </div>}
 
       <div className={styles.adaptRow}>
-        <TextField
-          select
+        <Autocomplete
           size="small"
-          label="Format to match"
           className={controls.fieldMd}
-          value={selectedOption.id}
-          onChange={(e) => {
-            const chosen = options.find((o) => o.id === e.target.value);
-            if (chosen) onChooseTemplate(slot.id, chosen.choice);
+          options={options}
+          value={selectedOption}
+          disableClearable
+          getOptionLabel={option => option.unavailable ? `${option.label} (no longer available)` : option.label}
+          inputValue={formatInput}
+          onInputChange={(_, value, reason) => {
+            if (reason === "input") { searching.current = true; setFormatInput(value); }
+            else if (!searching.current) setFormatInput(value);
           }}
-        >
-          {options.map((option) => (
-            <MenuItem key={option.id} value={option.id}>
-              {option.unavailable ? `${option.label} (no longer available)` : option.label}
-            </MenuItem>
-          ))}
-        </TextField>
+          onBlur={() => { searching.current = false; setFormatInput(selectedFormatRef.current); }}
+          isOptionEqualToValue={(option, value) => option.id === value.id}
+          getOptionKey={option => option.id}
+          getOptionDisabled={option => option.unavailable}
+          onChange={(_, option) => { searching.current = false; selectedFormatRef.current = option.label; setFormatInput(option.label); onChooseTemplate(slot.id, option.choice); }}
+          noOptionsText="No matching formats"
+          renderInput={params => <TextField {...params} label="Format to match" placeholder="Search saved announcements" />}
+        />
 
         <TextField
           select

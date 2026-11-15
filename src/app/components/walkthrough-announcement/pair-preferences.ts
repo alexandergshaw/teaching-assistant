@@ -1,5 +1,5 @@
 import { EMPTY_ANNOUNCEMENT_OUTLINE } from "@/lib/announcement-outline-types";
-import type { TemplateChoice } from "./announcement-draft-slots";
+import type { DraftSlot, TemplateChoice } from "./announcement-draft-slots";
 export type PairRole = "weekly" | "midweek";
 type Selection = { kind: "none" } | { kind: "saved"; id: string } | null;
 export type PairPreferences = Record<PairRole, Selection>;
@@ -34,4 +34,11 @@ export function createPairPreferenceStore(scope: string, storage: Pick<Storage, 
       try { storage.setItem(key, JSON.stringify({ version: 1, ...value })); return true; } catch { return false; }
     },
   };
+}
+
+/** Only fill the pair when neither choice or existing draft would be replaced. */
+export function slotsForBothTemplate(slots: readonly DraftSlot[]): readonly string[] {
+  const eligible = slots.filter(slot => (slot.id === "wta-slot-1" || slot.id === "wta-slot-2")
+    && slot.draft.phase === "empty" && (slot.choice.kind === "default" || slot.choice.kind === "unresolved"));
+  return eligible.length === 2 ? eligible.map(slot => slot.id) : [];
 }

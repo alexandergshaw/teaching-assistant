@@ -66,7 +66,7 @@ describe("one autosaved walkthrough announcement collection", () => {
     expect(panel).toContain("pastedOutline: null");
     expect(panel).toContain("saved: optionSource.saved, savedState: savedFormatsState, blocked: library.controller.blocked");
     expect(panel).toContain("outline: e.outline");
-    expect(panel).toContain("label: e.label || new Date(e.createdAt).toLocaleDateString()");
+    expect(panel).toContain("label: savedLabels.get(e.id) ?? announcementTemplateLabel(e)");
     expect(panel).toContain("optionSource={optionSource}");
     expect(panel).toContain('useAnnouncementDraftSlots({ courseId: selectedCourse?.id ?? null, scopeKey: library.scopeKey, buildRequest, resolveLive, draftOne, postDraft, fetchResources, researchFingerprint, mayGenerate: () => !capturing && !extracting && pendingFrames === 0 && !batchInFlightRef.current && !upload.busy && hasMaterial && upload.result?.status !== "needs-visible-only" })');
   });

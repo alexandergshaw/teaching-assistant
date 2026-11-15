@@ -34,11 +34,13 @@ import { createScriptCopyController } from "./script-copy";
 // is safer than a whole screen.
 
 import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
+import { slotsForBothTemplate } from "./pair-preferences";
 import { usePairPreferences } from "./usePairPreferences";
 import { useWalkthroughVideoUpload } from "./useWalkthroughVideoUpload";
 import { VIDEO_MAX_BYTES, VIDEO_MAX_SECONDS, VIDEO_MAX_FRAMES } from "./walkthrough-video-limits";
 import { uploadedVideoMaterialText, type VideoReadResult } from "./walkthrough-video-run";
 import type { LlmProvider } from "@/lib/llm";
+import { announcementTemplateLabel, announcementTemplateLabels } from "./announcement-template-label";
 import { useAnnouncementLibrary } from "./useAnnouncementLibrary";
 import AnnouncementLibrary from "./AnnouncementLibrary";
 import { listAnnouncementLibraryAction, saveAnnouncementLibraryEntryAction, deleteAnnouncementLibraryEntryAction } from "@/app/actions/announcement-library";
@@ -137,6 +139,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
   const savedExemplars = useMemo(() => library.state.cards.flatMap(card => card.acknowledged ? [card.acknowledged] : [])
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [library.state.cards]);
   const mostRecentExemplar = savedExemplars[0] ?? null;
+  const savedLabels = useMemo(() => announcementTemplateLabels(savedExemplars), [savedExemplars]);
   const loadSavedExemplars = useCallback(() => library.controller.load(), [library.controller]);
   const changeCourse = useCallback((next: string) => {
     if (next === courseId) return;
@@ -274,16 +277,16 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       mostRecent: mostRecentExemplar
         ? {
             id: mostRecentExemplar.id,
-            label: mostRecentExemplar.label || new Date(mostRecentExemplar.createdAt).toLocaleDateString(),
+            label: savedLabels.get(mostRecentExemplar.id) ?? announcementTemplateLabel(mostRecentExemplar),
             outline: mostRecentExemplar.outline,
           }
         : null,
       saved: (savedExemplars ?? []).map(
-        (e): TemplateCandidate => ({ id: e.id, label: e.label || new Date(e.createdAt).toLocaleDateString(), outline: e.outline })
+        (e): TemplateCandidate => ({ id: e.id, label: savedLabels.get(e.id) ?? announcementTemplateLabel(e), outline: e.outline })
       ),
       savedState: savedFormatsState,
     }),
-    [mostRecentExemplar, savedExemplars, savedFormatsState]
+    [mostRecentExemplar, savedExemplars, savedFormatsState, savedLabels]
   );
 
   const buildRequest = useCallback((): AnnouncementDraftRequestContext => {
@@ -530,7 +533,12 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       {pairPreferences.notice && <p role="status">{pairPreferences.notice}</p>}
       <AnnouncementLibrary key={library.scopeKey} controller={library.controller} state={library.state} enabled={library.enabled}
         canAddDraft={slots.length < MAX_ANNOUNCEMENT_BATCH_SIZE} addDraft={choice => addSlot(choice, "beginning-of-week")}
-        onUseDraft={slots.some(slot => slot.id === "wta-slot-1" && slot.draft.phase === "empty" && (slot.choice.kind === "default" || slot.choice.kind === "unresolved")) ? choice => pairPreferences.choose("wta-slot-1", choice) : undefined}
+        onUseTemplate={(choice, role) => pairPreferences.choose(role === "weekly" ? "wta-slot-1" : "wta-slot-2", choice)}
+        onUseBoth={slotsForBothTemplate(slots).length ? choice => {
+          for (const id of slotsForBothTemplate(slots)) pairPreferences.choose(id, choice);
+        } : undefined}
+        weeklyTemplateId={slots[0]?.choice.kind === "saved" ? slots[0].choice.exemplarId : undefined}
+        midweekTemplateId={slots[1]?.choice.kind === "saved" ? slots[1].choice.exemplarId : undefined}
         onRemoved={() => { /* Keep selections visible; unavailable IDs block generation. */ }} />
 
       <fieldset className={controls.section}>

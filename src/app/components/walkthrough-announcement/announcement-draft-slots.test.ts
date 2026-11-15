@@ -866,3 +866,15 @@ describe("cannot-overwrite, reducer layer (SMOOTH-WALKTHROUGH W1-4c)", () => {
     expect(after[0].draft).toEqual({ phase: "drafted", draft: drafted, error: null });
   });
 });
+
+it("keeps identically labeled saved formats distinct as asynchronous choices resolve", () => {
+  const slot = makeSlot("wta-slot-1", { kind: "saved", exemplarId: "second", label: "Old", outline: OUTLINE_A }, "beginning-of-week");
+  const loading = optionsForSlot(slot, { ...SRC_EMPTY, savedState: "loading" });
+  expect(loading.find(option => option.id === "saved:second")?.unavailable).toBe(false);
+  const loaded = optionsForSlot(slot, { ...SRC_EMPTY, savedState: "loaded", saved: [
+    { id: "first", label: "Week one", outline: OUTLINE_A },
+    { id: "second", label: "Week one", outline: OUTLINE_A },
+  ] });
+  expect(loaded.filter(option => option.label === "Week one").map(option => option.id)).toEqual(["saved:first", "saved:second"]);
+  expect(loaded.find(option => option.id === choiceId(slot.choice))?.unavailable).toBe(false);
+});

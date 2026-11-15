@@ -31,7 +31,7 @@ const escapeHtml = (s: string): string =>
 // ── HTML -> Markdown ───────────────────────────────────────────────────────────
 
 function renderInline(node: Node): string {
-  if (node.nodeType === NodeType.TEXT_NODE) return node.rawText.replace(/\s+/g, " ");
+  if (node.nodeType === NodeType.TEXT_NODE) return node.text.replace(/\s+/g, " ");
   if (!(node instanceof HTMLElement)) return "";
   const tag = node.rawTagName?.toLowerCase();
   const inner = node.childNodes.map(renderInline).join("");

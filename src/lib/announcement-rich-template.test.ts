@@ -3,6 +3,12 @@ import { deriveRichTemplate, renderRichTemplate } from "./announcement-rich-temp
 import { encodePreviousAnnouncementHtml } from "./announcement-library-rich-text";
 
 describe("rich announcement template extraction", () => {
+  it("rejects block Markdown in inline template slots", () => {
+    const template = deriveRichTemplate(encodePreviousAnnouncementHtml('<p>Old</p>'))!;
+    for (const fragment of ["- New item", "1. New item", "## Heading", "> Quote", "```code"]) {
+      expect(renderRichTemplate(template, [{ index: 0, entries: [[fragment]] }])).toBeNull();
+    }
+  });
   it("keeps safe style positions without retaining exemplar content", () => {
     const value = encodePreviousAnnouncementHtml('<p style="color:red;font-size:18px">Private <strong>old text</strong> ending</p>');
     const template = deriveRichTemplate(value);

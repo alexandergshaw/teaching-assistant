@@ -43,7 +43,8 @@ import { containsEmoji } from "@/lib/announcement-emoji";
 import { renderRichTemplate, validRichTemplate } from "@/lib/announcement-rich-template";
 import { renderRichTree, richTreePlan } from "@/lib/announcement-rich-tree";
 import { projectRichTemplate } from "@/lib/walkthrough-rich-projection";
-import { announcementStructurePlan, assembleAnnouncementSections, recoverAnnouncementSections, announcementContentSignature, announcementSectionBody, hasMeaningfulAnnouncementContent } from "@/lib/walkthrough-structured-announcement";
+import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown";
+import { announcementStructurePlan, assembleAnnouncementSections, recoverAnnouncementSections, announcementSectionFailure, announcementContentSignature, announcementSectionBody, hasMeaningfulAnnouncementContent } from "@/lib/walkthrough-structured-announcement";
 import { verifiedStyledAnnouncement } from "@/lib/walkthrough-styled-announcement";
 import { applyWalkthroughFidelity } from "@/lib/walkthrough-announcement-fidelity";
 import { matchQuizDetailsBullets } from "@/lib/walkthrough-quiz-list";
@@ -404,7 +405,12 @@ function composeProviderPrompt(input: WalkthroughAnnouncementDraftInput, styleBl
   return [
     "You are an instructor writing a course announcement for students.",
     bodyInstruction,
-    input.matchExample ? [
+    input.matchExample && validRichTemplate(input.outline.richTemplate) && !richTreePlan(input.outline.richTree) ? [
+      "Return ONLY valid JSON with title and richSlots. Generate current announcement content once, directly in the slots.",
+      `richSlots is an array of {index, entries}, using these zero-based blocks and fragment counts: ${JSON.stringify(input.outline.richTemplate.blocks.map((block, index) => ({ index, kind: block.tag, entries: block.entries.map(entry => entry.runs.length) })))}.`,
+      "Entries are arrays of arrays of new text fragments. Fill every fragment in an included entry; omit unsupported blocks. Keep each Markdown link entirely within one fragment. Never use example facts or invent facts to fill a block. Put additional supported material that does not fit in an optional extra array of plain paragraphs. Do not include sections, a message, or other fields.",
+      "Do not use emoji in the title or content.",
+    ].join("\n") : input.matchExample ? [
       "Return ONLY valid JSON with title and sections:",
       '{"title":"...","sections":[{"index":1,"heading":null,"paragraphs":["..."],"items":[],"emojis":[]}]}',
       "The title must be plain text with no emoji; emoji may appear only in the specified body positions.",
@@ -534,7 +540,7 @@ export async function draftWalkthroughAnnouncementAction(
     }
     const title = parsed.title.trim();
     const message = "message" in parsed && typeof parsed.message === "string" ? parsed.message.trim() : "";
-    if (!title || (!message && !(input.matchExample && useDefaultPrompt && "sections" in parsed))) {
+    if (!title || (!message && !(input.matchExample && useDefaultPrompt && ("sections" in parsed || "richSlots" in parsed)))) {
       return { error: "Generated announcement is empty. Try again.", diag: diagBase };
     }
 
@@ -558,9 +564,29 @@ export async function draftWalkthroughAnnouncementAction(
     const { text: permittedMessage } = stripUnpermittedUrls(message, permitted);
     let structuredMessage = permittedMessage;
     let formatFallback = false;
+    let singleSourceRich: string | null = null;
     if (input.matchExample && useDefaultPrompt) {
-      if (Object.keys(parsed).some(key => !["title", "message", "sections", "richSlots", "treeSlots", "treeExtra"].includes(key))) return { error: "The draft contained content outside its sections. Try again.", diag: diagBase };
+      if (Object.keys(parsed).some(key => !["title", "message", "sections", "richSlots", "treeSlots", "treeExtra", "extra"].includes(key))) return { error: "The draft contained content outside its sections. Try again.", diag: diagBase };
       if (containsEmoji(title)) return { error: "The draft title included an unsupported emoji. Try again.", diag: diagBase };
+      const slotsOnly = !message && !("sections" in parsed) && validRichTemplate(input.outline.richTemplate) && "richSlots" in parsed && Array.isArray(parsed.richSlots);
+      if (!slotsOnly && "extra" in parsed) return { error: "The draft contained content outside its sections. Try again.", diag: diagBase };
+      if (slotsOnly) {
+        if (input.emojiPolicy === "requested" && input.outline.sections.some(section => section.emojiPlacements?.length)) formatFallback = true;
+        if (Object.keys(parsed).some(key => !["title", "richSlots", "extra"].includes(key))) return { error: "The draft contained content outside its formatting slots. Try again.", diag: diagBase };
+        const extra = "extra" in parsed ? parsed.extra : [];
+        if (!Array.isArray(extra) || extra.length > 40 || !extra.every(value => typeof value === "string" && value.trim() && value.length <= 8000 && !/[\r\n]/.test(value))) return { error: "The draft contained invalid additional content. Try again.", diag: diagBase };
+        const rawSlots = (parsed as { richSlots: Parameters<typeof renderRichTemplate>[1] }).richSlots;
+        const rawHtml = rawSlots.length ? renderRichTemplate(input.outline.richTemplate!, rawSlots) : "";
+        if (rawHtml === null || (!rawHtml && !extra.length)) return { error: "The draft could not be matched safely to the saved formatting. Try again.", diag: diagBase };
+        const rawMarkdown = htmlToMarkdown(rawHtml);
+        if (containsEmoji(`${rawMarkdown}\n${extra.join("\n")}`)) return { error: "The draft included emoji that could not be positioned safely. Try again.", diag: diagBase };
+        const cleanedSlots = rawSlots.map(slot => ({ index: slot.index, entries: slot.entries.map(entry => entry.map(fragment => stripUnpermittedUrls(fragment, permitted).text)) }));
+        singleSourceRich = cleanedSlots.length ? renderRichTemplate(input.outline.richTemplate!, cleanedSlots) : "";
+        if (singleSourceRich === null) return { error: "Generated announcement has no content after removing unverified links. Try again.", diag: diagBase };
+        const extraMarkdown = extra.map(value => stripUnpermittedUrls(value, permitted).text).filter(value => value.trim()).join("\n\n");
+        if (extraMarkdown) { singleSourceRich += markdownToHtml(extraMarkdown); formatFallback = true; }
+        structuredMessage = htmlToMarkdown(singleSourceRich);
+      } else {
       const sections = "sections" in parsed ? parsed.sections : undefined;
       const assembled = assembleAnnouncementSections(sections, input.outline, input.emojiPolicy === "requested");
       if (assembled) {
@@ -570,6 +596,7 @@ export async function draftWalkthroughAnnouncementAction(
         if (message && announcementContentSignature(structuredMessage) !== announcementContentSignature(permittedMessage)) return { error: "The draft sections did not match the complete message. Try again.", diag: diagBase };
       } else if (sections !== undefined) {
         const recovered = recoverAnnouncementSections(sections, input.outline);
+        if (!recovered || message) console.warn("Walkthrough section validation:", announcementSectionFailure(sections, input.outline));
         if (!recovered && input.emojiPolicy === "requested" && Array.isArray(sections) && sections.some(section => section && typeof section === "object" && !Array.isArray(section) && Array.isArray(section.emojis) && section.emojis.length > 0)) return { error: "The draft's emoji positions could not be matched to the saved format. Try again or turn off emoji.", diag: diagBase };
         if (!recovered || message) return { error: "The draft did not match the requested section structure. Try again.", diag: diagBase };
         const retainedBody = stripUnpermittedUrls(announcementSectionBody(sections), permitted).text;
@@ -585,6 +612,7 @@ export async function draftWalkthroughAnnouncementAction(
       } else {
         return { error: "The draft did not contain usable section content. Try again.", diag: diagBase };
       }
+      }
     }
     const addedInstructions = useDefaultPrompt ? "" : addedPromptLines(defaultPrompt, input.promptOverride ?? "");
     const enforcedMessage = input.matchExample && useDefaultPrompt
@@ -599,10 +627,10 @@ export async function draftWalkthroughAnnouncementAction(
     }
 
     const wantsRich = !!(validRichTemplate(input.outline.richTemplate) || richTreePlan(input.outline.richTree));
-    let richHtml = input.matchExample && useDefaultPrompt && input.outline.richTemplate
+    let richHtml = singleSourceRich && verifiedStyledAnnouncement(enforcedMessage, singleSourceRich) ? singleSourceRich : input.matchExample && useDefaultPrompt && input.outline.richTemplate
       ? projectRichTemplate(enforcedMessage, input.outline.richTemplate) : null;
     let richExtraNotice = false;
-    if (input.matchExample && useDefaultPrompt && validRichTemplate(input.outline.richTemplate) && "richSlots" in parsed && Array.isArray(parsed.richSlots)) {
+    if (!singleSourceRich && input.matchExample && useDefaultPrompt && validRichTemplate(input.outline.richTemplate) && "richSlots" in parsed && Array.isArray(parsed.richSlots)) {
       const candidate = renderRichTemplate(input.outline.richTemplate, parsed.richSlots as Parameters<typeof renderRichTemplate>[1]);
       if (!candidate || !verifiedStyledAnnouncement(enforcedMessage, candidate)) formatFallback = true;
       else richHtml = candidate;

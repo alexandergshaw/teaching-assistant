@@ -294,6 +294,9 @@ describe("markdownToHtml - unchanged rendering behavior (pinned against the pre-
 });
 
 describe("htmlToMarkdown - unaffected by the escapeHtml quote fix", () => {
+  it("decodes text entities without losing punctuation", () => {
+    expect(htmlToMarkdown('<p>Tom &amp; Sue &lt;class&gt; &quot;quote&quot;</p>')).toBe('Tom & Sue <class> "quote"');
+  });
   it("preserves inline links and spacing around nested block elements", () => {
     expect(htmlToMarkdown('<div>Read <a href="https://example.com">guide</a><p>Next</p>Then <strong>finish</strong></div>')).toBe('Read [guide](https://example.com)\n\nNext\n\nThen **finish**');
   });

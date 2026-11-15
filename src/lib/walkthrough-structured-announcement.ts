@@ -21,6 +21,28 @@ function plainLine(value: unknown): value is string {
 }
 function slotKey(slot: { target: string; index: number; position: string }): string { return `${slot.target}:${slot.index}:${slot.position}`; }
 
+/** Return only a fixed category, never model-supplied content. */
+export function announcementSectionFailure(value: unknown, outline: AnnouncementOutline): string {
+  if (!Array.isArray(value) || !value.length || value.length > 100) return "section array";
+  const plan = announcementStructurePlan(outline);
+  let previous = 0;
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return "section object";
+    const item = candidate as Record<string, unknown>;
+    if (Object.keys(item).some(key => !["index", "heading", "paragraphs", "items", "emojis"].includes(key))) return "unexpected field";
+    if (!Number.isInteger(item.index) || (item.index as number) <= previous || (item.index as number) > plan.length) return "section order or index";
+    previous = item.index as number;
+    if (!Array.isArray(item.paragraphs) || !Array.isArray(item.items)) return "paragraph or item array";
+    if (!item.paragraphs.every(plainLine) || !item.items.every(plainLine)) return "paragraph or item text";
+    const section = plan[previous - 1];
+    if ((section.break === "heading" ? !plainLine(item.heading) : item.heading !== null) || (section.heading !== null && item.heading !== section.heading)) return "heading";
+    if ((section.listKind === null && item.items.length > 0) || (section.listKind !== null && item.items.length === 0)) return "list shape";
+    if (!item.paragraphs.length && !item.items.length) return "empty section";
+    if (item.emojis !== undefined && !Array.isArray(item.emojis)) return "emoji array";
+  }
+  return "emoji positions or section limits";
+}
+
 /** Preserve a valid model response when it does not fit the example's shape. */
 export function recoverAnnouncementSections(value: unknown, outline: AnnouncementOutline): string | null {
   if (!Array.isArray(value) || !value.length || value.length > 100) return null;

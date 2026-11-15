@@ -96,7 +96,7 @@ export function renderRichTemplate(template: RichTemplate, values: readonly { re
       let text = "";
       for (let j = 0; j < content.length; j++) {
         const run = entry.runs[j], fragment = content[j];
-        if (!run || typeof run.style !== "string" || run.style.length > 1000 || typeof run.before !== "boolean" || typeof run.after !== "boolean" || typeof fragment !== "string" || !fragment.trim() || fragment.length > 8000 || /[\r\n]/.test(fragment)) return null;
+        if (!run || typeof run.style !== "string" || run.style.length > 1000 || typeof run.before !== "boolean" || typeof run.after !== "boolean" || typeof fragment !== "string" || !fragment.trim() || fragment.length > 8000 || /[\r\n]/.test(fragment) || /^\s*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|`{3,}|~{3,}|\|)/.test(fragment)) return null;
         if (j && (run.before || entry.runs[j - 1].after)) text += " ";
         const rendered = markdownToHtml(fragment.trim()).replace(/^<p>/, "").replace(/<\/p>$/, "");
         text += `<span style="${escape(run.style)}">${rendered}</span>`;

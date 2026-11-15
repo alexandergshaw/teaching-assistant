@@ -138,6 +138,30 @@ describe("nested rich template draft", () => {
   });
 });
 describe("rich template draft", () => {
+  it("preserves extra-only content when no saved block applies", async () => {
+    const outline = derivePreviousAnnouncementOutline(encodePreviousAnnouncementHtml('<p style="color:red">Old</p>'));
+    const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current update.", outline, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", richSlots: [], extra: ["Current update."] }) } as never);
+    const result = await draftWalkthroughAnnouncementAction(input);
+    expect(result).toHaveProperty("message", "Current update.");
+    expect(result).toHaveProperty("formatFallback", true);
+  });
+  it("generates content once in rich slots and preserves mixed formatting", async () => {
+    const outline = derivePreviousAnnouncementOutline(encodePreviousAnnouncementHtml('<p style="font-size:20px;color:red"><strong>Old</strong> opening</p><p>Old paragraph</p><ul><li><em>Old item</em></li></ul>'));
+    const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Welcome current students. Read current material.", outline, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+    const payload = { title: "Update", richSlots: [{ index: 0, entries: [["Welcome", "current students."]] }, { index: 1, entries: [["Current paragraph & details."]] }, { index: 2, entries: [["Read current material."]] }], extra: ["Extra current content."] };
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify(payload) } as never);
+    const result = await draftWalkthroughAnnouncementAction(input);
+    expect(result).toHaveProperty("richHtml");
+    if (!("richHtml" in result)) throw new Error("Missing rich output");
+    expect(result.richHtml).toContain("font-weight:bold");
+    expect(result.richHtml).toContain("font-style:italic");
+    expect(result.richHtml).not.toContain("Old");
+    expect(result.message).toContain("current students.");
+    expect(result.message).toContain("Current paragraph & details.");
+    expect(result.message).toContain("Extra current content.");
+    expect(result).toHaveProperty("formatFallback", true);
+  });
   it("assembles safe style slots for the same content and rejects changed content", async () => {
     const outline = derivePreviousAnnouncementOutline(encodePreviousAnnouncementHtml('<p style="color:red">Old <strong>example</strong></p>'));
     const input = { courseLabel: "Course", moduleLabel: null, materialsText: "New material", outline, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
@@ -939,7 +963,7 @@ it("accepts a single generated section for an unheaded example with a styled bul
   const prepared = await prepareWalkthroughAnnouncementPromptAction(input);
   if (!("prompt" in prepared)) throw new Error("Missing prompt");
   expect(prepared.prompt).toContain("an unordered list");
-  expect(prepared.prompt).toContain("There are 2 available section positions");
+  expect(prepared.prompt).toContain("Return ONLY valid JSON with title and richSlots");
   vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", sections: [{ index: 1, heading: null, paragraphs: ["Current introduction."], items: ["Current task."], emojis: [] }] }) } as never);
   const result = await draftWalkthroughAnnouncementAction(input);
   expect(result).toHaveProperty("message");

@@ -4,7 +4,7 @@ import { resolveChoice, type DraftSlot, type SlotsAction, type ResearchNotice, t
 import type { AnnouncementDraftRequestContext, AnnouncementDraftDispatchContext } from "./useAnnouncementDraftSlots";
 import { pairRole } from "./pair-preferences";
 import { recordWalkthroughDiagnostic } from "./walkthrough-diagnostics";
-type DraftAdapter = (ctx: AnnouncementDraftDispatchContext, outline: AnnouncementOutline, isCurrent?: () => boolean) => Promise<{ title: string; message: string; researchNotice: ResearchNotice; compareTemplate?: boolean } | { error: string }>;
+type DraftAdapter = (ctx: AnnouncementDraftDispatchContext, outline: AnnouncementOutline, isCurrent?: () => boolean) => Promise<{ title: string; message: string; researchNotice: ResearchNotice; compareTemplate?: boolean; richHtml?: string; richSourceMessage?: string } | { error: string }>;
 export async function dispatchResolvedAnnouncementDraft(ctx: AnnouncementDraftDispatchContext, resolved: ReturnType<typeof resolveChoice>, draftOne: DraftAdapter) {
   if (resolved.error) return { error: resolved.error };
   const templateOutline = promptSafeAnnouncementOutline(resolved.outline);

@@ -78,6 +78,8 @@ export interface Drafted {
   readonly sourceCourseId?: string | null;
   readonly title: string;
   readonly message: string;
+  readonly richHtml?: string;
+  readonly richSourceMessage?: string;
   readonly builtFrom: ResolvedTemplate;
   /** Safe template shape pinned to the generation, if structure matching was requested. */
   readonly templateOutline?: AnnouncementOutline;

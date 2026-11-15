@@ -1,3 +1,4 @@
+import { validRichTemplate } from "./announcement-rich-template";
 import type { AnnouncementOutline } from "./announcement-outline-types";
 
 // Allow only canonical structural labels. Unknown headings may name old facts
@@ -14,6 +15,8 @@ function bounded(value: unknown): number { return Math.max(1, Math.min(100, Math
 function sectionIndex(value: unknown): number | null { return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null; }
 export function promptSafeAnnouncementOutline(outline: AnnouncementOutline): AnnouncementOutline {
   return {
+    ...(validRichTemplate(outline.richTemplate) ? { richTemplate: outline.richTemplate } : {}),
+    ...(outline.richTemplateUnsupported && { richTemplateUnsupported: true }),
     hasGreeting: !!outline.hasGreeting, hasSignOff: !!outline.hasSignOff,
     ...(outline.opensWithWelcome && { opensWithWelcome: true }),
     ...(Number.isInteger(outline.closingParagraphs) && outline.closingParagraphs! >= 1 && outline.closingParagraphs! <= 5 ? { closingParagraphs: outline.closingParagraphs } : {}),

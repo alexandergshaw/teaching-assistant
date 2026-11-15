@@ -32,6 +32,7 @@ vi.mock("@/lib/announcement-exemplars", () => ({
   saveAnnouncementExemplar: vi.fn(),
   deleteAnnouncementExemplar: vi.fn(),
 }));
+vi.mock("@/lib/canvas/announcements", () => ({ createAnnouncementFromSafeHtml: vi.fn() }));
 vi.mock("@/lib/canvas", () => ({
   createAnnouncementFromMarkdown: vi.fn(),
 }));
@@ -59,6 +60,7 @@ import {
   deleteAnnouncementExemplar,
 } from "@/lib/announcement-exemplars";
 import { createAnnouncementFromMarkdown } from "@/lib/canvas";
+import { createAnnouncementFromSafeHtml } from "@/lib/canvas/announcements";
 import {
   draftWalkthroughAnnouncementAction,
   prepareWalkthroughAnnouncementPromptAction,
@@ -71,6 +73,8 @@ import {
   postWalkthroughAnnouncementAction,
 } from "./walkthrough-announcement";
 import { deriveAnnouncementOutline } from "@/lib/announcement-outline";
+import { derivePreviousAnnouncementOutline } from "@/lib/previous-announcement-outline";
+import { encodePreviousAnnouncementHtml } from "@/lib/announcement-library-rich-text";
 import { walkthroughAnnouncementMaxOutputTokens } from "@/lib/walkthrough-announcement-bounds";
 import { EMPTY_ANNOUNCEMENT_OUTLINE } from "@/lib/announcement-outline-types";
 import { deriveResourceConcepts } from "./learning-resources-generator";
@@ -97,6 +101,32 @@ const REALISTIC_OUTLINE = deriveAnnouncementOutline(
 const NO_RESEARCH = { kind: "off" as const };
 const NO_RESEARCHED_RESOURCES: ReadonlyArray<{ title: string; url: string }> = [];
 
+describe("styled Canvas posting", () => {
+  it("posts the verified matching HTML with its scheduled time and refuses changed structure", async () => {
+    vi.mocked(createAnnouncementFromSafeHtml).mockResolvedValue({ id: 42 } as never);
+    expect(await postWalkthroughAnnouncementAction("course", "Title", "Hello", "ABC", "2026-11-15T15:00:00Z", '<p style="color:red">Hello</p>')).toEqual({ id: 42 });
+    expect(createAnnouncementFromSafeHtml).toHaveBeenCalledWith("course", "Title", '<p style="color:red">Hello</p>', "ABC", undefined, "2026-11-15T15:00:00Z");
+    expect(await postWalkthroughAnnouncementAction("course", "Title", "- Hello", "ABC", undefined, '<p>Hello</p>')).toHaveProperty("error");
+    expect(createAnnouncementFromSafeHtml).toHaveBeenCalledTimes(1);
+  });
+});
+describe("rich template draft", () => {
+  it("assembles safe style slots for the same content and rejects changed content", async () => {
+    const outline = derivePreviousAnnouncementOutline(encodePreviousAnnouncementHtml('<p style="color:red">Old <strong>example</strong></p>'));
+    const input = { courseLabel: "Course", moduleLabel: null, materialsText: "New material", outline, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+    const payload = { title: "Update", message: "New material", sections: [{ index: 1, heading: null, paragraphs: ["New material"], items: [], emojis: [] }], richSlots: [{ index: 0, entries: [["New", "material"]] }] };
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify(payload) } as never);
+    const result = await draftWalkthroughAnnouncementAction(input);
+    expect(result).toHaveProperty("richHtml");
+    if (!("richHtml" in result)) throw new Error("Expected styled output");
+    expect(result.richHtml).toContain('font-weight:bold');
+    const prompt = (vi.mocked(callLlm).mock.calls[0][0].contents[0].parts[0] as { text: string }).text;
+    expect(prompt).not.toContain("Old example");
+    payload.richSlots[0].entries[0][1] = "different";
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify(payload) } as never);
+    expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("error");
+  });
+});
 describe("editable provider prompt", () => {
   const input = { courseLabel: "Course", moduleLabel: "Week 2", materialsText: "Current class material", outline: EMPTY_ANNOUNCEMENT_OUTLINE,
     coverageBlock: "Page one", notes: "Keep it brief", emojiPolicy: "forbidden" as const, timing: "midweek" as const,

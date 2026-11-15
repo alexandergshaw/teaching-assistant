@@ -77,7 +77,7 @@ export function useWalkthroughGenerationAdapters(selectedCourse: WtaCourseOption
       ctx: AnnouncementDraftDispatchContext,
       outline: AnnouncementOutline,
       isCurrent: () => boolean = () => true
-    ): Promise<{ title: string; message: string; researchNotice: ResearchNotice; compareTemplate?: boolean } | { error: string }> => {
+    ): Promise<{ title: string; message: string; researchNotice: ResearchNotice; compareTemplate?: boolean; richHtml?: string; richSourceMessage?: string } | { error: string }> => {
       // G3 Ruling 9/M3.3: the derivation from the once-per-Generate research
       // OUTCOME to the RAW resource list the composer/enforcer actually
       // consume - any outcome other than "found" contributes zero citable
@@ -105,20 +105,21 @@ export function useWalkthroughGenerationAdapters(selectedCourse: WtaCourseOption
       if (promptOverride === null || !isCurrent()) return { error: "Draft cancelled before sending the prompt." };
       const result = await draftWalkthroughAnnouncementAction({ ...input, promptOverride, promptPreparedFor: prepared.preparedFor });
       if ("error" in result) return { error: result.error };
-      return { title: result.title, message: result.message, researchNotice: result.researchNotice, compareTemplate: promptOverride === prepared.prompt };
+      return { title: result.title, message: result.message, researchNotice: result.researchNotice, ...(result.richHtml && { richHtml: result.richHtml, richSourceMessage: result.message }), compareTemplate: promptOverride === prepared.prompt };
     },
     [scopeKey, reviewPrompt]
   );
 
   const postDraft = useCallback(
-    (title: string, message: string, delayedPostAt?: string) => {
+    (title: string, message: string, delayedPostAt?: string, richHtml?: string) => {
       if (!selectedCourse) return null;
       return postWalkthroughAnnouncementAction(
         selectedCourse.canvasUrl,
         title,
         message,
         selectedCourse.institution ?? undefined,
-        delayedPostAt
+        delayedPostAt,
+        richHtml
       ).then((result) => {
         if ("error" in result) {
           return {

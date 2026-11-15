@@ -22,6 +22,16 @@ describe("recording announcement Canvas boundary", () => {
     expect(form.get("message")).toBe("<h2>Tasks</h2><p><strong>Read</strong></p>");
     expect(form.get("title")).toBe("Week");
   });
+  it("schedules the same sanitized rich HTML and rejects invalid dates", async () => {
+    await createAnnouncementFromSafeHtml("course", "Week", '<p style="color:red">Hello</p>', undefined, undefined, "2026-11-15T15:00:00Z");
+    const [, init] = vi.mocked(canvasRequest).mock.calls.at(-1)!;
+    const form = new URLSearchParams(init?.body as string);
+    expect(form.get("message")).toBe('<p style="color:red">Hello</p>');
+    expect(form.get("delayed_post_at")).toBe("2026-11-15T15:00:00.000Z");
+    const calls = vi.mocked(canvasRequest).mock.calls.length;
+    await expect(createAnnouncementFromSafeHtml("course", "Week", "<p>Hi</p>", undefined, undefined, "not a date")).rejects.toBeInstanceOf(RecordingAnnouncementRefusal);
+    expect(vi.mocked(canvasRequest).mock.calls.length).toBe(calls);
+  });
   it("marks explicit client rejection as refusal while leaving server and transport errors ambiguous", async () => {
     vi.mocked(canvasError).mockReturnValue(new Error("Canvas failed"));
     vi.mocked(canvasRequest).mockResolvedValueOnce({ ok: false, status: 403 } as never);

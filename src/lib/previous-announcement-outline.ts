@@ -1,3 +1,4 @@
+import { deriveRichTemplate } from "./announcement-rich-template";
 import { deriveAnnouncementOutline } from "./announcement-outline";
 import { previousAnnouncementEmphasis, previousAnnouncementText } from "./announcement-library-rich-text";
 import type { AnnouncementOutline } from "./announcement-outline-types";
@@ -6,5 +7,6 @@ import type { AnnouncementOutline } from "./announcement-outline-types";
 export function derivePreviousAnnouncementOutline(value: string): AnnouncementOutline {
   const outline = deriveAnnouncementOutline(previousAnnouncementText(value));
   const emphasis = previousAnnouncementEmphasis(value);
-  return { ...outline, ...(emphasis.hasBold && { hasBold: true }), ...(emphasis.hasItalic && { hasItalic: true }) };
+  const richTemplate = deriveRichTemplate(value);
+  return { ...outline, ...(richTemplate && { richTemplate }), ...(value.startsWith("<!--announcement-rich-v1-->") && !richTemplate && { richTemplateUnsupported: true }), ...(emphasis.hasBold && { hasBold: true }), ...(emphasis.hasItalic && { hasItalic: true }) };
 }

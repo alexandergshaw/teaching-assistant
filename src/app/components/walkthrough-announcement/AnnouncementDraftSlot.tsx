@@ -17,6 +17,7 @@ import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
 import ConfirmArmButtons from "../ui/ConfirmArmButtons";
 import { markdownToHtml } from "@/lib/markdown";
+import { verifiedStyledAnnouncement } from "@/lib/walkthrough-styled-announcement";
 import { toDatetimeLocalValue } from "../canvas-tab/utils";
 import {
   builtFromId,
@@ -109,7 +110,9 @@ export default function AnnouncementDraftSlot({
 
   const previewHtml = useMemo(() => {
     if (phase !== "drafted") return "";
-    return markdownToHtml(slot.draft.phase === "drafted" ? slot.draft.draft.message : "");
+    const draft = slot.draft.phase === "drafted" ? slot.draft.draft : null;
+    if (!draft) return "";
+    return (draft.richSourceMessage === draft.message ? verifiedStyledAnnouncement(draft.message, draft.richHtml) : null) ?? markdownToHtml(draft.message);
   }, [phase, slot.draft]);
 
   const rootRef = useRef<HTMLFieldSetElement>(null);
@@ -223,6 +226,8 @@ export default function AnnouncementDraftSlot({
 
       {phase === "drafted" && slot.draft.phase === "drafted" && (
         <>
+          {slot.draft.draft.templateOutline?.richTemplateUnsupported && <Alert severity="info">This saved example contains formatting that cannot yet be reproduced. The draft uses Markdown formatting.</Alert>}
+          {slot.draft.draft.richHtml && slot.draft.draft.richSourceMessage !== slot.draft.draft.message && <Alert severity="info">The edited draft uses Markdown formatting. Regenerate to apply the saved example formatting again.</Alert>}
           {structureReview?.orderChanged && <Alert severity="warning">Named sections appear in a different order from the saved example. Review their sequence.</Alert>}
           {structureReview?.muchShorter && <Alert severity="warning">This draft has far fewer sections than the saved example. Check that it covers the relevant material.</Alert>}
           {structureReview?.fragmentedClosing && <Alert severity="warning">The ending may have more paragraphs than the saved example. Review the grouping and keep any relevant details.</Alert>}

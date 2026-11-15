@@ -40,6 +40,7 @@ import { walkthroughAnnouncementMaxOutputTokens } from "@/lib/walkthrough-announ
 import { composeWalkthroughScriptPrompt } from "@/lib/walkthrough-script-prompt";
 import { addedPromptLines, hasUnsupportedQuizContent } from "@/lib/walkthrough-quiz-evidence";
 import { containsEmoji } from "@/lib/announcement-emoji";
+import { renderRichTemplate, validRichTemplate } from "@/lib/announcement-rich-template";
 import { announcementStructurePlan, assembleAnnouncementSections, announcementContentSignature, announcementSectionBody, hasMeaningfulAnnouncementContent } from "@/lib/walkthrough-structured-announcement";
 import { applyWalkthroughFidelity } from "@/lib/walkthrough-announcement-fidelity";
 import { matchQuizDetailsBullets } from "@/lib/walkthrough-quiz-list";
@@ -58,6 +59,8 @@ import {
   deleteAnnouncementExemplar,
 } from "@/lib/announcement-exemplars";
 import { createAnnouncementFromMarkdown } from "@/lib/canvas";
+import { createAnnouncementFromSafeHtml } from "@/lib/canvas/announcements";
+import { verifiedStyledAnnouncement } from "@/lib/walkthrough-styled-announcement";
 import type { Json } from "@/lib/supabase/types";
 
 // ── Exemplars (AC1, decision P3: Supabase, not localStorage) ───────────────
@@ -407,6 +410,10 @@ function composeProviderPrompt(input: WalkthroughAnnouncementDraftInput, styleBl
       "For a heading section use the exact canonical heading when one is specified; otherwise provide a current-material heading. For a paragraph-break section set heading to null. For prose use paragraphs and no items; for a list use items, with optional introductory paragraphs. Each heading, paragraph and item must be a single string without emoji, line breaks or Markdown list or heading prefixes.",
       input.emojiPolicy === "requested" ? "For every applicable example emoji position in an included section, choose one relevant single emoji and put it in emojis as {target: heading, paragraph, or item; index: zero-based position; position: prefix or suffix; value: emoji}. Use only listed positions. The extra section has no emoji positions." : "Set every emojis array to empty; do not use emoji in the message or section fields.",
       "The message field must contain exactly the same headings, paragraphs and list items, in the same order and with the same wording and punctuation. It may use Markdown heading and list prefixes and must include the same chosen emoji at the same positions, but must contain no extra or omitted content. Do not place text outside these fields.",
+      ...(validRichTemplate(input.outline.richTemplate) ? [
+        `Also return richSlots: an array of {index, entries}, using these zero-based blocks and required fragment counts: ${JSON.stringify(input.outline.richTemplate.blocks.map((block, index) => ({ index, kind: block.tag, entries: block.entries.map(entry => entry.runs.length) })))}.`,
+        "For each included block, entries is an array of arrays of new text fragments, one fragment per indicated slot; omit unsupported blocks, not facts. These fragments must reconstruct exactly the complete message in the same order. Do not output old example words or unsupported information. Use Markdown links when needed, keeping each entire link in one fragment; otherwise use plain text.",
+      ] : []),
       `There are ${announcementStructurePlan(input.outline).length} available section positions. The final position is optional unheaded prose for current facts that do not fit any supported example section.`,
     ].join("\n") : [
       "Return ONLY valid JSON:",
@@ -453,7 +460,7 @@ export async function prepareWalkthroughAnnouncementPromptAction(input: Walkthro
 export async function draftWalkthroughAnnouncementAction(
   input: WalkthroughAnnouncementDraftInput
 ): Promise<
-  ({ title: string; message: string; researchNotice: ResearchNotice } | { error: string }) & {
+  ({ title: string; message: string; researchNotice: ResearchNotice; richHtml?: string } | { error: string }) & {
     diag: ScriptGenerationLlmDiag;
   }
 > {
@@ -544,7 +551,7 @@ export async function draftWalkthroughAnnouncementAction(
     const { text: permittedMessage } = stripUnpermittedUrls(message, permitted);
     let structuredMessage = permittedMessage;
     if (input.matchExample && useDefaultPrompt) {
-      if (Object.keys(parsed).some(key => !["title", "message", "sections"].includes(key))) return { error: "The draft contained content outside its sections. Try again.", diag: diagBase };
+      if (Object.keys(parsed).some(key => !["title", "message", "sections", "richSlots"].includes(key))) return { error: "The draft contained content outside its sections. Try again.", diag: diagBase };
       if (containsEmoji(title)) return { error: "The draft title included an unsupported emoji. Try again.", diag: diagBase };
       const sections = "sections" in parsed ? parsed.sections : undefined;
       const assembled = assembleAnnouncementSections(sections, input.outline, input.emojiPolicy === "requested");
@@ -568,9 +575,17 @@ export async function draftWalkthroughAnnouncementAction(
       return { error: "Generated announcement is empty after removing unverified links. Try again.", diag: diagBase };
     }
 
+    let richHtml: string | undefined;
+    if (input.matchExample && useDefaultPrompt && validRichTemplate(input.outline.richTemplate)) {
+      const candidate = "richSlots" in parsed && Array.isArray(parsed.richSlots) ? renderRichTemplate(input.outline.richTemplate, parsed.richSlots as Parameters<typeof renderRichTemplate>[1]) : null;
+      if (!candidate || !verifiedStyledAnnouncement(enforcedMessage, candidate)) {
+        return { error: "The draft could not be matched safely to the saved formatting. Try again.", diag: diagBase };
+      }
+      richHtml = candidate;
+    }
     const researchNotice = researchNoticeFor(input.researchOutcome);
 
-    return { title: enforcedTitle.trim(), message: enforcedMessage, researchNotice, diag: diagBase };
+    return { title: enforcedTitle.trim(), message: enforcedMessage, researchNotice, diag: diagBase, ...(richHtml && { richHtml }) };
   } catch {
     return {
       error: "Could not draft the announcement. Try again.",
@@ -670,11 +685,16 @@ export async function postWalkthroughAnnouncementAction(
   title: string,
   markdownBody: string,
   acronym?: string,
-  delayedPostAt?: string
+  delayedPostAt?: string,
+  richHtml?: string
 ): Promise<{ id: number } | { error: string }> {
   try {
     await requireUser();
-    const announcement = await createAnnouncementFromMarkdown(courseUrl, title, markdownBody, acronym, delayedPostAt);
+    const safeHtml = richHtml ? verifiedStyledAnnouncement(markdownBody, richHtml) : null;
+    if (richHtml && !safeHtml) return { error: "The styled announcement no longer matches the draft. Review it before posting." };
+    const announcement = safeHtml
+      ? await createAnnouncementFromSafeHtml(courseUrl, title, safeHtml, acronym, undefined, delayedPostAt)
+      : await createAnnouncementFromMarkdown(courseUrl, title, markdownBody, acronym, delayedPostAt);
     return { id: announcement.id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not post the announcement." };

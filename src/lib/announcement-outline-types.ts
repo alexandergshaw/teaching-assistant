@@ -54,8 +54,12 @@ export interface OutlineSection {
   emojiPlacements?: readonly { target: "heading" | "paragraph" | "item"; index: number; position: "prefix" | "suffix" }[];
 }
 
+import type { RichTemplate } from "./announcement-rich-template";
+
 /** The structural outline of one pasted announcement. */
 export interface AnnouncementOutline {
+  richTemplate?: RichTemplate;
+  richTemplateUnsupported?: boolean;
   sections: readonly OutlineSection[];
   /** Whether the exemplar opens with a greeting ("Hi everyone,"). Its presence
    * and its absence are both meaningful - an instructor whose announcements

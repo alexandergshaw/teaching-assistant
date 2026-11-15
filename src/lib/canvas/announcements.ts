@@ -466,7 +466,8 @@ export async function createAnnouncementFromSafeHtml(
   title: string,
   html: string,
   code?: string,
-  image?: AnnouncementBodyImage
+  image?: AnnouncementBodyImage,
+  delayedPostAt?: string | null
 ): Promise<CanvasAnnouncement> {
   const safeHtml = sanitizeRecordingAnnouncementHtml(html);
   if (!title.trim()) throw new RecordingAnnouncementRefusal("An announcement needs a title.");
@@ -476,6 +477,11 @@ export async function createAnnouncementFromSafeHtml(
   params.append("title", title.trim());
   params.append("message", image ? `${safeHtml}<p><img src="${escapeHtmlAttr(image.url)}" alt="${escapeHtmlAttr(image.altText)}"></p>` : safeHtml);
   params.append("is_announcement", "true");
+  if (delayedPostAt && delayedPostAt.trim()) {
+    const when = new Date(delayedPostAt.trim());
+    if (Number.isNaN(when.getTime())) throw new RecordingAnnouncementRefusal("Could not read the scheduled visibility time.");
+    params.append("delayed_post_at", when.toISOString());
+  }
   const response = await canvasRequest(`${baseUrl}/api/v1/courses/${courseId}/discussion_topics`, {
     method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: params.toString(),
   }, token);

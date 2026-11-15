@@ -1,4 +1,5 @@
 "use client";
+import { verifiedStyledAnnouncement } from "@/lib/walkthrough-styled-announcement";
 
 // The existing slot reducer remains the single draft store. pair-dispatch owns
 // synchronous call reservations and finalized snapshots; this hook binds it to
@@ -233,7 +234,7 @@ export function useAnnouncementDraftSlots(args: {
     ctx: AnnouncementDraftDispatchContext,
     outline: AnnouncementOutline,
     isCurrent?: () => boolean
-  ) => Promise<{ title: string; message: string; researchNotice: ResearchNotice; compareTemplate?: boolean } | { error: string }>;
+  ) => Promise<{ title: string; message: string; researchNotice: ResearchNotice; compareTemplate?: boolean; richHtml?: string; richSourceMessage?: string } | { error: string }>;
   /**
    * `null`: no Canvas-linked course is selected. Checked BEFORE dispatching
    * `posting`, so there is no `posting: true` flash - dispatches
@@ -253,7 +254,8 @@ export function useAnnouncementDraftSlots(args: {
   readonly postDraft: (
     title: string,
     message: string,
-    delayedPostAt?: string
+    delayedPostAt?: string,
+    richHtml?: string
   ) => Promise<{ course: string } | { error: string }> | null;
   /** G3 Ruling 2/9: the actual research call - injected, per the same
    * blocker-5 rule that keeps every literal server-action call in the
@@ -351,7 +353,7 @@ export function useAnnouncementDraftSlots(args: {
         dispatch({ type: "post-result", id, result: { error: "Could not read the scheduled visibility time." } });
         return;
       }
-      const promise = argsRef.current.postDraft(slot.draft.draft.title, slot.draft.draft.message, postArgsFor(decision));
+      const promise = argsRef.current.postDraft(slot.draft.draft.title, slot.draft.draft.message, postArgsFor(decision), slot.draft.draft.richSourceMessage === slot.draft.draft.message ? slot.draft.draft.richHtml : undefined);
       if (promise === null) {
         dispatch({ type: "post-result", id, result: { error: "Choose a course above to post." } });
         return;
@@ -397,10 +399,10 @@ export function useAnnouncementDraftSlots(args: {
   const copySlot = useCallback((id: string) => {
     const slot = slotsRef.current.find((s) => s.id === id);
     if (!slot || slot.draft.phase !== "drafted") return;
-    const { title, message } = slot.draft.draft;
+    const { title, message, richHtml, richSourceMessage } = slot.draft.draft;
     writeClipboardText(
       `${title}\n\n${message}`,
-      `<p><strong>${escapeForCopyTitle(title)}</strong></p>${markdownToHtml(message)}`
+      `<p><strong>${escapeForCopyTitle(title)}</strong></p>${richSourceMessage === message ? verifiedStyledAnnouncement(message, richHtml) ?? markdownToHtml(message) : markdownToHtml(message)}`
     ).then(
       () => dispatch({ type: "copy-result", id, error: null }),
       // `writeClipboardText`'s own rejection ("clipboard unavailable" for a

@@ -802,3 +802,17 @@ describe("quiz grounding for selected examples", () => {
     expect((vi.mocked(callLlm).mock.calls.at(-1)?.[0].contents[0].parts[0] as { text: string }).text).toBe(editedPrompt);
   });
 });
+
+it("does not regroup a closing after the instructor edits the provider prompt", async () => {
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current project details", outline: { ...EMPTY_ANNOUNCEMENT_OUTLINE, closingParagraphs: 3 }, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "beginning-of-week" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  const message = ["As you finalize the project, be clear.", "I look forward to your analysis.", "Document the supporting evidence.", "This week is a great opportunity to practice.", "I encourage you to use the examples. They are not graded.", "Good luck and reach out if needed."].join("\n\n");
+  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message }) } as never);
+  const prepared = await prepareWalkthroughAnnouncementPromptAction(input);
+  if (!("prompt" in prepared)) throw new Error("Missing prompt");
+  const automatic = await draftWalkthroughAnnouncementAction({ ...input, promptOverride: prepared.prompt, promptPreparedFor: prepared.preparedFor });
+  if (!("message" in automatic)) throw new Error("Missing draft");
+  expect(automatic.message.split("\n\n")).toHaveLength(3);
+  expect(automatic.message.replace(/\s+/g, " ")).toBe(message.replace(/\s+/g, " "));
+  const edited = await draftWalkthroughAnnouncementAction({ ...input, promptOverride: prepared.prompt + "\nKeep six distinct paragraphs.", promptPreparedFor: prepared.preparedFor });
+  expect(edited).toHaveProperty("message", message);
+});

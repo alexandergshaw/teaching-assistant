@@ -981,9 +981,23 @@ it("preserves safe section content and the saved list kind when the model change
   expect(result).toHaveProperty("formatFallback", true);
 });
 
-it("explains when unmatched section emoji cannot be recovered", async () => {
+it("preserves the draft with a warning when there is no saved emoji position", async () => {
   const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current content.", outline: EMPTY_ANNOUNCEMENT_OUTLINE, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "requested" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
   const icon = String.fromCodePoint(0x1f4cc);
   vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", sections: [{ index: 1, heading: null, paragraphs: ["Current content."], items: [], emojis: [{ target: "paragraph", index: 0, position: "prefix", value: icon }] }] }) } as never);
-  expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("error", "The draft's emoji positions could not be matched to the saved format. Try again or turn off emoji.");
+  const result = await draftWalkthroughAnnouncementAction(input);
+  expect(result).toHaveProperty("message", "Current content.");
+  expect(result).toHaveProperty("formatFallback", true);
+});
+
+it("does not discard malformed emoji text when another section was adjusted", async () => {
+  const icon = String.fromCodePoint(0x1f4cc);
+  const outline = deriveAnnouncementOutline(`## ${icon} Complete\n- Old task.\n\n## More\nOld content.`);
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current tasks.", outline, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "requested" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  const sections = [
+    { index: 1, heading: "Complete", paragraphs: [], items: ["Current task."], emojis: [{ target: "item", index: 0, position: "suffix", value: icon }] },
+    { index: 2, heading: "More", paragraphs: ["Current content."], items: [], emojis: [{ target: "paragraph", index: 0, position: "prefix", value: "Important deadline" }] },
+  ];
+  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", sections }) } as never);
+  expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("error");
 });

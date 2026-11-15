@@ -44,7 +44,7 @@ import { renderRichTemplate, validRichTemplate } from "@/lib/announcement-rich-t
 import { renderRichTree, richTreePlan } from "@/lib/announcement-rich-tree";
 import { projectRichTemplate } from "@/lib/walkthrough-rich-projection";
 import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown";
-import { announcementStructurePlan, assembleAnnouncementSections, recoverAnnouncementSections, announcementSectionFailure, announcementContentSignature, announcementSectionBody, hasMeaningfulAnnouncementContent } from "@/lib/walkthrough-structured-announcement";
+import { announcementStructurePlan, assembleAnnouncementSections, recoverAnnouncementSections, normalizeAnnouncementEmoji, validAnnouncementEmojiChoice, announcementSectionFailure, announcementContentSignature, announcementSectionBody, hasMeaningfulAnnouncementContent } from "@/lib/walkthrough-structured-announcement";
 import { verifiedStyledAnnouncement } from "@/lib/walkthrough-styled-announcement";
 import { applyWalkthroughFidelity } from "@/lib/walkthrough-announcement-fidelity";
 import { matchQuizDetailsBullets } from "@/lib/walkthrough-quiz-list";
@@ -587,7 +587,10 @@ export async function draftWalkthroughAnnouncementAction(
         if (extraMarkdown) { singleSourceRich += markdownToHtml(extraMarkdown); formatFallback = true; }
         structuredMessage = htmlToMarkdown(singleSourceRich);
       } else {
-      const sections = "sections" in parsed ? parsed.sections : undefined;
+      const rawSections = "sections" in parsed ? parsed.sections : undefined;
+      const normalized = input.emojiPolicy === "requested" && !message ? normalizeAnnouncementEmoji(rawSections, input.outline) : { sections: rawSections, adjusted: false };
+      const sections = normalized.sections;
+      if (normalized.adjusted) formatFallback = true;
       const assembled = assembleAnnouncementSections(sections, input.outline, input.emojiPolicy === "requested");
       if (assembled) {
         const retainedBody = stripUnpermittedUrls(announcementSectionBody(sections), permitted).text;
@@ -595,7 +598,12 @@ export async function draftWalkthroughAnnouncementAction(
         structuredMessage = stripUnpermittedUrls(assembled, permitted).text;
         if (message && announcementContentSignature(structuredMessage) !== announcementContentSignature(permittedMessage)) return { error: "The draft sections did not match the complete message. Try again.", diag: diagBase };
       } else if (sections !== undefined) {
-        const recovered = recoverAnnouncementSections(sections, input.outline);
+        let recovered = recoverAnnouncementSections(sections, input.outline);
+        if (!recovered && normalized.adjusted && input.emojiPolicy === "requested" && !message && Array.isArray(sections) && sections.every(section => section && typeof section === "object" && !Array.isArray(section) && (section.emojis === undefined || (Array.isArray(section.emojis) && section.emojis.every(validAnnouncementEmojiChoice))))) {
+          const withoutEmoji = sections.map(section => section && typeof section === "object" && !Array.isArray(section) ? { ...section, emojis: [] } : section);
+          recovered = recoverAnnouncementSections(withoutEmoji, input.outline);
+          if (recovered) formatFallback = true;
+        }
         if (!recovered || message) console.warn("Walkthrough section validation:", announcementSectionFailure(sections, input.outline));
         if (!recovered && input.emojiPolicy === "requested" && Array.isArray(sections) && sections.some(section => section && typeof section === "object" && !Array.isArray(section) && Array.isArray(section.emojis) && section.emojis.length > 0)) return { error: "The draft's emoji positions could not be matched to the saved format. Try again or turn off emoji.", diag: diagBase };
         if (!recovered || message) return { error: "The draft did not match the requested section structure. Try again.", diag: diagBase };

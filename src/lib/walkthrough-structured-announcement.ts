@@ -20,6 +20,35 @@ function plainLine(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0 && value.length <= 8000 && !/[\r\n]/.test(value) && !containsEmoji(value) && !/^\s*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|`{3,}|~{3,})/.test(value);
 }
 function slotKey(slot: { target: string; index: number; position: string }): string { return `${slot.target}:${slot.index}:${slot.position}`; }
+export function validAnnouncementEmojiChoice(slot: unknown): boolean {
+  if (!slot || typeof slot !== "object" || Array.isArray(slot)) return false;
+  const entry = slot as Record<string, unknown>;
+  return Object.keys(entry).every(key => ["target", "index", "position", "value"].includes(key)) &&
+    ["heading", "paragraph", "item"].includes(entry.target as string) && Number.isInteger(entry.index) && (entry.index as number) >= 0 &&
+    ["prefix", "suffix"].includes(entry.position as string) && typeof entry.value === "string" && isSingleEmoji(entry.value);
+}
+
+/** Place model-selected emoji at the saved positions, never at model-supplied coordinates. */
+export function normalizeAnnouncementEmoji(value: unknown, outline: AnnouncementOutline): { sections: unknown; adjusted: boolean } {
+  if (!Array.isArray(value)) return { sections: value, adjusted: false };
+  const plan = announcementStructurePlan(outline);
+  let adjusted = false;
+  const sections = value.map(candidate => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return candidate;
+    const item = candidate as Record<string, unknown>;
+    if (!Number.isInteger(item.index) || !Array.isArray(item.paragraphs) || !Array.isArray(item.items) || (item.emojis !== undefined && !Array.isArray(item.emojis))) return item;
+    const saved = plan[(item.index as number) - 1];
+    if (!saved) return item;
+    const applicable = (saved.emojiPlacements ?? []).filter(slot => slot.target === "heading" ? !!item.heading : slot.index < (slot.target === "item" ? (item.items as unknown[]).length : (item.paragraphs as unknown[]).length));
+    const original = (item.emojis ?? []) as unknown[];
+    if (original.some(slot => !validAnnouncementEmojiChoice(slot))) return item;
+    const choices = original.flatMap(slot => slot && typeof slot === "object" && !Array.isArray(slot) && typeof (slot as Record<string, unknown>).value === "string" && isSingleEmoji((slot as Record<string, unknown>).value as string) ? [(slot as Record<string, unknown>).value as string] : []);
+    const emojis = applicable.slice(0, choices.length).map((slot, index) => ({ ...slot, value: choices[index] }));
+    if (JSON.stringify(original) !== JSON.stringify(emojis) || emojis.length !== applicable.length) adjusted = true;
+    return { ...item, emojis };
+  });
+  return { sections, adjusted };
+}
 
 /** Return only a fixed category, never model-supplied content. */
 export function announcementSectionFailure(value: unknown, outline: AnnouncementOutline): string {
@@ -90,7 +119,7 @@ export function assembleAnnouncementSections(value: unknown, outline: Announceme
       (section.listKind !== null && item.items.length === 0)) return null;
     const allowed = emojiRequested ? (section.emojiPlacements ?? []).filter(slot => slot.target === "heading" ? !!item.heading : slot.index < (slot.target === "item" ? (item.items as unknown[]).length : (item.paragraphs as unknown[]).length)) : [];
     const emojis = item.emojis ?? [];
-    if (!Array.isArray(emojis) || emojis.length !== allowed.length) return null;
+    if (!Array.isArray(emojis) || emojis.length > allowed.length) return null;
     const seen = new Set<string>();
     for (const value of emojis) {
       if (!value || typeof value !== "object" || Array.isArray(value)) return null;

@@ -1,12 +1,39 @@
 import { expect, it } from "vitest";
 import type { AnnouncementOutline } from "./announcement-outline-types";
-import { assembleAnnouncementSections, announcementContentSignature } from "./walkthrough-structured-announcement";
+import { assembleAnnouncementSections, announcementContentSignature, announcementSectionFailure, normalizeAnnouncementEmoji } from "./walkthrough-structured-announcement";
 
 const outline: AnnouncementOutline = { sections: [
   { index: 1, heading: null, break: "paragraph-break", listKind: null, sentenceRange: [1, 3] },
   { index: 2, heading: "Complete", break: "heading", listKind: "unordered", sentenceRange: [1, 3] },
   { index: 3, heading: "Quiz Details", break: "heading", listKind: "unordered", sentenceRange: [1, 3] },
 ], hasGreeting: false, hasSignOff: false, hasLinks: false, dueDateSectionIndex: null, todoSectionIndex: null };
+
+it("classifies invalid section shapes without returning supplied text", () => {
+  expect(announcementSectionFailure([{ index: 1, heading: null, paragraphs: ["private"], items: ["private"] }], outline)).toBe("list shape");
+  expect(announcementSectionFailure([{ index: 9, heading: null, paragraphs: ["private"], items: [] }], outline)).toBe("section order or index");
+  expect(announcementSectionFailure([{ index: 1, heading: null, paragraphs: ["private\ntext"], items: [] }], outline)).toBe("paragraph or item text");
+});
+
+it("places model-selected emoji at saved positions and preserves content if none are selected", () => {
+  const icon = String.fromCodePoint(0x1f4cc);
+  const withPosition = { ...outline, sections: [{ ...outline.sections[0], emojiPlacements: [{ target: "paragraph" as const, index: 0, position: "prefix" as const }] }] };
+  const incoming = [{ index: 1, heading: null, paragraphs: ["Current content."], items: [], emojis: [{ target: "item", index: 9, position: "suffix", value: icon }] }];
+  const normalized = normalizeAnnouncementEmoji(incoming, withPosition);
+  expect(normalized.adjusted).toBe(true);
+  expect(assembleAnnouncementSections(normalized.sections, withPosition, true)).toBe(`${icon} Current content.`);
+  const missing = normalizeAnnouncementEmoji([{ ...incoming[0], emojis: [] }], withPosition);
+  expect(missing.adjusted).toBe(true);
+  expect(assembleAnnouncementSections(missing.sections, withPosition, true)).toBe("Current content.");
+});
+
+it("does not discard content or malformed fields masquerading as emoji", () => {
+  for (const slot of [{ target: "paragraph", index: 0, position: "prefix", value: "Important deadline" }, { target: "paragraph", position: "prefix", value: String.fromCodePoint(0x1f4cc) }]) {
+    const source = [{ index: 1, heading: null, paragraphs: ["Current content."], items: [], emojis: [slot] }];
+    const result = normalizeAnnouncementEmoji(source, outline);
+    expect(result.sections).toEqual(source);
+    expect(assembleAnnouncementSections(result.sections, outline, true)).toBeNull();
+  }
+});
 
 it("assembles supported sections in example order and skips missing optional sections", () => {
   const text = assembleAnnouncementSections([

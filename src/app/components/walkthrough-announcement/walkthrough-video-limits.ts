@@ -9,7 +9,7 @@ export class VideoReadError extends Error {
   constructor(public readonly code: string) { super(code); }
 }
 
-const AUDIO_FAILURE_CODES = new Set(["audio-duration", "audio-decode-timeout", "audio-close-timeout", "audio-prepare-timeout", "audio-empty-decode", "audio-incomplete", "audio-wire-limit", "transcription-timeout", "transcription-failed", "narration-limit"]);
+const AUDIO_FAILURE_CODES = new Set(["audio-duration", "audio-decode-timeout", "audio-close-timeout", "audio-prepare-timeout", "audio-empty-decode", "audio-incomplete", "audio-wire-limit", "transcription-timeout", "transcription-failed", "narration-limit", "audio-context-failed", "audio-close-failed", "audio-prepare-failed", "audio-decode-failed", "audio-chunk-failed"]);
 export function safeAudioFailureCode(error: unknown): string {
   return error instanceof VideoReadError && AUDIO_FAILURE_CODES.has(error.code) ? error.code : "audio-read-failed";
 }
@@ -19,6 +19,8 @@ export function audioFailureMessage(code: string): string {
   if (code === "transcription-failed" || code === "transcription-timeout") return "The transcription service could not complete narration. Try again or select another provider.";
   if (code === "audio-duration" || code === "narration-limit") return "The narration exceeds the supported duration or transcript length. Try a shorter video.";
   if (code === "audio-wire-limit") return "A narration segment exceeded the upload limit. Try a shorter video.";
+  if (code === "audio-context-failed" || code === "audio-close-failed") return "The browser could not start or release its audio decoder. Try another browser or reload and retry.";
+  if (code === "audio-prepare-failed" || code === "audio-decode-failed" || code === "audio-chunk-failed") return "The browser could not decode or prepare this video's audio. Try another video export or browser.";
   if (code === "audio-decode-timeout" || code === "audio-close-timeout" || code === "audio-prepare-timeout") return "The browser timed out while preparing audio. Try the video again or use another browser.";
   return "The browser could not prepare narration. Try another video export or browser.";
 }

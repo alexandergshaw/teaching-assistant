@@ -28,6 +28,7 @@ export async function readVideoAudio(blob: Blob, duration: number, provider: Llm
   let context: AudioContext | undefined;
   let mono: Float32Array | undefined;
   const durationTolerance = Math.min(2, duration * 0.02);
+  let failurePhase = "audio-context-failed";
   try {
     if (adapters.decodeDirect) {
       context = adapters.context();
@@ -39,28 +40,35 @@ export async function readVideoAudio(blob: Blob, duration: number, provider: Llm
         if (signal.aborted || (error instanceof VideoReadError && (error.code === "cancelled" || error.code === "audio-decode-timeout"))) throw error;
       }
       if (!mono) {
+        failurePhase = "audio-close-failed";
         await videoWait(() => context!.close(), signal, VIDEO_LOCAL_WAIT_MS, "audio-close-timeout");
         context = undefined;
       }
     }
     if (!mono) {
+      failurePhase = "audio-prepare-failed";
       const audio = await videoWait(() => adapters.prepare(blob, pct => {
       if (!signal.aborted && !prepare.signal.aborted) progress("preparing-narration", pct, 100);
       }, prepare.signal), signal, duration * 1000 + VIDEO_LOCAL_WAIT_MS, "audio-prepare-timeout");
+      failurePhase = "audio-context-failed";
       context = adapters.context();
+      failurePhase = "audio-decode-failed";
       mono = await videoWait(() => adapters.decode(context!, audio), signal, VIDEO_LOCAL_WAIT_MS, "audio-decode-timeout");
     }
     if (mono.length === 0) throw new VideoReadError("audio-empty-decode");
     const decodedDuration = mono.length / LIVE_SAMPLE_RATE;
     if (decodedDuration > VIDEO_MAX_SECONDS) throw new VideoReadError("audio-duration");
     if (decodedDuration < duration - durationTolerance) throw new VideoReadError("audio-incomplete");
+    failurePhase = "audio-chunk-failed";
     const plans = planTranscriptChunks(decodedDuration);
     const parts: string[] = [];
     for (const [index, plan] of plans.entries()) {
       if (signal.aborted) throw new VideoReadError("cancelled");
       progress("transcribing-narration", index, plans.length);
+      failurePhase = "audio-chunk-failed";
       const wav = base64FromArrayBuffer(encodeWav(sliceMonoSamples(mono, LIVE_SAMPLE_RATE, plan), LIVE_SAMPLE_RATE));
       if (!checkWireBudget(wav.length, "Narration chunk").ok) throw new VideoReadError("audio-wire-limit");
+      failurePhase = "transcription-failed";
       const result = await videoWait(() => adapters.transcribe(wav, { provider }), signal, VIDEO_PROVIDER_WAIT_MS, "transcription-timeout");
       if ("error" in result) throw new VideoReadError("transcription-failed");
       parts.push(result.text);
@@ -68,6 +76,9 @@ export async function readVideoAudio(blob: Blob, duration: number, provider: Llm
     }
     const text = joinTranscriptChunks(parts);
     return text ? { status: "complete", text, chunks: plans.length } : { status: "silence", chunks: plans.length };
+  } catch (error) {
+    if (error instanceof VideoReadError) throw error;
+    throw new VideoReadError(failurePhase);
   } finally {
     prepare.abort();
     signal.removeEventListener("abort", abort);

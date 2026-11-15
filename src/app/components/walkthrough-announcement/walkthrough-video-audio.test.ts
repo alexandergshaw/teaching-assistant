@@ -19,6 +19,15 @@ function harness(seconds = 125) {
 }
 afterEach(() => vi.useRealTimers());
 describe("uploaded narration production adapter", () => {
+  it.each(["context", "prepare", "decode", "transcribe"] as const)("classifies an untyped %s failure without exposing its message", async phase => {
+    const h = harness();
+    if (phase === "context") vi.mocked(h.adapters.context).mockImplementation(() => { throw new Error("PRIVATE_DETAIL"); });
+    if (phase === "prepare") vi.mocked(h.adapters.prepare).mockRejectedValue(new Error("PRIVATE_DETAIL"));
+    if (phase === "decode") vi.mocked(h.adapters.decode).mockRejectedValue(new Error("PRIVATE_DETAIL"));
+    if (phase === "transcribe") vi.mocked(h.adapters.transcribe).mockRejectedValue(new Error("PRIVATE_DETAIL"));
+    const codes = { context: "audio-context-failed", prepare: "audio-prepare-failed", decode: "audio-decode-failed", transcribe: "transcription-failed" };
+    await expect(h.run()).rejects.toMatchObject({ code: codes[phase] });
+  });
   it("decodes a supported video directly without real-time preparation", async () => {
     const h = harness(); h.adapters.decodeDirect = vi.fn(async () => new Float32Array(125 * LIVE_SAMPLE_RATE));
     expect((await h.run()).status).toBe("complete");

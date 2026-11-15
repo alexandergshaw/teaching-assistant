@@ -115,8 +115,8 @@ describe("uploaded narration production adapter", () => {
   });
   it("plans from decoded samples and transcribes bounded WAV chunks using the snapshotted provider", async () => {
     const h = harness(); const value = await h.run();
-    expect(value).toEqual({ status: "complete", text: "spoken fact spoken fact spoken fact", chunks: 3 });
-    expect(h.adapters.transcribe).toHaveBeenCalledTimes(3);
+    expect(value).toEqual({ status: "complete", text: Array(13).fill("spoken fact").join(" "), chunks: 13 });
+    expect(h.adapters.transcribe).toHaveBeenCalledTimes(13);
     for (const [wav, options] of vi.mocked(h.adapters.transcribe).mock.calls) {
       expect(wav.length).toBeLessThanOrEqual(UPLOAD_WIRE_BUDGET_BYTES); expect(options).toEqual({ provider: "gemini" });
       expect(atob(wav).slice(0, 4)).toBe("RIFF");
@@ -130,7 +130,7 @@ describe("uploaded narration production adapter", () => {
   });
   it("returns silence distinctly from failure and never claims no audio track", async () => {
     const h = harness(); vi.mocked(h.adapters.transcribe).mockResolvedValue({ text: "   " });
-    expect(await h.run()).toEqual({ status: "silence", chunks: 3 }); expect(h.close).toHaveBeenCalledOnce();
+    expect(await h.run()).toEqual({ status: "silence", chunks: 13 }); expect(h.close).toHaveBeenCalledOnce();
   });
   it("rejects real-time overlength before prepare and rejects decoded overlength before transcription", async () => {
     const h = harness(1201);
@@ -169,4 +169,25 @@ describe("uploaded narration production adapter", () => {
     await vi.advanceTimersByTimeAsync(125_000 + VIDEO_LOCAL_WAIT_MS + 1); await rejected;
     expect(prepareSignal?.aborted).toBe(true); expect(h.adapters.context).not.toHaveBeenCalled();
   });
+});
+
+it("submits a 36-second recording as four ordered sub-megabyte WAV chunks", async () => {
+  const h = harness();
+  const samples = new Float32Array(36 * LIVE_SAMPLE_RATE);
+  for (let second = 0; second < 36; second += 1) samples.fill((Math.floor(second / 10) + 1) / 10, second * LIVE_SAMPLE_RATE, (second + 1) * LIVE_SAMPLE_RATE);
+  h.adapters.decodeDirect = vi.fn(async () => samples);
+  const result = await readVideoAudio(new Blob(["video"]), 36, "gemini", h.controller.signal, h.progress, h.adapters);
+  expect(result).toMatchObject({ status: "complete", chunks: 4 });
+  const chunks = vi.mocked(h.adapters.transcribe).mock.calls.map(([wav]) => atob(wav));
+  expect(chunks.map(wav => wav.length)).toEqual([320044, 320044, 320044, 192044]);
+  expect(vi.mocked(h.adapters.transcribe).mock.calls.every(([wav]) => wav.length <= 512000)).toBe(true);
+  const firstSample = (wav: string) => wav.charCodeAt(44) | wav.charCodeAt(45) << 8;
+  expect(chunks.map(firstSample)).toEqual([3277, 6553, 9830, 13107]);
+});
+
+it("does not automatically retry a rejected action whose server outcome is unknown", async () => {
+  const h = harness();
+  vi.mocked(h.adapters.transcribe).mockRejectedValue(new Error("connection lost"));
+  await expect(h.run()).rejects.toMatchObject({ code: "transcription-call-failed" });
+  expect(h.adapters.transcribe).toHaveBeenCalledOnce();
 });

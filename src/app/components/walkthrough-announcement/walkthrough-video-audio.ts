@@ -17,6 +17,10 @@ export interface AudioAdapters {
 const browserAudio: AudioAdapters = {
   prepare: extractAudioOnly, context: () => new AudioContext(), decode: decodeBlobToMono, decodeDirect: decodeBlobToMono, transcribe: transcribeLiveAudioAction,
 };
+// 10 seconds of 16 kHz mono PCM is 320,044 WAV bytes and 426,728 base64
+// characters, leaving generous headroom for action framing under 1 MiB.
+export const WALKTHROUGH_AUDIO_CHUNK_SECONDS = 10;
+
 export type VideoAudioOutcome = { status: "complete"; text: string; chunks: number } | { status: "silence"; chunks: number };
 
 /** Map only fixed server responses; never propagate provider or account text. */
@@ -76,7 +80,7 @@ export async function readVideoAudio(blob: Blob, duration: number, provider: Llm
     if (decodedDuration > VIDEO_MAX_SECONDS) throw new VideoReadError("audio-duration");
     if (decodedDuration < duration - durationTolerance) throw new VideoReadError("audio-incomplete");
     failurePhase = "audio-chunk-failed";
-    const plans = planTranscriptChunks(decodedDuration);
+    const plans = planTranscriptChunks(decodedDuration, WALKTHROUGH_AUDIO_CHUNK_SECONDS);
     const parts: string[] = [];
     for (const [index, plan] of plans.entries()) {
       if (signal.aborted) throw new VideoReadError("cancelled");

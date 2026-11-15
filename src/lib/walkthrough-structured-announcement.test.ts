@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { AnnouncementOutline } from "./announcement-outline-types";
-import { assembleAnnouncementSections, announcementContentSignature, announcementSectionFailure, normalizeAnnouncementEmoji } from "./walkthrough-structured-announcement";
+import { assembleAnnouncementSections, announcementContentSignature, announcementSectionFailure, normalizeAnnouncementEmoji, normalizeAnnouncementSectionText } from "./walkthrough-structured-announcement";
 
 const outline: AnnouncementOutline = { sections: [
   { index: 1, heading: null, break: "paragraph-break", listKind: null, sentenceRange: [1, 3] },
@@ -33,6 +33,15 @@ it("does not discard content or malformed fields masquerading as emoji", () => {
     expect(result.sections).toEqual(source);
     expect(assembleAnnouncementSections(result.sections, outline, true)).toBeNull();
   }
+});
+
+it("preserves item boundaries when individual list items contain line breaks", () => {
+  const source = [{ index: 2, heading: "Complete", paragraphs: [], items: ["First line\ncontinued", "Second\ncontinued"], emojis: [] }];
+  const normalized = normalizeAnnouncementSectionText(source);
+  expect(normalized.adjusted).toBe(true);
+  expect(assembleAnnouncementSections(normalized.sections, outline)).toBe("## Complete\n\n- First line continued\n- Second continued");
+  const one = normalizeAnnouncementSectionText([{ ...source[0], items: ["Only line\ncontinued"] }]);
+  expect(assembleAnnouncementSections(one.sections, outline)).toBe("## Complete\n\n- Only line continued");
 });
 
 it("assembles supported sections in example order and skips missing optional sections", () => {

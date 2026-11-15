@@ -1001,3 +1001,14 @@ it("does not discard malformed emoji text when another section was adjusted", as
   vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", sections }) } as never);
   expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("error");
 });
+
+it.each([
+  ["scalar paragraph", "First current detail.", [], "First current detail."],
+  ["multiline paragraph", ["First current detail.\nSecond current detail."], [], "First current detail.\n\nSecond current detail."],
+])("recovers a %s without losing content", async (_label, paragraphs, items, expected) => {
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current details.", outline: EMPTY_ANNOUNCEMENT_OUTLINE, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", sections: [{ index: 1, heading: null, paragraphs, items, emojis: [] }] }) } as never);
+  const result = await draftWalkthroughAnnouncementAction(input);
+  expect(result).toHaveProperty("message", expected);
+  expect(result).toHaveProperty("formatFallback", true);
+});

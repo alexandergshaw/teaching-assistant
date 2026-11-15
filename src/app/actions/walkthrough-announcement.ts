@@ -44,7 +44,7 @@ import { renderRichTemplate, validRichTemplate } from "@/lib/announcement-rich-t
 import { renderRichTree, richTreePlan } from "@/lib/announcement-rich-tree";
 import { projectRichTemplate } from "@/lib/walkthrough-rich-projection";
 import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown";
-import { announcementStructurePlan, assembleAnnouncementSections, recoverAnnouncementSections, normalizeAnnouncementEmoji, validAnnouncementEmojiChoice, announcementSectionFailure, announcementContentSignature, announcementSectionBody, hasMeaningfulAnnouncementContent } from "@/lib/walkthrough-structured-announcement";
+import { announcementStructurePlan, assembleAnnouncementSections, recoverAnnouncementSections, normalizeAnnouncementEmoji, normalizeAnnouncementSectionText, validAnnouncementEmojiChoice, announcementSectionFailure, announcementContentSignature, announcementSectionBody, hasMeaningfulAnnouncementContent } from "@/lib/walkthrough-structured-announcement";
 import { verifiedStyledAnnouncement } from "@/lib/walkthrough-styled-announcement";
 import { applyWalkthroughFidelity } from "@/lib/walkthrough-announcement-fidelity";
 import { matchQuizDetailsBullets } from "@/lib/walkthrough-quiz-list";
@@ -588,9 +588,10 @@ export async function draftWalkthroughAnnouncementAction(
         structuredMessage = htmlToMarkdown(singleSourceRich);
       } else {
       const rawSections = "sections" in parsed ? parsed.sections : undefined;
-      const normalized = input.emojiPolicy === "requested" && !message ? normalizeAnnouncementEmoji(rawSections, input.outline) : { sections: rawSections, adjusted: false };
+      const normalizedText = !message ? normalizeAnnouncementSectionText(rawSections) : { sections: rawSections, adjusted: false };
+      const normalized = input.emojiPolicy === "requested" && !message ? normalizeAnnouncementEmoji(normalizedText.sections, input.outline) : { sections: normalizedText.sections, adjusted: false };
       const sections = normalized.sections;
-      if (normalized.adjusted) formatFallback = true;
+      if (normalized.adjusted || normalizedText.adjusted) formatFallback = true;
       const assembled = assembleAnnouncementSections(sections, input.outline, input.emojiPolicy === "requested");
       if (assembled) {
         const retainedBody = stripUnpermittedUrls(announcementSectionBody(sections), permitted).text;

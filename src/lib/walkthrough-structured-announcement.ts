@@ -20,6 +20,29 @@ function plainLine(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0 && value.length <= 8000 && !/[\r\n]/.test(value) && !containsEmoji(value) && !/^\s*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|`{3,}|~{3,})/.test(value);
 }
 function slotKey(slot: { target: string; index: number; position: string }): string { return `${slot.target}:${slot.index}:${slot.position}`; }
+
+/** Accept harmless scalar and line-break variations without dropping text. */
+export function normalizeAnnouncementSectionText(value: unknown): { sections: unknown; adjusted: boolean } {
+  if (!Array.isArray(value)) return { sections: value, adjusted: false };
+  let adjusted = false;
+  const sections = value.map(candidate => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return candidate;
+    const item = candidate as Record<string, unknown>;
+    const next = { ...item };
+    for (const field of ["paragraphs", "items"] as const) {
+      const original = item[field];
+      const values = typeof original === "string" ? [original] : original;
+      if (!Array.isArray(values) || !values.every(value => typeof value === "string")) continue;
+      const lines = field === "items"
+        ? values.map(value => (value as string).replace(/\s*(?:\r\n|\r|\n)\s*/g, " ").trim())
+        : values.flatMap(value => (value as string).split(/\r\n|\r|\n/).map(line => line.trim()).filter(Boolean));
+      if (!lines.length || !lines.every(plainLine)) continue;
+      if (typeof original === "string" || values.some(value => /[\r\n]/.test(value as string))) { next[field] = lines; adjusted = true; }
+    }
+    return next;
+  });
+  return { sections, adjusted };
+}
 export function validAnnouncementEmojiChoice(slot: unknown): boolean {
   if (!slot || typeof slot !== "object" || Array.isArray(slot)) return false;
   const entry = slot as Record<string, unknown>;

@@ -235,6 +235,7 @@ function renderOutlineSection(section: OutlineSection, omitUnsupportedQuiz = fal
   } else if (section.break === "heading") {
     parts.push(`Use a brief ${section.headingRole ?? "general"} heading or lead-in derived from current materials; do not print a generic placeholder.`);
   }
+  if (section.emojiPlacements?.length) parts.push(`Example emoji positions: ${section.emojiPlacements.map(slot => `${slot.target} ${slot.index} ${slot.position}`).join(", ")}.`);
   if (section.listItemRange) parts.push(`Approximately ${section.listItemRange[0]}-${section.listItemRange[1]} list items${section.checklist ? ", in checklist form" : ""}.`);
   return parts.join(" ");
 }

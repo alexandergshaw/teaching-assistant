@@ -48,3 +48,9 @@ it("never regroups code, list steps or unanchored endings", () => {
   ];
   for (const input of examples) expect(applyWalkthroughFidelity(input, outline)).toBe(input);
 });
+
+it("does not add a second welcome when an emoji precedes the generated welcome", () => {
+  const icon = String.fromCodePoint(0x1f44b);
+  const input = `${icon} Welcome to the course!\n\nCurrent details.`;
+  expect(applyWalkthroughFidelity(input, { ...deriveAnnouncementOutline("Welcome!"), opensWithWelcome: true })).toBe(input);
+});

@@ -752,11 +752,11 @@ it("enforces quiz bullets for the unchanged reviewed prompt without overriding e
   const outline = deriveAnnouncementOutline("Quiz Details:\n- Due Sunday\n- Points 20");
   const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current quiz information", outline, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "beginning-of-week" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
   const message = "Quiz Details\n1. Due: Thursday\n2. Points: 10";
-  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Quiz", message }) } as never);
+  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Quiz", message, sections: [{ index: 1, heading: "Quiz Details", paragraphs: [], items: ["Due: Thursday", "Points: 10"] }] }) } as never);
   const preview = await prepareWalkthroughAnnouncementPromptAction(input);
   if (!("prompt" in preview)) throw new Error("Missing prompt");
   const unchanged = await draftWalkthroughAnnouncementAction({ ...input, promptOverride: preview.prompt, promptPreparedFor: preview.preparedFor });
-  expect(unchanged).toHaveProperty("message", "Quiz Details\n- Due: Thursday\n- Points: 10");
+  expect(unchanged).toHaveProperty("message", "## Quiz Details\n\n- Due: Thursday\n- Points: 10");
   const edited = await draftWalkthroughAnnouncementAction({ ...input, promptOverride: preview.prompt + "\nUse numbered quiz details.", promptPreparedFor: preview.preparedFor });
   expect(edited).toHaveProperty("message", message);
 });
@@ -764,7 +764,7 @@ it("enforces quiz bullets for the unchanged reviewed prompt without overriding e
 it("preserves the reviewed prompt while applying a welcome only when it is unchanged", async () => {
   const outline = deriveAnnouncementOutline("Welcome to Week Twelve!\nCurrent topic.");
   const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current topic", outline, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "beginning-of-week" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
-  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message: "Current topic details." }) } as never);
+  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message: "Current topic details.", sections: [{ index: 2, heading: null, paragraphs: ["Current topic details."], items: [] }] }) } as never);
   const prepared = await prepareWalkthroughAnnouncementPromptAction(input);
   if (!("prompt" in prepared)) throw new Error("Missing prompt");
   const unchanged = await draftWalkthroughAnnouncementAction({ ...input, promptOverride: prepared.prompt, promptPreparedFor: prepared.preparedFor });
@@ -778,7 +778,7 @@ it("preserves the reviewed prompt while applying a welcome only when it is uncha
 describe("quiz grounding for selected examples", () => {
   const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Complete the current project.", outline: deriveAnnouncementOutline("Quiz Details:\n- Due Sunday\n- Points 20"), matchExample: true, coverageBlock: "Project overview", notes: "", emojiPolicy: "forbidden" as const, timing: "beginning-of-week" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
   it("rejects an invented quiz section instead of relabeling a project", async () => {
-    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Weekly update", message: "Quiz Details\n- Complete the project." }) } as never);
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Weekly update", message: "Quiz Details\n- Complete the project.", sections: [{ index: 1, heading: "Quiz Details", paragraphs: [], items: ["Complete the project."] }] }) } as never);
     expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("error", expect.stringContaining("not found in the current materials"));
   });
   it("does not infer a quiz from a filename or a negative edit, and permits project time limits", async () => {
@@ -787,11 +787,11 @@ describe("quiz grounding for selected examples", () => {
     if (!("prompt" in preview)) throw new Error("Missing prompt");
     const edited = await draftWalkthroughAnnouncementAction({ ...input, materialsText: "Review quiz.pdf and complete the project.", promptOverride: preview.prompt + "\nDo not invent Quiz 2 due Friday.", promptPreparedFor: preview.preparedFor });
     expect(edited).toHaveProperty("error", expect.stringContaining("not found in the current materials"));
-    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Project", message: "The project has a 30 minute time limit." }) } as never);
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Project", message: "The project has a 30 minute time limit.", sections: [{ index: 2, heading: null, paragraphs: ["The project has a 30 minute time limit."], items: [] }] }) } as never);
     expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("message", "The project has a 30 minute time limit.");
   });
   it("allows an actual current quiz and preserves instructor prompt edits", async () => {
-    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Weekly update", message: "Quiz 2 is due Thursday." }) } as never);
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Weekly update", message: "Quiz 2 is due Thursday.", sections: [{ index: 2, heading: null, paragraphs: ["Quiz 2 is due Thursday."], items: [] }] }) } as never);
     const actual = await draftWalkthroughAnnouncementAction({ ...input, materialsText: "Quiz 2 is due Thursday." });
     expect(actual).toHaveProperty("message", "Quiz 2 is due Thursday.");
     const preview = await prepareWalkthroughAnnouncementPromptAction(input);
@@ -806,7 +806,7 @@ describe("quiz grounding for selected examples", () => {
 it("does not regroup a closing after the instructor edits the provider prompt", async () => {
   const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current project details", outline: { ...EMPTY_ANNOUNCEMENT_OUTLINE, closingParagraphs: 3 }, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "beginning-of-week" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
   const message = ["As you finalize the project, be clear.", "I look forward to your analysis.", "Document the supporting evidence.", "This week is a great opportunity to practice.", "I encourage you to use the examples. They are not graded.", "Good luck and reach out if needed."].join("\n\n");
-  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message }) } as never);
+  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message, sections: [{ index: 1, heading: null, paragraphs: message.split("\n\n"), items: [] }] }) } as never);
   const prepared = await prepareWalkthroughAnnouncementPromptAction(input);
   if (!("prompt" in prepared)) throw new Error("Missing prompt");
   const automatic = await draftWalkthroughAnnouncementAction({ ...input, promptOverride: prepared.prompt, promptPreparedFor: prepared.preparedFor });
@@ -815,4 +815,55 @@ it("does not regroup a closing after the instructor edits the provider prompt", 
   expect(automatic.message.replace(/\s+/g, " ")).toBe(message.replace(/\s+/g, " "));
   const edited = await draftWalkthroughAnnouncementAction({ ...input, promptOverride: prepared.prompt + "\nKeep six distinct paragraphs.", promptPreparedFor: prepared.preparedFor });
   expect(edited).toHaveProperty("message", message);
+});
+
+it("assembles supported template sections deterministically and rejects content omitted by section data", async () => {
+  const outline = deriveAnnouncementOutline("Introduction.\nComplete:\n- Read the source.\n- Submit the work.\nQuiz Details:\n- Due Sunday\n- Points 20");
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current project and reading.", outline, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "beginning-of-week" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  const sections = [{ index: 1, heading: null, paragraphs: ["Current introduction."], items: [] }, { index: 2, heading: "Complete", paragraphs: [], items: ["Read the chapter.", "Submit the project."] }];
+  const message = "Current introduction.\n\nComplete\n1. Read the chapter.\n2. Submit the project.";
+  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message, sections }) } as never);
+  const result = await draftWalkthroughAnnouncementAction(input);
+  expect(result).toHaveProperty("message", "Current introduction.\n\n## Complete\n\n- Read the chapter.\n- Submit the project.");
+  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message: message + "\nDo not omit this fact.", sections }) } as never);
+  expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("error", "The draft sections did not match the complete message. Try again.");
+});
+
+it("renders newly chosen emoji only at saved example positions and respects the toggle", async () => {
+  const oldIcon = String.fromCodePoint(0x1f4cc), newIcon = String.fromCodePoint(0x1f4a1);
+  const outline = deriveAnnouncementOutline(`## ${oldIcon} Complete\n- Read the chapter.`);
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Read the current chapter.", outline, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "requested" as const, timing: "beginning-of-week" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  const section = { index: 1, heading: "Complete", paragraphs: [], items: ["Read the current chapter."], emojis: [{ target: "heading", index: 0, position: "prefix", value: newIcon }] };
+  const message = `## ${newIcon} Complete\n- Read the current chapter.`;
+  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message, sections: [section] }) } as never);
+  const prepared = await prepareWalkthroughAnnouncementPromptAction(input);
+  if (!("prompt" in prepared)) throw new Error("Missing prompt");
+  expect(prepared.prompt).not.toContain(oldIcon);
+  expect(prepared.prompt).toContain("heading 0 prefix");
+  const result = await draftWalkthroughAnnouncementAction(input);
+  expect(result).toHaveProperty("message", `## ${newIcon} Complete\n\n- Read the current chapter.`);
+  const off = await draftWalkthroughAnnouncementAction({ ...input, emojiPolicy: "forbidden" });
+  expect(off).toHaveProperty("error", "The draft did not match the requested section structure. Try again.");
+});
+
+it("rejects emoji in a structured title even when the emoji toggle is off", async () => {
+  const icon = String.fromCodePoint(0x1f4cc);
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Read the current chapter.", outline: EMPTY_ANNOUNCEMENT_OUTLINE, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "beginning-of-week" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: `${icon} Update`, message: "Read the current chapter.", sections: [{ index: 1, heading: null, paragraphs: ["Read the current chapter."], items: [] }] }) } as never);
+  expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("error", "The draft title included an unsupported emoji. Try again.");
+});
+
+it("does not return a heading and synthetic welcome after all body content is stripped", async () => {
+  const outline = deriveAnnouncementOutline("Welcome!\nQuiz Details:\n- Due Sunday\n- Points 20");
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText: "A current quiz is available.", outline, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "beginning-of-week" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  const message = "Quiz Details\n- https://unverified.example/old";
+  const sections = [{ index: 2, heading: "Quiz Details", paragraphs: [], items: ["https://unverified.example/old"] }];
+  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message, sections }) } as never);
+  expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("error", "Generated announcement has no content after removing unverified links. Try again.");
+});
+
+it("rejects unstructured output for the unchanged selected-template prompt", async () => {
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current content.", outline: EMPTY_ANNOUNCEMENT_OUTLINE, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "beginning-of-week" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message: "Current content." }) } as never);
+  expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("error", "The draft did not match the requested section structure. Try again.");
 });

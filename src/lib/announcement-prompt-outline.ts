@@ -30,6 +30,7 @@ export function promptSafeAnnouncementOutline(outline: AnnouncementOutline): Ann
       sentenceRange: [bounded(section.sentenceRange[0]), bounded(section.sentenceRange[1])] as const,
       ...(section.listItemRange ? { listItemRange: [bounded(section.listItemRange[0]), bounded(section.listItemRange[1])] as const } : {}),
       ...(section.checklist ? { checklist: true } : {}),
+      ...(Array.isArray(section.emojiPlacements) ? { emojiPlacements: section.emojiPlacements.filter(item => item && ["heading", "paragraph", "item"].includes(item.target) && ["prefix", "suffix"].includes(item.position) && Number.isInteger(item.index) && item.index >= 0 && item.index < 100 && (item.target !== "heading" || item.index === 0)).slice(0, 100).map(item => ({ target: item.target, index: item.index, position: item.position })) } : {}),
     })),
   };
 }

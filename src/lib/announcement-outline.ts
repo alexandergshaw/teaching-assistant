@@ -1,3 +1,4 @@
+import { emojiGraphemes, isSingleEmoji } from "./announcement-emoji";
 import { closingParagraphCount } from "./announcement-closing-shape";
 // NAMED FOR WHAT IT PRODUCES, not for what it reads, and that was a rename.
 // It landed as announcement-exemplar.ts (singular), one character away from
@@ -280,6 +281,18 @@ function analyzeBlock(block: string[]): BlockAnalysis {
   return { listKind, sentenceRange: [min, max] };
 }
 
+type EmojiPlacement = NonNullable<OutlineSection["emojiPlacements"]>[number];
+function emojiEdges(value: string, target: EmojiPlacement["target"], index: number): EmojiPlacement[] {
+  const text = value.replace(/^(?:[-*]|\d+[.)])\s+/, "").trim().replace(/^(?:\*\*|__)/, "").replace(/(?:\*\*|__)$/, "").trim();
+  const parts = emojiGraphemes(text);
+  const first = parts.findIndex(part => part.trim());
+  let last = parts.length - 1;
+  while (last >= 0 && !parts[last].trim()) last -= 1;
+  const prefix = first >= 0 && isSingleEmoji(parts[first]);
+  const suffix = last > first && isSingleEmoji(parts[last]);
+  return [...(prefix ? [{ target, index, position: "prefix" as const }] : []), ...(suffix ? [{ target, index, position: "suffix" as const }] : [])];
+}
+
 /**
  * Reads a pasted announcement and returns its structural outline: section
  * shapes, greeting/sign-off presence, and the location of a due-date block
@@ -313,12 +326,17 @@ export function deriveAnnouncementOutline(text: string): AnnouncementOutline {
     const bodyBlock = headingText !== null ? nextBlock! : block;
     const { listKind, sentenceRange } = analyzeBlock(bodyBlock);
 
+    const emojiPlacements = [
+      ...(headingText ? emojiEdges(headingText, "heading", 0) : []),
+      ...(listKind ? bodyBlock.slice(0, 100).flatMap((line, index) => emojiEdges(line, "item", index)) : emojiEdges(bodyBlock.join(" "), "paragraph", 0)),
+    ];
     const section: OutlineSection = {
       index: sections.length + 1,
       heading: headingText,
       break: headingText !== null ? "heading" : "paragraph-break",
       listKind,
       sentenceRange,
+      ...(emojiPlacements.length && { emojiPlacements }),
       ...(listKind ? { listItemRange: [Math.max(1, bodyBlock.length - 1), bodyBlock.length + 1] as const, checklist: bodyBlock.some(line => /^[-*]\s+\[[ xX]\]/.test(line)) } : {}),
     };
     sections.push(section);
@@ -351,6 +369,7 @@ export function deriveAnnouncementOutline(text: string): AnnouncementOutline {
   const isTriviallyEmpty =
     sections.length === 1 &&
     sections[0].heading === null &&
+    !sections[0].emojiPlacements?.length &&
     !hasGreeting &&
     !hasSignOff &&
     dueDateSectionIndex === null &&

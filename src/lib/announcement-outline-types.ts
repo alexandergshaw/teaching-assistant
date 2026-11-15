@@ -50,6 +50,8 @@ export interface OutlineSection {
   sentenceRange: readonly [number, number];
   listItemRange?: readonly [number, number];
   checklist?: boolean;
+  /** Positions only: never retain example emoji glyphs or content. */
+  emojiPlacements?: readonly { target: "heading" | "paragraph" | "item"; index: number; position: "prefix" | "suffix" }[];
 }
 
 /** The structural outline of one pasted announcement. */

@@ -39,6 +39,8 @@ import { buildWalkthroughAnnouncementPrompt, type AnnouncementTiming } from "@/l
 import { walkthroughAnnouncementMaxOutputTokens } from "@/lib/walkthrough-announcement-bounds";
 import { composeWalkthroughScriptPrompt } from "@/lib/walkthrough-script-prompt";
 import { addedPromptLines, hasUnsupportedQuizContent } from "@/lib/walkthrough-quiz-evidence";
+import { containsEmoji } from "@/lib/announcement-emoji";
+import { announcementStructurePlan, assembleAnnouncementSections, announcementContentSignature, announcementSectionBody, hasMeaningfulAnnouncementContent } from "@/lib/walkthrough-structured-announcement";
 import { applyWalkthroughFidelity } from "@/lib/walkthrough-announcement-fidelity";
 import { matchQuizDetailsBullets } from "@/lib/walkthrough-quiz-list";
 import { collectPermittedUrls, stripUnpermittedUrls } from "@/lib/walkthrough-announcement-link-guard";
@@ -397,7 +399,16 @@ function composeProviderPrompt(input: WalkthroughAnnouncementDraftInput, styleBl
   return [
     "You are an instructor writing a course announcement for students.",
     bodyInstruction,
-    [
+    input.matchExample ? [
+      "Return ONLY valid JSON with title, message, and sections:",
+      '{"title":"...","message":"...","sections":[{"index":1,"heading":null,"paragraphs":["..."],"items":[],"emojis":[]}]}',
+      "The title must be plain text with no emoji; emoji may appear only in the specified body positions.",
+      "Sections are identified by the 1-based positions in the example outline. Include only sections supported by current materials, in ascending order; never invent facts to fill an example section.",
+      "For a heading section use the exact canonical heading when one is specified; otherwise provide a current-material heading. For a paragraph-break section set heading to null. For prose use paragraphs and no items; for a list use items, with optional introductory paragraphs. Each heading, paragraph and item must be a single string without emoji, line breaks or Markdown list or heading prefixes.",
+      input.emojiPolicy === "requested" ? "For every applicable example emoji position in an included section, choose one relevant single emoji and put it in emojis as {target: heading, paragraph, or item; index: zero-based position; position: prefix or suffix; value: emoji}. Use only listed positions. The extra section has no emoji positions." : "Set every emojis array to empty; do not use emoji in the message or section fields.",
+      "The message field must contain exactly the same headings, paragraphs and list items, in the same order and with the same wording and punctuation. It may use Markdown heading and list prefixes and must include the same chosen emoji at the same positions, but must contain no extra or omitted content. Do not place text outside these fields.",
+      `There are ${announcementStructurePlan(input.outline).length} available section positions. The final position is optional unheaded prose for current facts that do not fit any supported example section.`,
+    ].join("\n") : [
       "Return ONLY valid JSON:",
       "{",
       '  "title": "...",',
@@ -460,12 +471,16 @@ export async function draftWalkthroughAnnouncementAction(
     if (input.promptOverride !== undefined && (!input.promptOverride.trim() || input.promptOverride.length > 160000)) {
       return { error: "The prompt must contain text and be at most 160,000 characters.", diag: unattemptedLlmDiag(provider) };
     }
-    const prompt = input.promptOverride ?? composeProviderPrompt(input, styleBlock);
+    const defaultPrompt = composeProviderPrompt(input, styleBlock);
+    const prompt = input.promptOverride ?? defaultPrompt;
+    const useDefaultPrompt = input.promptOverride === undefined || input.promptOverride === defaultPrompt;
 
     // THE COMPUTED TOKEN BUDGET (P7) - sized from the outline, never a fixed
     // 1024 (draftAnnouncementAction's own budget, deliberately not
     // inherited - see walkthrough-announcement-bounds.ts's header).
-    const tokenBudget = walkthroughAnnouncementMaxOutputTokens(input.outline);
+    const tokenBudget = input.matchExample && useDefaultPrompt
+      ? Math.min(8192, walkthroughAnnouncementMaxOutputTokens(input.outline) * 2)
+      : walkthroughAnnouncementMaxOutputTokens(input.outline);
     const r = await callLlm(
       { contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: 0.5, maxOutputTokens: tokenBudget } },
       provider
@@ -527,17 +542,29 @@ export async function draftWalkthroughAnnouncementAction(
       researchedResources: input.researchedResources,
     });
     const { text: permittedMessage } = stripUnpermittedUrls(message, permitted);
-    const defaultPrompt = composeProviderPrompt(input, styleBlock);
-    const useDefaultPrompt = input.promptOverride === undefined || input.promptOverride === defaultPrompt;
+    let structuredMessage = permittedMessage;
+    if (input.matchExample && useDefaultPrompt) {
+      if (Object.keys(parsed).some(key => !["title", "message", "sections"].includes(key))) return { error: "The draft contained content outside its sections. Try again.", diag: diagBase };
+      if (containsEmoji(title)) return { error: "The draft title included an unsupported emoji. Try again.", diag: diagBase };
+      const sections = "sections" in parsed ? parsed.sections : undefined;
+      const assembled = assembleAnnouncementSections(sections, input.outline, input.emojiPolicy === "requested");
+      if (!assembled) return { error: "The draft did not match the requested section structure. Try again.", diag: diagBase };
+      const retainedBody = stripUnpermittedUrls(announcementSectionBody(sections), permitted).text;
+      if (!hasMeaningfulAnnouncementContent(retainedBody)) return { error: "Generated announcement has no content after removing unverified links. Try again.", diag: diagBase };
+      structuredMessage = stripUnpermittedUrls(assembled, permitted).text;
+      if (announcementContentSignature(structuredMessage) !== announcementContentSignature(permittedMessage)) {
+        return { error: "The draft sections did not match the complete message. Try again.", diag: diagBase };
+      }
+    }
     const addedInstructions = useDefaultPrompt ? "" : addedPromptLines(defaultPrompt, input.promptOverride ?? "");
     const enforcedMessage = input.matchExample && useDefaultPrompt
-      ? applyWalkthroughFidelity(matchQuizDetailsBullets(permittedMessage, input.outline), input.outline)
+      ? applyWalkthroughFidelity(matchQuizDetailsBullets(structuredMessage, input.outline), input.outline)
       : permittedMessage;
     const { text: enforcedTitle } = stripUnpermittedUrls(title, permitted);
     if (input.matchExample && hasUnsupportedQuizContent(enforcedTitle, enforcedMessage, [input.courseLabel, input.moduleLabel ?? "", input.materialsText, input.coverageBlock, input.notes].join("\n"), addedInstructions)) {
       return { error: "The draft mentioned a quiz that was not found in the current materials. Retry, or add the quiz details to the notes.", diag: diagBase };
     }
-    if (!enforcedTitle.trim() || !enforcedMessage.trim()) {
+    if (!enforcedTitle.trim() || !hasMeaningfulAnnouncementContent(enforcedMessage)) {
       return { error: "Generated announcement is empty after removing unverified links. Try again.", diag: diagBase };
     }
 

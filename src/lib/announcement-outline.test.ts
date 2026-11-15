@@ -269,3 +269,14 @@ it("records emphasis style without carrying the old wording", () => {
   expect(outline.hasItalic).toBe(true);
   expect(JSON.stringify(outline)).not.toContain("Secret old title");
 });
+
+it("derives both emoji edges and list positions without retaining glyphs in the safe outline", async () => {
+  const { promptSafeAnnouncementOutline } = await import("./announcement-prompt-outline");
+  const pin = String.fromCodePoint(0x1f4cc), flag = String.fromCodePoint(0x1f1fa, 0x1f1f8), family = String.fromCodePoint(0x1f469, 0x200d, 0x1f4bb);
+  const outline = deriveAnnouncementOutline(`## ${pin} Complete ${flag}\n- ${family} Read the chapter.\n- Submit the work.`);
+  const safe = promptSafeAnnouncementOutline(outline);
+  expect(safe.sections[0].emojiPlacements).toEqual([{ target: "heading", index: 0, position: "prefix" }, { target: "heading", index: 0, position: "suffix" }, { target: "item", index: 0, position: "prefix" }]);
+  expect(JSON.stringify(safe)).not.toContain(pin);
+  expect(JSON.stringify(safe)).not.toContain(flag);
+  expect(JSON.stringify(safe)).not.toContain(family);
+});

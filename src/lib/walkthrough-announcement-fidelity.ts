@@ -1,10 +1,18 @@
+import { emojiGraphemes, isSingleEmoji } from "./announcement-emoji";
 import { isAnnouncementClosingParagraph } from "./announcement-closing-shape";
 import type { AnnouncementOutline } from "./announcement-outline-types";
+
+function opensWithWelcome(message: string): boolean {
+  let beginning = message.trimStart().replace(/^#{1,6}\s*/, "").replace(/^\*\*/, "");
+  const first = emojiGraphemes(beginning)[0];
+  if (first && isSingleEmoji(first)) beginning = beginning.slice(first.length).trimStart();
+  return /^welcome\b/i.test(beginning);
+}
 
 /** Apply only fact-free and text-preserving adjustments to an unchanged prompt. */
 export function applyWalkthroughFidelity(message: string, outline: AnnouncementOutline): string {
   let result = message;
-  if (outline.opensWithWelcome && !/^(?:#{1,6}\s*|\*\*)?welcome\b/i.test(result.trimStart())) result = `Welcome!\n\n${result}`;
+  if (outline.opensWithWelcome && !opensWithWelcome(result)) result = `Welcome!\n\n${result}`;
   const target = outline.closingParagraphs;
   if (!Number.isInteger(target) || !target || target < 1 || target > 5 || result.includes("\r") || result.includes("\n\n\n")) return result;
   const paragraphs = result.split("\n\n");

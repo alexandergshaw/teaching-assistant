@@ -39,6 +39,8 @@ export interface OutlineSection {
    * format" means to them - but see the module comment: a heading is a LABEL,
    * never an instruction, and the composer must frame it as such. */
   heading: string | null;
+  /** Content-free classification for headings whose original text cannot be reused. */
+  headingRole?: "focus" | "consider" | "assessment" | "general";
   break: OutlineSectionBreak;
   listKind: OutlineListKind;
   /** Approximate length as an inclusive [min, max] range of sentences, never a
@@ -57,6 +59,7 @@ export interface AnnouncementOutline {
    * and its absence are both meaningful - an instructor whose announcements
    * start cold should not suddenly be given a greeting. */
   hasGreeting: boolean;
+  opensWithWelcome?: boolean;
   /** Whether it closes with a sign-off. Same reasoning as hasGreeting. */
   hasSignOff: boolean;
   /** The 1-based section index holding the due-date block, or null when the

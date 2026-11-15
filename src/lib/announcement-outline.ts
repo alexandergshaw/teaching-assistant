@@ -295,6 +295,7 @@ export function deriveAnnouncementOutline(text: string): AnnouncementOutline {
   const afterSignOff = stripSignOff(afterGreeting.blocks);
   const blocks = afterSignOff.blocks;
   const hasGreeting = afterGreeting.hasGreeting;
+  const opensWithWelcome = /^welcome\b/i.test((afterGreeting.blocks[0]?.[0] ?? "").replace(/^#{1,6}\s*/, "").replace(/^\*\*/, ""));
   const hasSignOff = afterSignOff.hasSignOff;
 
   const sections: OutlineSection[] = [];
@@ -353,11 +354,12 @@ export function deriveAnnouncementOutline(text: string): AnnouncementOutline {
     dueDateSectionIndex === null &&
     todoSectionIndex === null &&
     !hasLinks;
-  if (isTriviallyEmpty) return hasBold || hasItalic ? { ...EMPTY_ANNOUNCEMENT_OUTLINE, hasBold, hasItalic } : EMPTY_ANNOUNCEMENT_OUTLINE;
+  if (isTriviallyEmpty) return hasBold || hasItalic || opensWithWelcome ? { ...EMPTY_ANNOUNCEMENT_OUTLINE, ...(hasBold && { hasBold }), ...(hasItalic && { hasItalic }), ...(opensWithWelcome && { opensWithWelcome }) } : EMPTY_ANNOUNCEMENT_OUTLINE;
 
   return {
     sections,
     hasGreeting,
+    ...(opensWithWelcome && { opensWithWelcome }),
     hasSignOff,
     dueDateSectionIndex,
     todoSectionIndex,

@@ -242,8 +242,8 @@ describe("restored choices reach the real runner and safe prompt", () => {
     h.dispatch({ type: "choose", id: "wta-slot-2", choice: preferenceChoice(fresh.value.midweek) });
     await h.runner.generate();
     const calls = h.draftOne.mock.calls;
-    expect(calls[0][1].sections.map(s => [s.heading, s.listKind])).toEqual([["Current material section", null], ["Complete", "unordered"], ["Also Review", null], ["Before You Submit", "unordered"], ["Help", null]]);
-    expect(calls[1][1].sections.map(s => [s.heading, s.listKind])).toEqual([["Current material section", null], ["Complete", "ordered"], ["Help", null]]);
+    expect(calls[0][1].sections.map(s => [s.heading, s.listKind])).toEqual([[null, null], ["Complete", "unordered"], ["Also Review", null], ["Before You Submit", "unordered"], ["Help", null]]);
+    expect(calls[1][1].sections.map(s => [s.heading, s.listKind])).toEqual([[null, null], ["Complete", "ordered"], ["Help", null]]);
     expect(calls[0][1].sections[3]).toMatchObject({ checklist: true, listItemRange: [1, 3] });
     for (const [ctx, outline] of calls) {
       const prompt = buildWalkthroughAnnouncementPrompt({ ...ctx, outline: JSON.parse(JSON.stringify(outline)), styleBlock: "", emojiPolicy: "forbidden", researchedResources: [] });

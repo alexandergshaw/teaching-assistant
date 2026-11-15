@@ -126,6 +126,20 @@ describe("nested rich template draft", () => {
     vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", placeholders: { s0: "Important deadline", s1: "Parent", s2: "Child" } }) } as never);
     expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("error");
   });
+  it("accepts a blank tree emoji placeholder when emoji are disabled", async () => {
+    const icon = String.fromCodePoint(0x1f4cc);
+    const outline = derivePreviousAnnouncementOutline(encodePreviousAnnouncementHtml(`<ul><li><strong>${icon}</strong> Parent<ul><li>Child</li></ul></li></ul>`));
+    const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Parent Child", outline, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", placeholders: { s0: "  ", s1: "Parent", s2: "Child" } }) } as never);
+    const result = await draftWalkthroughAnnouncementAction(input);
+    expect(result).toHaveProperty("richHtml");
+    if (!("richHtml" in result)) throw new Error("Missing rich output");
+    expect(result.richHtml).not.toContain(icon);
+    expect(result.richHtml).toContain("Parent");
+    expect(result.richHtml).toContain("Child");
+    const requested = await draftWalkthroughAnnouncementAction({ ...input, emojiPolicy: "requested" });
+    expect(requested).toHaveProperty("error");
+  });
   it("renders nested output from the pinned tree and plain reference text", async () => {
     const derived = derivePreviousAnnouncementOutline(encodePreviousAnnouncementHtml('<div><ul><li>Old<ul><li>Private</li></ul></li></ul><table><tr><td>Secret</td></tr></table></div>'));
     expect(derived.richTree).toBeTruthy();

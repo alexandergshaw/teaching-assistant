@@ -9,6 +9,20 @@ export class VideoReadError extends Error {
   constructor(public readonly code: string) { super(code); }
 }
 
+const AUDIO_FAILURE_CODES = new Set(["audio-duration", "audio-decode-timeout", "audio-close-timeout", "audio-prepare-timeout", "audio-empty-decode", "audio-incomplete", "audio-wire-limit", "transcription-timeout", "transcription-failed", "narration-limit"]);
+export function safeAudioFailureCode(error: unknown): string {
+  return error instanceof VideoReadError && AUDIO_FAILURE_CODES.has(error.code) ? error.code : "audio-read-failed";
+}
+export function audioFailureMessage(code: string): string {
+  if (code === "audio-incomplete") return "The decoded audio did not cover the full video. Try exporting the video again.";
+  if (code === "audio-empty-decode") return "The browser decoded no audio samples. Try another video export.";
+  if (code === "transcription-failed" || code === "transcription-timeout") return "The transcription service could not complete narration. Try again or select another provider.";
+  if (code === "audio-duration" || code === "narration-limit") return "The narration exceeds the supported duration or transcript length. Try a shorter video.";
+  if (code === "audio-wire-limit") return "A narration segment exceeded the upload limit. Try a shorter video.";
+  if (code === "audio-decode-timeout" || code === "audio-close-timeout" || code === "audio-prepare-timeout") return "The browser timed out while preparing audio. Try the video again or use another browser.";
+  return "The browser could not prepare narration. Try another video export or browser.";
+}
+
 export function validateVideo(file: Pick<Blob, "type" | "size">): void {
   if (!["video/mp4", "video/webm"].includes(file.type)) throw new VideoReadError("unsupported-media");
   if (file.size <= 0 || file.size > VIDEO_MAX_BYTES) throw new VideoReadError("file-size");

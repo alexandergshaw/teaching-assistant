@@ -37,7 +37,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } fr
 import { slotsForBothTemplate } from "./pair-preferences";
 import { usePairPreferences } from "./usePairPreferences";
 import { useWalkthroughVideoUpload } from "./useWalkthroughVideoUpload";
-import { VIDEO_MAX_BYTES, VIDEO_MAX_SECONDS, VIDEO_MAX_FRAMES } from "./walkthrough-video-limits";
+import { VIDEO_MAX_BYTES, VIDEO_MAX_SECONDS, VIDEO_MAX_FRAMES, audioFailureMessage } from "./walkthrough-video-limits";
 import { uploadedVideoMaterialText, type VideoReadResult } from "./walkthrough-video-run";
 import type { LlmProvider } from "@/lib/llm";
 import { announcementTemplateLabel, announcementTemplateLabels } from "./announcement-template-label";
@@ -567,6 +567,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
             This is sampled visual coverage, not a complete account of the video.</p>
           {upload.result.audio === "silence" && <p>No speech text was returned by the complete narration pass; this does not establish that the video has no audio track.</p>}
           {upload.result.status === "needs-visible-only" && <>
+            <p>{audioFailureMessage(upload.result.code)} ({upload.result.code})</p>
             <p>Narration could not be completed. No partial transcript was kept. Choose visible pages only to draft from the successful visual results, or start a new walkthrough to try again.</p>
             <Button disabled={!upload.result.blocks.some(batch => batch.length)} onClick={() => {
               const value = upload.result;

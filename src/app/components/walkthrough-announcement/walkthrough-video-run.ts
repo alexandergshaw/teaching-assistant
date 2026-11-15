@@ -4,7 +4,7 @@ import { MODULE_EXTRACT_BATCH_SIZE, type ExtractedBlock } from "../module-deck-c
 import { EXTRACT_BATCH_WIRE_BUDGET } from "../recording/discussion-capture";
 import { createVideoReader, type VideoReader } from "./walkthrough-video-media";
 import { readVideoAudio, type VideoAudioOutcome } from "./walkthrough-video-audio";
-import { VIDEO_LOCAL_WAIT_MS, VIDEO_PROVIDER_WAIT_MS, VideoReadError, validateVideo, videoTimestamps, videoWait } from "./walkthrough-video-limits";
+import { VIDEO_LOCAL_WAIT_MS, VIDEO_PROVIDER_WAIT_MS, VideoReadError, safeAudioFailureCode, validateVideo, videoTimestamps, videoWait } from "./walkthrough-video-limits";
 import { recordSessionDiagnosticEntry } from "@/lib/session-diagnostic-log";
 import { reduceCaptureToMaterials } from "../module-deck-capture/module-blocks";
 
@@ -67,6 +67,7 @@ export async function runVideoRead(input: VideoReadInput, adapters: VideoRunAdap
   const result: VideoReadResult = { status: "failed", blocks: [], narration: "", audio: input.framesOnly ? "not-requested" : "failed",
     duration: 0, sampled: 0, planned: 0, interval: 0, gaps: 0, illegible: 0, emptyBatches: 0, failedBatches: 0, code: "read-failed" };
   let reader: VideoReader | undefined;
+  let audioFailure = "audio-read-failed";
   const current = () => {
     if (signal.aborted || !input.isCurrent()) { controller.abort(); throw new VideoReadError("cancelled"); }
   };
@@ -132,13 +133,14 @@ export async function runVideoRead(input: VideoReadInput, adapters: VideoRunAdap
       } catch (error) {
         current();
         if (error instanceof VideoReadError && error.code === "cancelled") throw error;
+        audioFailure = safeAudioFailureCode(error);
         result.audio = "failed";
       }
     }
     current();
     const hasContent = result.blocks.some(blocks => blocks.length) || !!result.narration;
     result.status = result.audio === "failed" ? "needs-visible-only" : hasContent ? "ready" : "failed";
-    result.code = result.status === "needs-visible-only" ? "audio-failed" : !hasContent ? "no-readable-content"
+    result.code = result.status === "needs-visible-only" ? audioFailure : !hasContent ? "no-readable-content"
       : result.gaps || result.failedBatches || result.illegible ? "partial-visual-coverage" : "ok";
     return result;
   } catch (error) {

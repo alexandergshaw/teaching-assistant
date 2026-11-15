@@ -6,7 +6,7 @@ import { runVideoRead, uploadedVideoMaterialText, recordVideoReadDiagnostic, typ
 import { createPairDraftRunner } from "./pair-dispatch";
 import { makeSlot, slotsReducer } from "./announcement-draft-slots";
 import { readSessionDiagnosticLogState, resetSessionDiagnosticLogForTests, buildSessionDiagnosticLog, formatSessionDiagnosticLogJson, formatSessionDiagnosticLogCsv } from "@/lib/session-diagnostic-log";
-import { VIDEO_MAX_BYTES, VIDEO_MAX_SECONDS, VIDEO_MAX_FRAMES, VIDEO_PROVIDER_WAIT_MS, videoTimestamps } from "./walkthrough-video-limits";
+import { VIDEO_MAX_BYTES, VIDEO_MAX_SECONDS, VIDEO_MAX_FRAMES, VIDEO_PROVIDER_WAIT_MS, VideoReadError, videoTimestamps } from "./walkthrough-video-limits";
 import { EXTRACT_BATCH_WIRE_BUDGET } from "../recording/discussion-capture";
 import { readVideoAudio } from "./walkthrough-video-audio";
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
@@ -55,6 +55,13 @@ describe("uploaded video production runner", () => {
     const h = harness(2); h.audio.mockRejectedValue(new Error("PRIVATE_UPSTREAM_ERROR"));
     const value = await runVideoRead(h.input, h.adapters);
     expect(value.status).toBe("needs-visible-only"); expect(value.blocks).toHaveLength(1); expect(value.narration).toBe(""); expect(value.audio).toBe("failed");
+  });
+  it("records only allowlisted narration failure codes, never raw errors", async () => {
+    const h = harness(2);
+    h.audio.mockRejectedValueOnce(new VideoReadError("audio-incomplete"));
+    expect((await runVideoRead(h.input, h.adapters)).code).toBe("audio-incomplete");
+    h.audio.mockRejectedValueOnce(new VideoReadError("PRIVATE_FILENAME"));
+    expect((await runVideoRead(h.input, h.adapters)).code).toBe("audio-read-failed");
   });
   it("requires visible-only fallback after the actual audio adapter receives an empty decode", async () => {
     const h = harness(2); const close = vi.fn(async () => undefined);

@@ -117,8 +117,8 @@ describe("uploaded narration production adapter", () => {
     const h = harness(); const value = await h.run();
     expect(value).toEqual({ status: "complete", text: Array(13).fill("spoken fact").join(" "), chunks: 13 });
     expect(h.adapters.transcribe).toHaveBeenCalledTimes(13);
-    for (const [wav, options] of vi.mocked(h.adapters.transcribe).mock.calls) {
-      expect(wav.length).toBeLessThanOrEqual(UPLOAD_WIRE_BUDGET_BYTES); expect(options).toEqual({ provider: "gemini" });
+    for (const [wav, options, signal] of vi.mocked(h.adapters.transcribe).mock.calls) {
+      expect(wav.length).toBeLessThanOrEqual(UPLOAD_WIRE_BUDGET_BYTES); expect(options).toEqual({ provider: "gemini" }); expect(signal?.aborted).toBe(true);
       expect(atob(wav).slice(0, 4)).toBe("RIFF");
     }
     expect(h.close).toHaveBeenCalledOnce();

@@ -4,7 +4,7 @@ import { decodeBlobToMono, decideRealTimeGuard } from "../recording/takeAnnounce
 import { LIVE_SAMPLE_RATE, encodeWav, base64FromArrayBuffer } from "@/lib/live-class/wav";
 import { planTranscriptChunks, sliceMonoSamples, joinTranscriptChunks } from "@/lib/take-transcript";
 import { checkWireBudget } from "@/lib/upload-budget";
-import { transcribeLiveAudioAction } from "@/app/actions/live-class";
+import { transcribeWalkthroughChunk } from "./walkthrough-transcription-transport";
 import { VIDEO_LOCAL_WAIT_MS, VIDEO_PROVIDER_WAIT_MS, VIDEO_MAX_SECONDS, VIDEO_NARRATION_CHARS, VideoReadError, videoWait } from "./walkthrough-video-limits";
 
 export interface AudioAdapters {
@@ -12,10 +12,10 @@ export interface AudioAdapters {
   context(): AudioContext;
   decode: typeof decodeBlobToMono;
   decodeDirect?: typeof decodeBlobToMono;
-  transcribe: typeof transcribeLiveAudioAction;
+  transcribe: typeof transcribeWalkthroughChunk;
 }
 const browserAudio: AudioAdapters = {
-  prepare: extractAudioOnly, context: () => new AudioContext(), decode: decodeBlobToMono, decodeDirect: decodeBlobToMono, transcribe: transcribeLiveAudioAction,
+  prepare: extractAudioOnly, context: () => new AudioContext(), decode: decodeBlobToMono, decodeDirect: decodeBlobToMono, transcribe: transcribeWalkthroughChunk,
 };
 // 10 seconds of 16 kHz mono PCM is 320,044 WAV bytes and 426,728 base64
 // characters, leaving generous headroom for action framing under 1 MiB.
@@ -89,7 +89,16 @@ export async function readVideoAudio(blob: Blob, duration: number, provider: Llm
       const wav = base64FromArrayBuffer(encodeWav(sliceMonoSamples(mono, LIVE_SAMPLE_RATE, plan), LIVE_SAMPLE_RATE));
       if (!checkWireBudget(wav.length, "Narration chunk").ok) throw new VideoReadError("audio-wire-limit");
       failurePhase = "transcription-call-failed";
-      const result = await videoWait(() => adapters.transcribe(wav, { provider }), signal, VIDEO_PROVIDER_WAIT_MS, "transcription-timeout");
+      const chunkRequest = new AbortController();
+      const abortChunk = () => chunkRequest.abort();
+      signal.addEventListener("abort", abortChunk, { once: true });
+      let result: Awaited<ReturnType<typeof transcribeWalkthroughChunk>>;
+      try {
+        result = await videoWait(() => adapters.transcribe(wav, { provider }, chunkRequest.signal), signal, VIDEO_PROVIDER_WAIT_MS, "transcription-timeout");
+      } finally {
+        chunkRequest.abort();
+        signal.removeEventListener("abort", abortChunk);
+      }
       if ("error" in result) throw new VideoReadError(transcriptionFailureCode(result.error));
       parts.push(result.text);
       if (parts.reduce((sum, text) => sum + text.length, 0) > VIDEO_NARRATION_CHARS) throw new VideoReadError("narration-limit");

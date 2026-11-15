@@ -83,6 +83,7 @@ export interface Drafted {
   readonly richHtml?: string;
   readonly richSourceMessage?: string;
   readonly richExtraNotice?: boolean;
+  readonly formatFallback?: boolean;
   readonly builtFrom: ResolvedTemplate;
   /** Safe template shape pinned to the generation, if structure matching was requested. */
   readonly templateOutline?: AnnouncementOutline;

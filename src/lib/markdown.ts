@@ -90,6 +90,19 @@ function renderBlock(node: Node): string {
       return `\`\`\`\n${node.text.replace(/\n+$/, "")}\n\`\`\`\n\n`;
     case "p":
     case "div": {
+      if (tag === "div" && node.childNodes.some(child => child instanceof HTMLElement && /^(?:p|div|h[1-6]|ul|ol|pre|blockquote|table)$/i.test(child.rawTagName ?? ""))) {
+        let inline = "";
+        let output = "";
+        const flush = () => { if (inline.trim()) output += `${inline.trim()}\n\n`; inline = ""; };
+        for (const child of node.childNodes) {
+          if (child instanceof HTMLElement && /^(?:p|div|h[1-6]|ul|ol|pre|blockquote|table)$/i.test(child.rawTagName ?? "")) {
+            flush();
+            output += renderBlock(child);
+          } else inline += renderInline(child);
+        }
+        flush();
+        return output;
+      }
       const inner = node.childNodes.map(renderInline).join("").trim();
       return inner ? `${inner}\n\n` : "";
     }

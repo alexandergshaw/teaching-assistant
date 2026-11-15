@@ -42,7 +42,9 @@ import { addedPromptLines, hasUnsupportedQuizContent } from "@/lib/walkthrough-q
 import { containsEmoji } from "@/lib/announcement-emoji";
 import { renderRichTemplate, validRichTemplate } from "@/lib/announcement-rich-template";
 import { renderRichTree, richTreePlan } from "@/lib/announcement-rich-tree";
+import { projectRichTemplate } from "@/lib/walkthrough-rich-projection";
 import { announcementStructurePlan, assembleAnnouncementSections, announcementContentSignature, announcementSectionBody, hasMeaningfulAnnouncementContent } from "@/lib/walkthrough-structured-announcement";
+import { verifiedStyledAnnouncement } from "@/lib/walkthrough-styled-announcement";
 import { applyWalkthroughFidelity } from "@/lib/walkthrough-announcement-fidelity";
 import { matchQuizDetailsBullets } from "@/lib/walkthrough-quiz-list";
 import { collectPermittedUrls, stripUnpermittedUrls } from "@/lib/walkthrough-announcement-link-guard";
@@ -61,7 +63,6 @@ import {
 } from "@/lib/announcement-exemplars";
 import { createAnnouncementFromMarkdown } from "@/lib/canvas";
 import { createAnnouncementFromSafeHtml } from "@/lib/canvas/announcements";
-import { verifiedStyledAnnouncement } from "@/lib/walkthrough-styled-announcement";
 import type { Json } from "@/lib/supabase/types";
 
 // ── Exemplars (AC1, decision P3: Supabase, not localStorage) ───────────────
@@ -382,7 +383,7 @@ function composeProviderPrompt(input: WalkthroughAnnouncementDraftInput, styleBl
     courseLabel: input.courseLabel,
     moduleLabel: input.moduleLabel,
     materialsText: input.materialsText,
-    outline: input.outline,
+    outline: input.matchExample ? { ...input.outline, sections: announcementStructurePlan(input.outline).slice(0, -1) } : input.outline,
     matchExample: input.matchExample,
     coverageBlock: input.coverageBlock,
     notes: input.notes,
@@ -404,20 +405,21 @@ function composeProviderPrompt(input: WalkthroughAnnouncementDraftInput, styleBl
     "You are an instructor writing a course announcement for students.",
     bodyInstruction,
     input.matchExample ? [
-      "Return ONLY valid JSON with title, message, and sections:",
-      '{"title":"...","message":"...","sections":[{"index":1,"heading":null,"paragraphs":["..."],"items":[],"emojis":[]}]}',
+      "Return ONLY valid JSON with title and sections:",
+      '{"title":"...","sections":[{"index":1,"heading":null,"paragraphs":["..."],"items":[],"emojis":[]}]}',
       "The title must be plain text with no emoji; emoji may appear only in the specified body positions.",
       "Sections are identified by the 1-based positions in the example outline. Include only sections supported by current materials, in ascending order; never invent facts to fill an example section.",
       "For a heading section use the exact canonical heading when one is specified; otherwise provide a current-material heading. For a paragraph-break section set heading to null. For prose use paragraphs and no items; for a list use items, with optional introductory paragraphs. Each heading, paragraph and item must be a single string without emoji, line breaks or Markdown list or heading prefixes.",
       input.emojiPolicy === "requested" ? "For every applicable example emoji position in an included section, choose one relevant single emoji and put it in emojis as {target: heading, paragraph, or item; index: zero-based position; position: prefix or suffix; value: emoji}. Use only listed positions. The extra section has no emoji positions." : "Set every emojis array to empty; do not use emoji in the message or section fields.",
-      "The message field must contain exactly the same headings, paragraphs and list items, in the same order and with the same wording and punctuation. It may use Markdown heading and list prefixes and must include the same chosen emoji at the same positions, but must contain no extra or omitted content. Do not place text outside these fields.",
-      ...(validRichTemplate(input.outline.richTemplate) ? [
-        `Also return richSlots: an array of {index, entries}, using these zero-based blocks and required fragment counts: ${JSON.stringify(input.outline.richTemplate.blocks.map((block, index) => ({ index, kind: block.tag, entries: block.entries.map(entry => entry.runs.length) })))}.`,
-        "For each included block, entries is an array of arrays of new text fragments, one fragment per indicated slot; omit unsupported blocks, not facts. These fragments must reconstruct exactly the complete message in the same order. Do not output old example words or unsupported information. Use Markdown links when needed, keeping each entire link in one fragment; otherwise use plain text.",
+      "Write each piece of content once, in its section. Do not return a duplicate message or text outside these fields.",
+      "If the supplied section shape cannot represent the current material faithfully, return title and a complete Markdown message instead of sections.",
+      ...(validRichTemplate(input.outline.richTemplate) && input.outline.richTemplate.blocks.some(block => block.entries.some(entry => entry.runs.length > 1)) ? [
+        `For the saved mixed formatting also return richSlots: an array of {index, entries}, using these zero-based blocks and required fragment counts: ${JSON.stringify(input.outline.richTemplate.blocks.map((block, index) => ({ index, kind: block.tag, entries: block.entries.map(entry => entry.runs.length) })))}.`,
+        "Each entries array holds new text fragments for its block. Together the fragments must reproduce the section content exactly, in order, without old example words. Keep each Markdown link in one fragment.",
       ] : []),
       ...(richTreePlan(input.outline.richTree) ? [
-        `Also return treeSlots as an array of {slot, text}, and treeExtra as an array of extra current-material paragraphs. The saved layout tree is: ${JSON.stringify(richTreePlan(input.outline.richTree)!.shape)}.`,
-        "Each top-level tree branch is optional: omit all its slots when unsupported by current materials, but fill every text slot in a branch you include. Never invent facts to fill a slot. Put necessary current content that has no fitting slot in treeExtra. Together, treeSlots and treeExtra must reproduce the complete message in order; each text fragment must be one line. For this tree response, message must be plain paragraphs without Markdown headings, lists, tables, or block quotes: the pinned tree alone controls structure. Use Markdown links when needed, keeping an entire link in one fragment.",
+        `For the saved nested layout also return treeSlots as {slot, text} and treeExtra as extra paragraphs. The layout is: ${JSON.stringify(richTreePlan(input.outline.richTree)!.shape)}.`,
+        "Omit unsupported branches entirely; fill every slot in an included branch. The slots and extra paragraphs must reproduce the section content exactly, in order, without old example words.",
       ] : []),
       `There are ${announcementStructurePlan(input.outline).length} available section positions. The final position is optional unheaded prose for current facts that do not fit any supported example section.`,
     ].join("\n") : [
@@ -465,7 +467,7 @@ export async function prepareWalkthroughAnnouncementPromptAction(input: Walkthro
 export async function draftWalkthroughAnnouncementAction(
   input: WalkthroughAnnouncementDraftInput
 ): Promise<
-  ({ title: string; message: string; researchNotice: ResearchNotice; richHtml?: string; richExtraNotice?: boolean } | { error: string }) & {
+  ({ title: string; message: string; researchNotice: ResearchNotice; richHtml?: string; richExtraNotice?: boolean; formatFallback?: boolean } | { error: string }) & {
     diag: ScriptGenerationLlmDiag;
   }
 > {
@@ -526,13 +528,13 @@ export async function draftWalkthroughAnnouncementAction(
     }
 
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) ||
-      !("title" in parsed) || !("message" in parsed) ||
-      typeof parsed.title !== "string" || typeof parsed.message !== "string") {
+      !("title" in parsed) || typeof parsed.title !== "string" ||
+      ("message" in parsed && typeof parsed.message !== "string")) {
       return { error: "Could not parse the draft from the model response.", diag: diagBase };
     }
     const title = parsed.title.trim();
-    const message = parsed.message.trim();
-    if (!title || !message) {
+    const message = "message" in parsed && typeof parsed.message === "string" ? parsed.message.trim() : "";
+    if (!title || (!message && !(input.matchExample && useDefaultPrompt && "sections" in parsed))) {
       return { error: "Generated announcement is empty. Try again.", diag: diagBase };
     }
 
@@ -555,17 +557,27 @@ export async function draftWalkthroughAnnouncementAction(
     });
     const { text: permittedMessage } = stripUnpermittedUrls(message, permitted);
     let structuredMessage = permittedMessage;
+    let formatFallback = false;
     if (input.matchExample && useDefaultPrompt) {
       if (Object.keys(parsed).some(key => !["title", "message", "sections", "richSlots", "treeSlots", "treeExtra"].includes(key))) return { error: "The draft contained content outside its sections. Try again.", diag: diagBase };
       if (containsEmoji(title)) return { error: "The draft title included an unsupported emoji. Try again.", diag: diagBase };
       const sections = "sections" in parsed ? parsed.sections : undefined;
       const assembled = assembleAnnouncementSections(sections, input.outline, input.emojiPolicy === "requested");
-      if (!assembled) return { error: "The draft did not match the requested section structure. Try again.", diag: diagBase };
-      const retainedBody = stripUnpermittedUrls(announcementSectionBody(sections), permitted).text;
-      if (!hasMeaningfulAnnouncementContent(retainedBody)) return { error: "Generated announcement has no content after removing unverified links. Try again.", diag: diagBase };
-      structuredMessage = stripUnpermittedUrls(assembled, permitted).text;
-      if (announcementContentSignature(structuredMessage) !== announcementContentSignature(permittedMessage)) {
-        return { error: "The draft sections did not match the complete message. Try again.", diag: diagBase };
+      if (assembled) {
+        const retainedBody = stripUnpermittedUrls(announcementSectionBody(sections), permitted).text;
+        if (!hasMeaningfulAnnouncementContent(retainedBody)) return { error: "Generated announcement has no content after removing unverified links. Try again.", diag: diagBase };
+        structuredMessage = stripUnpermittedUrls(assembled, permitted).text;
+        if (message && announcementContentSignature(structuredMessage) !== announcementContentSignature(permittedMessage)) return { error: "The draft sections did not match the complete message. Try again.", diag: diagBase };
+      } else if (sections !== undefined) {
+        return { error: "The draft did not match the requested section structure. Try again.", diag: diagBase };
+      } else if (message) {
+        if (input.emojiPolicy !== "requested" && containsEmoji(permittedMessage)) return { error: "The draft included unsupported emoji. Try again.", diag: diagBase };
+        // A returned freeform message may contain information absent from sections.
+        // Preserve it rather than silently choosing a conflicting representation.
+        structuredMessage = permittedMessage;
+        formatFallback = true;
+      } else {
+        return { error: "The draft did not contain usable section content. Try again.", diag: diagBase };
       }
     }
     const addedInstructions = useDefaultPrompt ? "" : addedPromptLines(defaultPrompt, input.promptOverride ?? "");
@@ -580,28 +592,26 @@ export async function draftWalkthroughAnnouncementAction(
       return { error: "Generated announcement is empty after removing unverified links. Try again.", diag: diagBase };
     }
 
-    let richHtml: string | undefined;
+    const wantsRich = !!(validRichTemplate(input.outline.richTemplate) || richTreePlan(input.outline.richTree));
+    let richHtml = input.matchExample && useDefaultPrompt && input.outline.richTemplate
+      ? projectRichTemplate(enforcedMessage, input.outline.richTemplate) : null;
     let richExtraNotice = false;
-    if (input.matchExample && useDefaultPrompt && validRichTemplate(input.outline.richTemplate)) {
-      const candidate = "richSlots" in parsed && Array.isArray(parsed.richSlots) ? renderRichTemplate(input.outline.richTemplate, parsed.richSlots as Parameters<typeof renderRichTemplate>[1]) : null;
-      if (!candidate || !verifiedStyledAnnouncement(enforcedMessage, candidate)) {
-        return { error: "The draft could not be matched safely to the saved formatting. Try again.", diag: diagBase };
-      }
-      richHtml = candidate;
+    if (input.matchExample && useDefaultPrompt && validRichTemplate(input.outline.richTemplate) && "richSlots" in parsed && Array.isArray(parsed.richSlots)) {
+      const candidate = renderRichTemplate(input.outline.richTemplate, parsed.richSlots as Parameters<typeof renderRichTemplate>[1]);
+      if (!candidate || !verifiedStyledAnnouncement(enforcedMessage, candidate)) formatFallback = true;
+      else richHtml = candidate;
     }
-    if (input.matchExample && useDefaultPrompt && input.outline.richTree && richTreePlan(input.outline.richTree)) {
-      const slots = "treeSlots" in parsed && Array.isArray(parsed.treeSlots) ? parsed.treeSlots : null;
-      const extra = "treeExtra" in parsed && Array.isArray(parsed.treeExtra) ? parsed.treeExtra : null;
-      const candidate = slots && extra ? renderRichTree(input.outline.richTree, slots as Parameters<typeof renderRichTree>[1], extra as string[]) : null;
-      if (!candidate || !verifiedStyledAnnouncement(permittedMessage, candidate, "plain-tree")) {
-        return { error: "The draft could not be matched safely to the saved formatting. Try again.", diag: diagBase };
-      }
-      richHtml = candidate;
-      richExtraNotice = extra!.length > 0;
+    if (input.matchExample && useDefaultPrompt && input.outline.richTree && richTreePlan(input.outline.richTree) && "treeSlots" in parsed && Array.isArray(parsed.treeSlots) && "treeExtra" in parsed && Array.isArray(parsed.treeExtra)) {
+      const candidate = renderRichTree(input.outline.richTree, parsed.treeSlots as Parameters<typeof renderRichTree>[1], parsed.treeExtra as string[]);
+      const plainReference = message ? permittedMessage : enforcedMessage.replace(/^ {0,3}(?:#{1,6}[ \t]+|[-*+][ \t]+|\d+[.)][ \t]+)/gm, "");
+      if (!candidate || !verifiedStyledAnnouncement(plainReference, candidate, "plain-tree")) formatFallback = true;
+      else { richHtml = candidate; richExtraNotice = parsed.treeExtra.length > 0; }
     }
+    if (wantsRich && !richHtml && input.matchExample && useDefaultPrompt) formatFallback = true;
+
     const researchNotice = researchNoticeFor(input.researchOutcome);
 
-    return { title: enforcedTitle.trim(), message: input.matchExample && useDefaultPrompt && input.outline.richTree && richHtml ? permittedMessage : enforcedMessage, researchNotice, diag: diagBase, ...(richHtml && { richHtml }), ...(richExtraNotice && { richExtraNotice }) };
+    return { title: enforcedTitle.trim(), message: enforcedMessage, researchNotice, diag: diagBase, ...(richHtml && { richHtml }), ...(richExtraNotice && { richExtraNotice }), ...(formatFallback && { formatFallback: true }) };
   } catch {
     return {
       error: "Could not draft the announcement. Try again.",

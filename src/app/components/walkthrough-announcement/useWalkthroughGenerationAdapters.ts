@@ -77,7 +77,7 @@ export function useWalkthroughGenerationAdapters(selectedCourse: WtaCourseOption
       ctx: AnnouncementDraftDispatchContext,
       outline: AnnouncementOutline,
       isCurrent: () => boolean = () => true
-    ): Promise<{ title: string; message: string; researchNotice: ResearchNotice; compareTemplate?: boolean; richHtml?: string; richSourceMessage?: string; richExtraNotice?: boolean } | { error: string }> => {
+    ): Promise<{ title: string; message: string; researchNotice: ResearchNotice; compareTemplate?: boolean; richHtml?: string; richSourceMessage?: string; richExtraNotice?: boolean; formatFallback?: boolean } | { error: string }> => {
       // G3 Ruling 9/M3.3: the derivation from the once-per-Generate research
       // OUTCOME to the RAW resource list the composer/enforcer actually
       // consume - any outcome other than "found" contributes zero citable
@@ -105,7 +105,7 @@ export function useWalkthroughGenerationAdapters(selectedCourse: WtaCourseOption
       if (promptOverride === null || !isCurrent()) return { error: "Draft cancelled before sending the prompt." };
       const result = await draftWalkthroughAnnouncementAction({ ...input, promptOverride, promptPreparedFor: prepared.preparedFor });
       if ("error" in result) return { error: result.error };
-      return { title: result.title, message: result.message, researchNotice: result.researchNotice, ...(result.richHtml && { richHtml: result.richHtml, richSourceMessage: result.message }), ...(result.richExtraNotice && { richExtraNotice: true }), compareTemplate: promptOverride === prepared.prompt };
+      return { title: result.title, message: result.message, researchNotice: result.researchNotice, ...(result.richHtml && { richHtml: result.richHtml, richSourceMessage: result.message }), ...(result.richExtraNotice && { richExtraNotice: true }), ...(result.formatFallback && { formatFallback: true }), compareTemplate: promptOverride === prepared.prompt };
     },
     [scopeKey, reviewPrompt]
   );

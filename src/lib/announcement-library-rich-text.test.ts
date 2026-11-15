@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { encodePreviousAnnouncementHtml, previousAnnouncementHtml, previousAnnouncementText, sanitizePreviousAnnouncementHtml } from "./announcement-library-rich-text";
+import { derivePreviousAnnouncementOutline } from "./previous-announcement-outline";
+
+it("retains paragraphs and list boundaries inside a pasted editor wrapper", () => {
+  const saved = encodePreviousAnnouncementHtml('<div><p>Introduction.</p><ul><li>First task.</li><li>Second task.</li></ul></div>');
+  expect(previousAnnouncementText(saved)).toContain('- First task.\n- Second task.');
+  expect(derivePreviousAnnouncementOutline(saved).sections.some(section => section.listKind === "unordered")).toBe(true);
+});
 
 describe("previous announcement rich paste", () => {
   it("preserves safe color, size, bold and lists through save and reopen", () => {

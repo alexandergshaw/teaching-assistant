@@ -8,8 +8,12 @@ type StructuredSection = { index: number; heading: string | null; paragraphs: st
 /** Build a bounded, content-free blueprint. Never include text from the example. */
 export function announcementStructurePlan(outline: AnnouncementOutline): readonly OutlineSection[] {
   const safe = promptSafeAnnouncementOutline(outline);
+  const lists = outline.richTemplate?.blocks.filter(block => block.tag === "ul" || block.tag === "ol") ?? [];
+  const sections = safe.sections.length === 1 && safe.sections[0].break === "paragraph-break" && safe.sections[0].listKind === null && lists.length === 1
+    ? [{ ...safe.sections[0], listKind: lists[0].tag === "ol" ? "ordered" as const : "unordered" as const }]
+    : safe.sections;
   const extra: OutlineSection = { index: safe.sections.length + 1, heading: null, break: "paragraph-break", listKind: null, sentenceRange: [1, 3] };
-  return [...safe.sections, extra];
+  return [...sections, extra];
 }
 
 function plainLine(value: unknown): value is string {

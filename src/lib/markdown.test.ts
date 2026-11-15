@@ -294,6 +294,9 @@ describe("markdownToHtml - unchanged rendering behavior (pinned against the pre-
 });
 
 describe("htmlToMarkdown - unaffected by the escapeHtml quote fix", () => {
+  it("preserves inline links and spacing around nested block elements", () => {
+    expect(htmlToMarkdown('<div>Read <a href="https://example.com">guide</a><p>Next</p>Then <strong>finish</strong></div>')).toBe('Read [guide](https://example.com)\n\nNext\n\nThen **finish**');
+  });
   // escapeHtml is never called from this direction (renderInline/renderBlock/
   // listToMarkdown build Markdown strings directly from the parsed DOM), so
   // widening it to escape quotes cannot change anything here. A quote in the

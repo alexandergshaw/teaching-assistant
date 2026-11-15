@@ -131,6 +131,10 @@ describe("nested rich template draft", () => {
     if (!("richHtml" in nested)) throw new Error("Missing nested output");
     expect(nested.richHtml).toContain("<ul><li>Parent<ul><li>Child</li></ul></li></ul>");
     expect(nested.richHtml).toContain("<table>");
+    const { message: _message, ...sectionsOnly } = full;
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify(sectionsOnly) } as never);
+    const nestedSectionsOnly = await draftWalkthroughAnnouncementAction({ ...input, materialsText: "Parent Child Cell" });
+    expect(nestedSectionsOnly).toHaveProperty("richHtml");
   });
 });
 describe("rich template draft", () => {
@@ -147,7 +151,9 @@ describe("rich template draft", () => {
     expect(prompt).not.toContain("Old example");
     payload.richSlots[0].entries[0][1] = "different";
     vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify(payload) } as never);
-    expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("error");
+    const fallback = await draftWalkthroughAnnouncementAction(input);
+    expect(fallback).toHaveProperty("message", "New material");
+    expect(fallback).toHaveProperty("formatFallback", true);
   });
 });
 describe("editable provider prompt", () => {
@@ -915,8 +921,29 @@ it("does not return a heading and synthetic welcome after all body content is st
   expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("error", "Generated announcement has no content after removing unverified links. Try again.");
 });
 
-it("rejects unstructured output for the unchanged selected-template prompt", async () => {
+it("preserves a complete unstructured draft with a formatting warning", async () => {
   const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current content.", outline: EMPTY_ANNOUNCEMENT_OUTLINE, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "beginning-of-week" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
   vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message: "Current content." }) } as never);
-  expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("error", "The draft did not match the requested section structure. Try again.");
+  const result = await draftWalkthroughAnnouncementAction(input);
+  expect(result).toHaveProperty("message", "Current content.");
+  expect(result).toHaveProperty("formatFallback", true);
+  const icon = String.fromCodePoint(0x1f4cc);
+  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", message: `${icon} Current content.` }) } as never);
+  expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("error", "The draft included unsupported emoji. Try again.");
+});
+
+it("accepts a single generated section for an unheaded example with a styled bullet list", async () => {
+  const derived = derivePreviousAnnouncementOutline(encodePreviousAnnouncementHtml('<p style="color:red">Old introduction.</p><ul><li>Old item.</li></ul>'));
+  const outline = { ...derived, sections: [derived.sections[0]] };
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current introduction and task.", outline, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  const prepared = await prepareWalkthroughAnnouncementPromptAction(input);
+  if (!("prompt" in prepared)) throw new Error("Missing prompt");
+  expect(prepared.prompt).toContain("an unordered list");
+  expect(prepared.prompt).toContain("There are 2 available section positions");
+  vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify({ title: "Update", sections: [{ index: 1, heading: null, paragraphs: ["Current introduction."], items: ["Current task."], emojis: [] }] }) } as never);
+  const result = await draftWalkthroughAnnouncementAction(input);
+  expect(result).toHaveProperty("message");
+  if (!("message" in result)) throw new Error("Missing draft");
+  expect(result.message).toContain("Current introduction.");
+  expect(result.message).toContain("Current task.");
 });

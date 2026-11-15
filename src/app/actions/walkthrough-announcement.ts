@@ -41,6 +41,7 @@ import { composeWalkthroughScriptPrompt } from "@/lib/walkthrough-script-prompt"
 import { addedPromptLines, hasUnsupportedQuizContent } from "@/lib/walkthrough-quiz-evidence";
 import { containsEmoji } from "@/lib/announcement-emoji";
 import { renderRichTemplate, validRichTemplate } from "@/lib/announcement-rich-template";
+import { renderRichTree, richTreePlan } from "@/lib/announcement-rich-tree";
 import { announcementStructurePlan, assembleAnnouncementSections, announcementContentSignature, announcementSectionBody, hasMeaningfulAnnouncementContent } from "@/lib/walkthrough-structured-announcement";
 import { applyWalkthroughFidelity } from "@/lib/walkthrough-announcement-fidelity";
 import { matchQuizDetailsBullets } from "@/lib/walkthrough-quiz-list";
@@ -414,6 +415,10 @@ function composeProviderPrompt(input: WalkthroughAnnouncementDraftInput, styleBl
         `Also return richSlots: an array of {index, entries}, using these zero-based blocks and required fragment counts: ${JSON.stringify(input.outline.richTemplate.blocks.map((block, index) => ({ index, kind: block.tag, entries: block.entries.map(entry => entry.runs.length) })))}.`,
         "For each included block, entries is an array of arrays of new text fragments, one fragment per indicated slot; omit unsupported blocks, not facts. These fragments must reconstruct exactly the complete message in the same order. Do not output old example words or unsupported information. Use Markdown links when needed, keeping each entire link in one fragment; otherwise use plain text.",
       ] : []),
+      ...(richTreePlan(input.outline.richTree) ? [
+        `Also return treeSlots as an array of {slot, text}, and treeExtra as an array of extra current-material paragraphs. The saved layout tree is: ${JSON.stringify(richTreePlan(input.outline.richTree)!.shape)}.`,
+        "Each top-level tree branch is optional: omit all its slots when unsupported by current materials, but fill every text slot in a branch you include. Never invent facts to fill a slot. Put necessary current content that has no fitting slot in treeExtra. Together, treeSlots and treeExtra must reproduce the complete message in order; each text fragment must be one line. For this tree response, message must be plain paragraphs without Markdown headings, lists, tables, or block quotes: the pinned tree alone controls structure. Use Markdown links when needed, keeping an entire link in one fragment.",
+      ] : []),
       `There are ${announcementStructurePlan(input.outline).length} available section positions. The final position is optional unheaded prose for current facts that do not fit any supported example section.`,
     ].join("\n") : [
       "Return ONLY valid JSON:",
@@ -460,7 +465,7 @@ export async function prepareWalkthroughAnnouncementPromptAction(input: Walkthro
 export async function draftWalkthroughAnnouncementAction(
   input: WalkthroughAnnouncementDraftInput
 ): Promise<
-  ({ title: string; message: string; researchNotice: ResearchNotice; richHtml?: string } | { error: string }) & {
+  ({ title: string; message: string; researchNotice: ResearchNotice; richHtml?: string; richExtraNotice?: boolean } | { error: string }) & {
     diag: ScriptGenerationLlmDiag;
   }
 > {
@@ -551,7 +556,7 @@ export async function draftWalkthroughAnnouncementAction(
     const { text: permittedMessage } = stripUnpermittedUrls(message, permitted);
     let structuredMessage = permittedMessage;
     if (input.matchExample && useDefaultPrompt) {
-      if (Object.keys(parsed).some(key => !["title", "message", "sections", "richSlots"].includes(key))) return { error: "The draft contained content outside its sections. Try again.", diag: diagBase };
+      if (Object.keys(parsed).some(key => !["title", "message", "sections", "richSlots", "treeSlots", "treeExtra"].includes(key))) return { error: "The draft contained content outside its sections. Try again.", diag: diagBase };
       if (containsEmoji(title)) return { error: "The draft title included an unsupported emoji. Try again.", diag: diagBase };
       const sections = "sections" in parsed ? parsed.sections : undefined;
       const assembled = assembleAnnouncementSections(sections, input.outline, input.emojiPolicy === "requested");
@@ -576,6 +581,7 @@ export async function draftWalkthroughAnnouncementAction(
     }
 
     let richHtml: string | undefined;
+    let richExtraNotice = false;
     if (input.matchExample && useDefaultPrompt && validRichTemplate(input.outline.richTemplate)) {
       const candidate = "richSlots" in parsed && Array.isArray(parsed.richSlots) ? renderRichTemplate(input.outline.richTemplate, parsed.richSlots as Parameters<typeof renderRichTemplate>[1]) : null;
       if (!candidate || !verifiedStyledAnnouncement(enforcedMessage, candidate)) {
@@ -583,9 +589,19 @@ export async function draftWalkthroughAnnouncementAction(
       }
       richHtml = candidate;
     }
+    if (input.matchExample && useDefaultPrompt && input.outline.richTree && richTreePlan(input.outline.richTree)) {
+      const slots = "treeSlots" in parsed && Array.isArray(parsed.treeSlots) ? parsed.treeSlots : null;
+      const extra = "treeExtra" in parsed && Array.isArray(parsed.treeExtra) ? parsed.treeExtra : null;
+      const candidate = slots && extra ? renderRichTree(input.outline.richTree, slots as Parameters<typeof renderRichTree>[1], extra as string[]) : null;
+      if (!candidate || !verifiedStyledAnnouncement(permittedMessage, candidate, "plain-tree")) {
+        return { error: "The draft could not be matched safely to the saved formatting. Try again.", diag: diagBase };
+      }
+      richHtml = candidate;
+      richExtraNotice = extra!.length > 0;
+    }
     const researchNotice = researchNoticeFor(input.researchOutcome);
 
-    return { title: enforcedTitle.trim(), message: enforcedMessage, researchNotice, diag: diagBase, ...(richHtml && { richHtml }) };
+    return { title: enforcedTitle.trim(), message: input.matchExample && useDefaultPrompt && input.outline.richTree && richHtml ? permittedMessage : enforcedMessage, researchNotice, diag: diagBase, ...(richHtml && { richHtml }), ...(richExtraNotice && { richExtraNotice }) };
   } catch {
     return {
       error: "Could not draft the announcement. Try again.",
@@ -690,10 +706,10 @@ export async function postWalkthroughAnnouncementAction(
 ): Promise<{ id: number } | { error: string }> {
   try {
     await requireUser();
-    const safeHtml = richHtml ? verifiedStyledAnnouncement(markdownBody, richHtml) : null;
-    if (richHtml && !safeHtml) return { error: "The styled announcement no longer matches the draft. Review it before posting." };
-    const announcement = safeHtml
-      ? await createAnnouncementFromSafeHtml(courseUrl, title, safeHtml, acronym, undefined, delayedPostAt)
+    // Rich HTML is the instructor-edited, displayed representation. The
+    // Canvas helper sanitizes it again at the server boundary.
+    const announcement = richHtml !== undefined
+      ? await createAnnouncementFromSafeHtml(courseUrl, title, richHtml, acronym, undefined, delayedPostAt)
       : await createAnnouncementFromMarkdown(courseUrl, title, markdownBody, acronym, delayedPostAt);
     return { id: announcement.id };
   } catch (err) {

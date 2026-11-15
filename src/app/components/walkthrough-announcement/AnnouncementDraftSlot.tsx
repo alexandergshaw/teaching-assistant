@@ -17,7 +17,8 @@ import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
 import ConfirmArmButtons from "../ui/ConfirmArmButtons";
 import { markdownToHtml } from "@/lib/markdown";
-import { verifiedStyledAnnouncement } from "@/lib/walkthrough-styled-announcement";
+import RecordingAnnouncementEditor from "../recording/RecordingAnnouncementEditor";
+import { sanitizeRecordingAnnouncementHtml } from "@/lib/recording-announcement-html";
 import { toDatetimeLocalValue } from "../canvas-tab/utils";
 import {
   builtFromId,
@@ -65,7 +66,7 @@ export interface AnnouncementDraftSlotProps {
   readonly onChooseTemplate: (id: string, choice: TemplateChoice) => void;
   readonly onChooseTiming: (id: string, timing: AnnouncementTiming) => void;
   readonly onSetScheduledAt: (id: string, raw: string) => void;
-  readonly onEdit: (id: string, field: "title" | "message" | "revisionNote", value: string) => void;
+  readonly onEdit: (id: string, field: "title" | "message" | "richMessage" | "revisionNote", value: string) => void;
   readonly onRegenerateArm: (id: string) => void;
   readonly onRegenerateConfirm: (id: string) => void;
   readonly onRegenerateCancel: (id: string) => void;
@@ -112,7 +113,7 @@ export default function AnnouncementDraftSlot({
     if (phase !== "drafted") return "";
     const draft = slot.draft.phase === "drafted" ? slot.draft.draft : null;
     if (!draft) return "";
-    return (draft.richSourceMessage === draft.message ? verifiedStyledAnnouncement(draft.message, draft.richHtml) : null) ?? markdownToHtml(draft.message);
+    return (draft.richSourceMessage === draft.message && draft.richHtml !== undefined ? sanitizeRecordingAnnouncementHtml(draft.richHtml) : null) ?? markdownToHtml(draft.message);
   }, [phase, slot.draft]);
 
   const rootRef = useRef<HTMLFieldSetElement>(null);
@@ -227,7 +228,8 @@ export default function AnnouncementDraftSlot({
       {phase === "drafted" && slot.draft.phase === "drafted" && (
         <>
           {slot.draft.draft.templateOutline?.richTemplateUnsupported && <Alert severity="info">This saved example contains formatting that cannot yet be reproduced. The draft uses Markdown formatting.</Alert>}
-          {slot.draft.draft.richHtml && slot.draft.draft.richSourceMessage !== slot.draft.draft.message && <Alert severity="info">The edited draft uses Markdown formatting. Regenerate to apply the saved example formatting again.</Alert>}
+          {slot.draft.draft.richHtml !== undefined && slot.draft.draft.richSourceMessage !== slot.draft.draft.message && <Alert severity="info">The edited draft uses Markdown formatting. Regenerate to apply the saved example formatting again.</Alert>}
+          {slot.draft.draft.richExtraNotice && <Alert severity="info">Some current material was added after the saved format. Review its placement before copying or posting.</Alert>}
           {structureReview?.orderChanged && <Alert severity="warning">Named sections appear in a different order from the saved example. Review their sequence.</Alert>}
           {structureReview?.muchShorter && <Alert severity="warning">This draft has far fewer sections than the saved example. Check that it covers the relevant material.</Alert>}
           {structureReview?.fragmentedClosing && <Alert severity="warning">The ending may have more paragraphs than the saved example. Review the grouping and keep any relevant details.</Alert>}
@@ -263,25 +265,20 @@ export default function AnnouncementDraftSlot({
             fullWidth
           />
           <div className={styles.adaptFieldGrid2}>
-            <TextField
-              size="small"
-              label="Message (Markdown)"
-              value={slot.draft.draft.message}
-              onChange={(e) => onEdit(slot.id, "message", e.target.value)}
-              disabled={slot.posting}
-              multiline
-              minRows={6}
-              fullWidth
-            />
+            {slot.draft.draft.richHtml !== undefined && slot.draft.draft.richSourceMessage === slot.draft.draft.message ? (
+              <RecordingAnnouncementEditor value={slot.draft.draft.richHtml} onChange={html => onEdit(slot.id, "richMessage", html)} disabled={slot.posting} />
+            ) : (
+              <TextField size="small" label="Message (Markdown)" value={slot.draft.draft.message} onChange={(e) => onEdit(slot.id, "message", e.target.value)} disabled={slot.posting} multiline minRows={6} fullWidth />
+            )}
             <div>
               <p className={styles.fieldHint}>Preview (how this renders on Canvas):</p>
               <div className={controls.draftPreview} dangerouslySetInnerHTML={{ __html: previewHtml }} />
             </div>
           </div>
           <p className={styles.fieldHint}>
-            Markdown formatting (##, -, numbered lists, **bold**, *italic*) becomes real headings, lists and emphasis
-            when posted to Canvas - and Copy now puts the formatted version on the clipboard alongside the raw
-            source, so it is not pasted as literal characters either.
+            {slot.draft.draft.richHtml !== undefined && slot.draft.draft.richSourceMessage === slot.draft.draft.message
+              ? "Edits preserve the displayed formatting for copying and posting."
+              : "Markdown headings, lists and emphasis are formatted for copying and posting."}
           </p>
 
           {slot.copyError && (

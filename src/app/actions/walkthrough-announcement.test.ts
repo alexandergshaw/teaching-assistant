@@ -102,12 +102,35 @@ const NO_RESEARCH = { kind: "off" as const };
 const NO_RESEARCHED_RESOURCES: ReadonlyArray<{ title: string; url: string }> = [];
 
 describe("styled Canvas posting", () => {
-  it("posts the verified matching HTML with its scheduled time and refuses changed structure", async () => {
+  it("posts the displayed HTML with its scheduled time", async () => {
     vi.mocked(createAnnouncementFromSafeHtml).mockResolvedValue({ id: 42 } as never);
     expect(await postWalkthroughAnnouncementAction("course", "Title", "Hello", "ABC", "2026-11-15T15:00:00Z", '<p style="color:red">Hello</p>')).toEqual({ id: 42 });
     expect(createAnnouncementFromSafeHtml).toHaveBeenCalledWith("course", "Title", '<p style="color:red">Hello</p>', "ABC", undefined, "2026-11-15T15:00:00Z");
-    expect(await postWalkthroughAnnouncementAction("course", "Title", "- Hello", "ABC", undefined, '<p>Hello</p>')).toHaveProperty("error");
-    expect(createAnnouncementFromSafeHtml).toHaveBeenCalledTimes(1);
+    expect(await postWalkthroughAnnouncementAction("course", "Title", "- Hello", "ABC", undefined, '<p>Hello</p>')).toEqual({ id: 42 });
+    expect(createAnnouncementFromSafeHtml).toHaveBeenLastCalledWith("course", "Title", '<p>Hello</p>', "ABC", undefined, undefined);
+  });
+});
+describe("nested rich template draft", () => {
+  it("renders nested output from the pinned tree and plain reference text", async () => {
+    const derived = derivePreviousAnnouncementOutline(encodePreviousAnnouncementHtml('<div><ul><li>Old<ul><li>Private</li></ul></li></ul><table><tr><td>Secret</td></tr></table></div>'));
+    expect(derived.richTree).toBeTruthy();
+    const outline = { ...derived, sections: [{ index: 1, heading: null, break: "paragraph-break" as const, listKind: null, sentenceRange: [1, 3] as const }] };
+    const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Cell New content", outline, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+    const payload = { title: "Update", message: "Cell New content", sections: [{ index: 1, heading: null, paragraphs: ["Cell New content"], items: [], emojis: [] }], treeSlots: [{ slot: 2, text: "Cell" }], treeExtra: ["New content"] };
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify(payload) } as never);
+    const result = await draftWalkthroughAnnouncementAction(input);
+    expect(result).toHaveProperty("richHtml");
+    if (!("richHtml" in result)) throw new Error("Missing rich output");
+    expect(result.richHtml).toContain("<td>Cell</td>");
+    expect(result.richHtml).not.toContain("<ul>");
+    expect(result.richHtml).toContain("New content");
+    const full = { ...payload, message: "Parent Child Cell", sections: [{ index: 1, heading: null, paragraphs: ["Parent Child Cell"], items: [], emojis: [] }], treeSlots: [{ slot: 0, text: "Parent" }, { slot: 1, text: "Child" }, { slot: 2, text: "Cell" }], treeExtra: [] };
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: JSON.stringify(full) } as never);
+    const nested = await draftWalkthroughAnnouncementAction({ ...input, materialsText: "Parent Child Cell" });
+    expect(nested).toHaveProperty("richHtml");
+    if (!("richHtml" in nested)) throw new Error("Missing nested output");
+    expect(nested.richHtml).toContain("<ul><li>Parent<ul><li>Child</li></ul></li></ul>");
+    expect(nested.richHtml).toContain("<table>");
   });
 });
 describe("rich template draft", () => {

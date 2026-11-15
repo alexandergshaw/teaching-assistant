@@ -1,5 +1,5 @@
 "use client";
-import { verifiedStyledAnnouncement } from "@/lib/walkthrough-styled-announcement";
+import { sanitizeRecordingAnnouncementHtml } from "@/lib/recording-announcement-html";
 
 // The existing slot reducer remains the single draft store. pair-dispatch owns
 // synchronous call reservations and finalized snapshots; this hook binds it to
@@ -205,6 +205,7 @@ export function postSignatureFor(slot: DraftSlot, courseId?: string | null): str
     slot.id,
     slot.draft.draft.title,
     slot.draft.draft.message,
+    slot.draft.draft.richHtml ?? null,
     slot.scheduledAt,
     courseId ?? null,
   ]);
@@ -234,7 +235,7 @@ export function useAnnouncementDraftSlots(args: {
     ctx: AnnouncementDraftDispatchContext,
     outline: AnnouncementOutline,
     isCurrent?: () => boolean
-  ) => Promise<{ title: string; message: string; researchNotice: ResearchNotice; compareTemplate?: boolean; richHtml?: string; richSourceMessage?: string } | { error: string }>;
+  ) => Promise<{ title: string; message: string; researchNotice: ResearchNotice; compareTemplate?: boolean; richHtml?: string; richSourceMessage?: string; richExtraNotice?: boolean } | { error: string }>;
   /**
    * `null`: no Canvas-linked course is selected. Checked BEFORE dispatching
    * `posting`, so there is no `posting: true` flash - dispatches
@@ -316,7 +317,7 @@ export function useAnnouncementDraftSlots(args: {
   const chooseTiming = useCallback((id: string, timing: AnnouncementTiming) => dispatch({ type: "choose-timing", id, timing }), [dispatch]);
   const setScheduledAt = useCallback((id: string, raw: string) => dispatch({ type: "set-scheduled-at", id, raw }), [dispatch]);
   const editSlot = useCallback(
-    (id: string, field: "title" | "message" | "revisionNote", value: string) => dispatch({ type: "edit", id, field, value }),
+    (id: string, field: "title" | "message" | "richMessage" | "revisionNote", value: string) => dispatch({ type: "edit", id, field, value }),
     [dispatch]
   );
 
@@ -402,7 +403,7 @@ export function useAnnouncementDraftSlots(args: {
     const { title, message, richHtml, richSourceMessage } = slot.draft.draft;
     writeClipboardText(
       `${title}\n\n${message}`,
-      `<p><strong>${escapeForCopyTitle(title)}</strong></p>${richSourceMessage === message ? verifiedStyledAnnouncement(message, richHtml) ?? markdownToHtml(message) : markdownToHtml(message)}`
+      `<p><strong>${escapeForCopyTitle(title)}</strong></p>${richSourceMessage === message && richHtml !== undefined ? sanitizeRecordingAnnouncementHtml(richHtml) : markdownToHtml(message)}`
     ).then(
       () => dispatch({ type: "copy-result", id, error: null }),
       // `writeClipboardText`'s own rejection ("clipboard unavailable" for a

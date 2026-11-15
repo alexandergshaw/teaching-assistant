@@ -54,11 +54,13 @@ export interface OutlineSection {
   emojiPlacements?: readonly { target: "heading" | "paragraph" | "item"; index: number; position: "prefix" | "suffix" }[];
 }
 
+import type { RichTree } from "./announcement-rich-tree";
 import type { RichTemplate } from "./announcement-rich-template";
 
 /** The structural outline of one pasted announcement. */
 export interface AnnouncementOutline {
   richTemplate?: RichTemplate;
+  richTree?: RichTree;
   richTemplateUnsupported?: boolean;
   sections: readonly OutlineSection[];
   /** Whether the exemplar opens with a greeting ("Hi everyone,"). Its presence

@@ -1,3 +1,4 @@
+import { verifiedStyledAnnouncement } from "@/lib/walkthrough-styled-announcement";
 // docs/announcement-from-walkthrough-acceptance-criteria.md 8: one describe block per member of the SlotsAction
 // union (read off the type, 15 members as of A19), not per any transition table row -
 // so a 15th member added later fails this file's own construction, not just
@@ -63,6 +64,39 @@ const SRC_EMPTY: TemplateOptionSource = {
 // every such table test to pick it up.
 const ALL_SAVED_FORMATS_STATES: readonly SavedFormatsState[] = ["loading", "loaded", "failed", "timedout"];
 
+describe("rich draft edits", () => {
+  it("keeps rich mode through delete all, typing and formatted paste", () => {
+    let state = [drafted("a")];
+    for (const html of ["", "<p>Typed</p>", '<p>Typed <strong>Pasted</strong></p>']) {
+      state = slotsReducer(state, { type: "edit", id: "a", field: "richMessage", value: html }) as DraftSlot[];
+      if (state[0].draft.phase !== "drafted") throw new Error("missing draft");
+      expect(state[0].draft.draft.richHtml).toBe(html);
+      expect(state[0].draft.draft.richSourceMessage).toBe(state[0].draft.draft.message);
+    }
+  });
+  it("retains nested lists, tables and underline in authoritative HTML after editing", () => {
+    const html = '<div><h5>Details</h5><ul><li>One<ul><li><u>Nested</u></li></ul></li></ul><table><tr><td>Cell</td></tr></table></div>';
+    const [result] = slotsReducer([drafted("a")], { type: "edit", id: "a", field: "richMessage", value: html });
+    if (result.draft.phase !== "drafted") throw new Error("missing draft");
+    expect(result.draft.draft.richHtml).toContain("<u>Nested</u>");
+    expect(result.draft.draft.richHtml).toContain("<h5>Details</h5>");
+    expect(result.draft.draft.richHtml).toContain("<td>Cell</td>");
+    expect(result.draft.draft.richSourceMessage).toBe(result.draft.draft.message);
+  });
+  it("atomically preserves sanitized formatting and updates the message while clearing post confirmation", () => {
+    const initial = drafted("a", { postArmedFor: "old", postLocked: true });
+    const [result] = slotsReducer([initial], { type: "edit", id: "a", field: "richMessage", value: '<p style="color:red">New <strong>words</strong></p><script>bad()</script>' });
+    expect(result.postArmedFor).toBeNull();
+    expect(result.postLocked).toBe(false);
+    expect(result.draft.phase).toBe("drafted");
+    if (result.draft.phase !== "drafted") throw new Error("missing draft");
+    expect(result.draft.draft.richHtml).toBe('<p style="color:red">New <strong>words</strong></p>');
+    expect(result.draft.draft.richSourceMessage).toBe(result.draft.draft.message);
+    expect(result.draft.draft.message).toContain("New");
+    expect(verifiedStyledAnnouncement(result.draft.draft.message, result.draft.draft.richHtml)).toBeTruthy();
+    expect(result.draft.draft.message).not.toContain("bad()");
+  });
+});
 describe("initialSlots / makeSlot / emptySlotIds", () => {
   it("initialSlots returns exactly one slot, choice default, phase empty, timing beginning-of-week", () => {
     const slots = initialSlots(FIRST_SLOT_ID);

@@ -18,4 +18,15 @@ describe("styled announcement validation", () => {
     expect(verifiedStyledAnnouncement("## Topic", "<h3>Topic</h3>")).toBeNull();
     expect(verifiedStyledAnnouncement("Topic", "<h2>Topic</h2>")).toBeNull();
   });
+  it("does not accept a table or nested list in place of flat prose", () => {
+    expect(verifiedStyledAnnouncement("Cell", "<table><tr><td>Cell</td></tr></table>")).toBeNull();
+    expect(verifiedStyledAnnouncement("- Parent Child", "<ul><li>Parent<ul><li>Child</li></ul></li></ul>")).toBeNull();
+  });
+  it("accepts nested pinned structure only with a plain reference, and rejects conflicting list claims", () => {
+    const html = "<ul><li>Parent<ol><li>Child</li></ol></li></ul>";
+    expect(verifiedStyledAnnouncement("Parent Child", html, "plain-tree")).toBeTruthy();
+    expect(verifiedStyledAnnouncement("- Parent Child", html, "plain-tree")).toBeNull();
+    expect(verifiedStyledAnnouncement("1. Parent Child", html, "plain-tree")).toBeNull();
+    expect(verifiedStyledAnnouncement("Parent Changed", html, "plain-tree")).toBeNull();
+  });
 });

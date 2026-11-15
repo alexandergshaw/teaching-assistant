@@ -1,3 +1,5 @@
+import { htmlToMarkdown } from "@/lib/markdown";
+import { sanitizeRecordingAnnouncementHtml } from "@/lib/recording-announcement-html";
 // The multi-draft-slot seam for "Announcement from a walkthrough" (G2 of
 // docs/announcement-from-walkthrough-acceptance-criteria.md). No React, no
 // DOM, no "use server" - this file is the pure leaf every reducer, hook and
@@ -80,6 +82,7 @@ export interface Drafted {
   readonly message: string;
   readonly richHtml?: string;
   readonly richSourceMessage?: string;
+  readonly richExtraNotice?: boolean;
   readonly builtFrom: ResolvedTemplate;
   /** Safe template shape pinned to the generation, if structure matching was requested. */
   readonly templateOutline?: AnnouncementOutline;
@@ -428,7 +431,7 @@ export type SlotsAction =
   | { type: "choose"; id: string; choice: TemplateChoice }
   | { type: "choose-timing"; id: string; timing: AnnouncementTiming }
   | { type: "set-scheduled-at"; id: string; raw: string }
-  | { type: "edit"; id: string; field: "title" | "message" | "revisionNote"; value: string }
+  | { type: "edit"; id: string; field: "title" | "message" | "richMessage" | "revisionNote"; value: string }
   | { type: "generate-started"; ids: readonly string[] }
   | { type: "regenerate-started"; id: string }
   | { type: "result"; id: string; result: Drafted | { error: string } }
@@ -487,7 +490,9 @@ export function slotsReducer(state: readonly DraftSlot[], action: SlotsAction): 
         if (slot.posting) return slot;
         if (action.field === "revisionNote") return { ...slot, revisionNote: action.value.slice(0, 2000), regenerateArmed: false };
         if (slot.draft.phase !== "drafted") return slot;
-        const draft = { ...slot.draft.draft, [action.field]: action.value };
+        const safeHtml = action.field === "richMessage" ? sanitizeRecordingAnnouncementHtml(action.value) : null;
+        const message = safeHtml === null ? null : htmlToMarkdown(safeHtml);
+        const draft = safeHtml === null ? { ...slot.draft.draft, [action.field]: action.value } : { ...slot.draft.draft, message: message!, richHtml: safeHtml, richSourceMessage: message! };
         return {
           ...slot,
           draft: { ...slot.draft, draft },

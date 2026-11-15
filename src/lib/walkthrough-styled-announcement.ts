@@ -4,7 +4,8 @@ import { sanitizeRecordingAnnouncementHtml } from "./recording-announcement-html
 
 /** Verify the styled representation has exactly the same content and links as
  * the Markdown draft, and sanitize it again at every trust boundary. */
-export function verifiedStyledAnnouncement(message: string, html: string | undefined): string | null {
+export function verifiedStyledAnnouncement(message: string, html: string | undefined, reference: "structured" | "plain-tree" = "structured"): string | null {
+  if (reference === "plain-tree" && /(?:^|\n)\s*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|`{3}|~{3}|\|)/.test(message)) return null;
   if (!html || html.length > 1_000_000) return null;
   const safe = sanitizeRecordingAnnouncementHtml(html);
   const expected = parse(markdownToHtml(message));
@@ -17,7 +18,7 @@ export function verifiedStyledAnnouncement(message: string, html: string | undef
       if (node.nodeType === 3) { prefix += node.text; return; }
       if (!(node instanceof HTMLElement)) return;
       const tag = node.rawTagName?.toLowerCase() ?? "";
-      const block = ["p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "br"].includes(tag);
+      const block = ["p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption", "blockquote", "br"].includes(tag);
       if (block) prefix += " ";
       if (tag === "a") anchors.push({ href: node.getAttribute("href") ?? "", text: text(node.text), offset: text(prefix).length });
       node.childNodes.forEach(visit);
@@ -31,7 +32,7 @@ export function verifiedStyledAnnouncement(message: string, html: string | undef
       if (!("rawTagName" in node)) return [];
       const tag = node.rawTagName?.toLowerCase() ?? "";
       const block = tag === "div" ? "p" : tag;
-      const own = ["p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li"].includes(block) && !(block === "p" && inListItem) ? [block] : [];
+      const own = ["p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "table", "tr", "th", "td"].includes(block) && !(block === "p" && inListItem) ? [block] : [];
       return [...own, ...node.childNodes.flatMap(child => visit(child, inListItem || tag === "li"))];
     };
     return root.childNodes.flatMap(node => visit(node, false));
@@ -39,6 +40,6 @@ export function verifiedStyledAnnouncement(message: string, html: string | undef
   const actualContent = content(actual), expectedContent = content(expected);
   const actualStructure = structure(actual), expectedStructure = structure(expected);
   const structureMatches = actualStructure.length === expectedStructure.length && actualStructure.every((tag, index) => tag === expectedStructure[index] || (tag === "p" && /^h[1-6]$/.test(expectedStructure[index])));
-  if (!actualContent.text || actualContent.text !== expectedContent.text || JSON.stringify(actualContent.anchors) !== JSON.stringify(expectedContent.anchors) || !structureMatches) return null;
+  if (!actualContent.text || actualContent.text !== expectedContent.text || JSON.stringify(actualContent.anchors) !== JSON.stringify(expectedContent.anchors) || (reference === "structured" && !structureMatches)) return null;
   return safe;
 }

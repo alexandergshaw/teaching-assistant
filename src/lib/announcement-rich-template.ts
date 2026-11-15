@@ -50,7 +50,11 @@ export function deriveRichTemplate(value: string): RichTemplate | null {
     flush();
   };
   const process = (node: Node, inherited: string) => {
-    if (node.nodeType === NodeType.TEXT_NODE && !node.text.trim()) return;
+    if (node.nodeType === NodeType.TEXT_NODE) {
+      const text = node.text;
+      if (text.trim()) appendLine("div", inherited, [{ style: "", before: /^\s/.test(text), after: /\s$/.test(text) }], text);
+      return;
+    }
     if (!(node instanceof HTMLElement)) { invalid = true; return; }
     const tag = node.rawTagName?.toLowerCase() ?? "";
     const style = [inherited, styleOf(node)].filter(Boolean).join(";");

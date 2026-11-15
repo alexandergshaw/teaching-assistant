@@ -26,8 +26,13 @@ describe("rich announcement template extraction", () => {
     expect(template.blocks[2].entries).toHaveLength(2);
     expect(JSON.stringify(template)).not.toMatch(/Intro|One|Two|First|Second|Done/);
   });
-  it("rejects mixed block content and nested lists instead of dropping them", () => {
-    for (const html of ['<div>Text<p>Other</p></div>', '<ul><li>One<ul><li>Nested</li></ul></li></ul>']) {
+  it("retains direct text alongside nested blocks", () => {
+    const template = deriveRichTemplate(encodePreviousAnnouncementHtml('<div style="color:red">Text<p>Other</p>Tail</div>'))!;
+    expect(template.blocks.map(block => block.tag)).toEqual(["div", "p", "div"]);
+    expect(template.blocks.every(block => block.style.includes("color:red"))).toBe(true);
+  });
+  it("rejects nested lists instead of dropping them", () => {
+    for (const html of ['<ul><li>One<ul><li>Nested</li></ul></li></ul>']) {
       expect(deriveRichTemplate(encodePreviousAnnouncementHtml(html))).toBeNull();
     }
   });

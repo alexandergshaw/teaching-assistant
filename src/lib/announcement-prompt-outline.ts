@@ -1,3 +1,4 @@
+import { richTreePlan } from "./announcement-rich-tree";
 import { validRichTemplate } from "./announcement-rich-template";
 import type { AnnouncementOutline } from "./announcement-outline-types";
 
@@ -16,6 +17,7 @@ function sectionIndex(value: unknown): number | null { return typeof value === "
 export function promptSafeAnnouncementOutline(outline: AnnouncementOutline): AnnouncementOutline {
   return {
     ...(validRichTemplate(outline.richTemplate) ? { richTemplate: outline.richTemplate } : {}),
+    ...(richTreePlan(outline.richTree) ? { richTree: outline.richTree } : {}),
     ...(outline.richTemplateUnsupported && { richTemplateUnsupported: true }),
     hasGreeting: !!outline.hasGreeting, hasSignOff: !!outline.hasSignOff,
     ...(outline.opensWithWelcome && { opensWithWelcome: true }),

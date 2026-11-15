@@ -573,10 +573,17 @@ export async function draftWalkthroughAnnouncementAction(
       ("message" in parsed && typeof parsed.message !== "string")) {
       return { error: "Could not parse the draft from the model response.", diag: diagBase };
     }
+    if (input.matchExample && useDefaultPrompt && !("placeholders" in parsed) && !("message" in parsed) && !("sections" in parsed) && !("richSlots" in parsed)) {
+      const entries = Object.entries(parsed).filter(([key]) => key !== "title");
+      if (entries.length && entries.every(([key, value]) => /^(?:s\d+_(?:heading|p\d+|i\d+|emoji\d+)|b\d+_e\d+_r\d+|s\d+|extra_\d+)$/.test(key) && typeof value === "string")) {
+        parsed = { title: parsed.title, placeholders: Object.fromEntries(entries) };
+      }
+    }
     const title = parsed.title.trim();
     const message = "message" in parsed && typeof parsed.message === "string" ? parsed.message.trim() : "";
     if (!title || (!message && !(input.matchExample && useDefaultPrompt && ("sections" in parsed || "richSlots" in parsed || "placeholders" in parsed)))) {
       console.warn("Walkthrough draft validation", !title ? "missing-title" : !input.matchExample ? "missing-body-no-template" : !useDefaultPrompt ? "missing-body-custom-prompt" : "missing-template-content");
+      if (title && !message && input.matchExample && useDefaultPrompt) console.warn("Walkthrough draft shape", Object.keys(parsed).length === 1 ? "title-only" : Object.keys(parsed).some(key => /^(?:s\d+_(?:heading|p\d+|i\d+|emoji\d+)|b\d+_e\d+_r\d+|s\d+|extra_\d+)$/.test(key)) ? "top-level-placeholder-keys" : "other-fields");
       return { error: "Generated announcement is empty. Try again.", diag: diagBase };
     }
 
@@ -620,7 +627,7 @@ export async function draftWalkthroughAnnouncementAction(
         const contentMap = placeholderMap && Object.fromEntries(Object.entries(placeholderMap).filter(([key]) => !extraKeys.includes(key)));
         if (treePlan && "placeholders" in parsed) {
           const treeSlots = richTreeSlotsFromMap(input.outline.richTree, contentMap);
-          if (!treeSlots || treeSlots.some(slot => treePlan.emojiSlots.includes(slot.slot) ? !isSingleEmoji(slot.text) : containsEmoji(slot.text)) || extra.some(value => containsEmoji(value))) { console.warn("Walkthrough draft validation", !treeSlots ? "tree-map-invalid" : "tree-emoji-invalid"); return { error: "The draft could not be matched safely to the saved formatting. Try again.", diag: diagBase }; }
+          if (!treeSlots || treeSlots.some(slot => treePlan.emojiSlots.includes(slot.slot) ? !isSingleEmoji(slot.text) : containsEmoji(slot.text)) || extra.some(value => containsEmoji(value))) { console.warn("Walkthrough draft validation", !treeSlots ? "tree-map-invalid" : treeSlots.some(slot => treePlan.emojiSlots.includes(slot.slot) && !isSingleEmoji(slot.text)) ? "tree-invalid-emoji-slot" : treeSlots.some(slot => !treePlan.emojiSlots.includes(slot.slot) && containsEmoji(slot.text)) ? "tree-emoji-in-text-slot" : "tree-emoji-in-extra"); return { error: "The draft could not be matched safely to the saved formatting. Try again.", diag: diagBase }; }
           if (input.emojiPolicy === "requested" && treePlan.emojiSlots.some(id => !treeSlots.some(slot => slot.slot === id))) formatFallback = true;
           const cleanedTree = treeSlots.filter(slot => input.emojiPolicy === "requested" || !treePlan.emojiSlots.includes(slot.slot)).map(slot => ({ ...slot, text: stripUnpermittedUrls(slot.text, permitted).text }));
           const cleanedExtra = extra.map(value => stripUnpermittedUrls(value, permitted).text).filter(value => value.trim());

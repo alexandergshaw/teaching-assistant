@@ -101,6 +101,14 @@ const REALISTIC_OUTLINE = deriveAnnouncementOutline(
 const NO_RESEARCH = { kind: "off" as const };
 const NO_RESEARCHED_RESOURCES: ReadonlyArray<{ title: string; url: string }> = [];
 
+it("accepts a flat top-level placeholder map without dropping unknown fields", async () => {
+  const input = { courseLabel: "Course", moduleLabel: null, materialsText: "Current content.", outline: EMPTY_ANNOUNCEMENT_OUTLINE, matchExample: true, coverageBlock: "", notes: "", emojiPolicy: "forbidden" as const, timing: "midweek" as const, researchedResources: [], researchOutcome: NO_RESEARCH };
+  vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, status: 200, text: JSON.stringify({ title: "Update", s1_p0: "Current content." }) } as never);
+  expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("message", "Current content.");
+  vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, status: 200, text: JSON.stringify({ title: "Update", s1_p0: "Current content.", other: "Important detail" }) } as never);
+  expect(await draftWalkthroughAnnouncementAction(input)).toHaveProperty("error");
+});
+
 it("logs only a fixed validation category without model content", async () => {
   const log = vi.spyOn(console, "warn").mockImplementation(() => {});
   try {

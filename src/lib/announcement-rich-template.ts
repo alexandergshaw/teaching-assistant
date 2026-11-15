@@ -1,10 +1,43 @@
 import { markdownToHtml } from "./markdown";
 import { HTMLElement, NodeType, parse, type Node } from "node-html-parser";
 import { previousAnnouncementHtml, sanitizePreviousAnnouncementHtml } from "./announcement-library-rich-text";
+import { emojiGraphemes, isSingleEmoji, containsEmoji } from "./announcement-emoji";
 
-export type RichTemplateRun = { readonly style: string; readonly before: boolean; readonly after: boolean };
+export type RichTemplateRun = { readonly style: string; readonly before: boolean; readonly after: boolean; readonly emoji?: boolean };
 export type RichTemplateBlock = { readonly tag: "p" | "div" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "ul" | "ol"; readonly style: string; readonly entries: readonly { readonly style: string; readonly runs: readonly RichTemplateRun[] }[] };
 export type RichTemplate = { readonly blocks: readonly RichTemplateBlock[] };
+
+/** Stable placeholder identifiers describe positions, never example content. */
+export function richTemplatePlaceholders(template: RichTemplate): string[][][] {
+  return template.blocks.map((block, b) => block.entries.map((entry, e) => entry.runs.map((_run, r) => `b${b}_e${e}_r${r}`)));
+}
+
+/** Convert a placeholder map into complete, ordered blocks; reject unknown or partial entries. */
+export function richTemplateSlotsFromMap(template: RichTemplate, value: unknown): { index: number; entries: string[][] }[] | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const map = value as Record<string, unknown>;
+  const positions = richTemplatePlaceholders(template);
+  const allowed = new Set(positions.flat(2));
+  if (Object.keys(map).some(key => !allowed.has(key)) || Object.values(map).some(text => typeof text !== "string")) return null;
+  const result: { index: number; entries: string[][] }[] = [];
+  for (let b = 0; b < positions.length; b++) {
+    const entries: string[][] = [];
+    let omitted = false;
+    for (let e = 0; e < positions[b].length; e++) {
+      const entry = positions[b][e];
+      const present = entry.filter(key => Object.hasOwn(map, key)).length;
+      const missingRequired = entry.some((key, r) => !template.blocks[b].entries[e].runs[r].emoji && !Object.hasOwn(map, key));
+      const emojiOnly = template.blocks[b].entries[e].runs.every(run => run.emoji);
+      const laterPresent = positions[b].slice(e + 1).some(later => later.some(key => Object.hasOwn(map, key)));
+      if (!present && emojiOnly && laterPresent && !omitted) { entries.push(entry.map(() => "")); continue; }
+      if (present && (omitted || missingRequired)) return null;
+      if (!present) omitted = true;
+      else entries.push(entry.map(key => (map[key] as string | undefined) ?? ""));
+    }
+    if (entries.length) result.push({ index: b, entries });
+  }
+  return result;
+}
 
 /** Extract only formatting and positions; never retain example text or links. */
 export function deriveRichTemplate(value: string): RichTemplate | null {
@@ -34,7 +67,19 @@ export function deriveRichTemplate(value: string): RichTemplate | null {
         const markerOnly = !raw.trim() && /^\s*(?:[-*+]|\d+[.)])\s+$/.test(text);
         raw += text;
         if (markerOnly) return;
-        if (text.trim()) runs.push({ style: inherited, before: /^\s/.test(text), after: /\s$/.test(text) });
+        if (text.trim()) {
+          const groups: { emoji: boolean; text: string }[] = [];
+          for (const grapheme of emojiGraphemes(text)) {
+            const emoji = isSingleEmoji(grapheme);
+            const last = groups[groups.length - 1];
+            if (!emoji && last && !last.emoji) last.text += grapheme;
+            else groups.push({ emoji, text: grapheme });
+          }
+          for (const group of groups) {
+            if (group.text.trim()) runs.push({ style: inherited, before: /^\s/.test(group.text), after: /\s$/.test(group.text), ...(group.emoji && { emoji: true }) });
+            else if (runs.length) runs[runs.length - 1] = { ...runs[runs.length - 1], after: true };
+          }
+        }
         else if (text && runs.length) runs[runs.length - 1] = { ...runs[runs.length - 1], after: true };
         return;
       }
@@ -96,12 +141,13 @@ export function renderRichTemplate(template: RichTemplate, values: readonly { re
       let text = "";
       for (let j = 0; j < content.length; j++) {
         const run = entry.runs[j], fragment = content[j];
-        if (!run || typeof run.style !== "string" || run.style.length > 1000 || typeof run.before !== "boolean" || typeof run.after !== "boolean" || typeof fragment !== "string" || !fragment.trim() || fragment.length > 8000 || /[\r\n]/.test(fragment) || /^\s*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|`{3,}|~{3,}|\|)/.test(fragment)) return null;
+        if (!run || typeof run.style !== "string" || run.style.length > 1000 || typeof run.before !== "boolean" || typeof run.after !== "boolean" || typeof fragment !== "string" || fragment.length > 8000 || /[\r\n]/.test(fragment) || (run.emoji ? fragment !== "" && !isSingleEmoji(fragment) : !fragment.trim() || containsEmoji(fragment) || /^\s*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|`{3,}|~{3,}|\|)/.test(fragment))) return null;
+        if (run.emoji && !fragment) continue;
         if (j && (run.before || entry.runs[j - 1].after)) text += " ";
         const rendered = markdownToHtml(fragment.trim()).replace(/^<p>/, "").replace(/<\/p>$/, "");
         text += `<span style="${escape(run.style)}">${rendered}</span>`;
       }
-      items.push(isList ? `<li style="${escape(entry.style)}">${text}</li>` : text);
+      if (text) items.push(isList ? `<li style="${escape(entry.style)}">${text}</li>` : text);
     }
     output.push(`<${block.tag} style="${escape(block.style)}">${items.join("")}</${block.tag}>`);
     last = value.index;
@@ -116,7 +162,7 @@ export function validRichTemplate(value: unknown): value is RichTemplate {
   const template = value as RichTemplate;
   if (!template.blocks.length || template.blocks.length > 100) return false;
   try {
-    const slots = template.blocks.map((block, index) => ({ index, entries: block.entries.map(entry => entry.runs.map(() => "x")) }));
+    const slots = template.blocks.map((block, index) => ({ index, entries: block.entries.map(entry => entry.runs.map(run => run.emoji ? "" : "x")) }));
     return renderRichTemplate(template, slots) !== null;
   } catch { return false; }
 }

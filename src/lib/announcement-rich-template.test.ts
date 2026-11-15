@@ -1,8 +1,37 @@
 import { describe, expect, it } from "vitest";
-import { deriveRichTemplate, renderRichTemplate } from "./announcement-rich-template";
+import { deriveRichTemplate, renderRichTemplate, richTemplatePlaceholders, richTemplateSlotsFromMap } from "./announcement-rich-template";
 import { encodePreviousAnnouncementHtml } from "./announcement-library-rich-text";
 
 describe("rich announcement template extraction", () => {
+  it("stores emoji positions without example glyphs and inserts chosen emoji", () => {
+    const original = String.fromCodePoint(0x1f4cc), chosen = String.fromCodePoint(0x1f4a1);
+    const template = deriveRichTemplate(encodePreviousAnnouncementHtml(`<p><strong>${original}</strong> Current text</p>`))!;
+    expect(JSON.stringify(template)).not.toContain(original);
+    const slots = richTemplateSlotsFromMap(template, { b0_e0_r0: chosen, b0_e0_r1: "Fresh content" });
+    expect(slots).not.toBeNull();
+    expect(renderRichTemplate(template, slots!)).toContain(chosen);
+    const noEmoji = richTemplateSlotsFromMap(template, { b0_e0_r1: "Fresh content" });
+    expect(renderRichTemplate(template, noEmoji!)).not.toContain(original);
+    expect(renderRichTemplate(template, [{ index: 0, entries: [["not an emoji", "Fresh content"]] }])).toBeNull();
+  });
+  it("keeps the later list entry style when an emoji-only entry is omitted", () => {
+    const old = String.fromCodePoint(0x1f4cc);
+    const template = deriveRichTemplate(encodePreviousAnnouncementHtml(`<ul><li>${old}</li><li style="color:red">Old text</li></ul>`))!;
+    const slots = richTemplateSlotsFromMap(template, { b0_e1_r0: "Current text" });
+    expect(slots).not.toBeNull();
+    const html = renderRichTemplate(template, slots!);
+    expect(html).toContain('color:red');
+    expect(html).toContain('Current text');
+    expect(html).not.toContain(old);
+  });
+  it("maps stable placeholders while rejecting unknown and incomplete entries", () => {
+    const template = deriveRichTemplate(encodePreviousAnnouncementHtml('<p>Old <strong>example</strong></p><ul><li>One</li><li>Two</li></ul>'))!;
+    expect(richTemplatePlaceholders(template)).toEqual([[["b0_e0_r0", "b0_e0_r1"]], [["b1_e0_r0"], ["b1_e1_r0"]]]);
+    expect(richTemplateSlotsFromMap(template, { b0_e0_r0: "New", b0_e0_r1: "content", b1_e0_r0: "Task" })).toEqual([{ index: 0, entries: [["New", "content"]] }, { index: 1, entries: [["Task"]] }]);
+    expect(richTemplateSlotsFromMap(template, { b0_e0_r0: "New" })).toBeNull();
+    expect(richTemplateSlotsFromMap(template, { extra_key: "Content" })).toBeNull();
+    expect(richTemplateSlotsFromMap(template, { b1_e1_r0: "Later" })).toBeNull();
+  });
   it("rejects block Markdown in inline template slots", () => {
     const template = deriveRichTemplate(encodePreviousAnnouncementHtml('<p>Old</p>'))!;
     for (const fragment of ["- New item", "1. New item", "## Heading", "> Quote", "```code"]) {

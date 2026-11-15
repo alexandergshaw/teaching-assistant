@@ -39,12 +39,12 @@ import { buildWalkthroughAnnouncementPrompt, type AnnouncementTiming } from "@/l
 import { walkthroughAnnouncementMaxOutputTokens } from "@/lib/walkthrough-announcement-bounds";
 import { composeWalkthroughScriptPrompt } from "@/lib/walkthrough-script-prompt";
 import { addedPromptLines, hasUnsupportedQuizContent } from "@/lib/walkthrough-quiz-evidence";
-import { containsEmoji } from "@/lib/announcement-emoji";
-import { renderRichTemplate, validRichTemplate } from "@/lib/announcement-rich-template";
-import { renderRichTree, richTreePlan } from "@/lib/announcement-rich-tree";
+import { containsEmoji, isSingleEmoji } from "@/lib/announcement-emoji";
+import { renderRichTemplate, validRichTemplate, richTemplatePlaceholders, richTemplateSlotsFromMap } from "@/lib/announcement-rich-template";
+import { renderRichTree, richTreePlan, richTreeSlotsFromMap } from "@/lib/announcement-rich-tree";
 import { projectRichTemplate } from "@/lib/walkthrough-rich-projection";
 import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown";
-import { announcementStructurePlan, assembleAnnouncementSections, recoverAnnouncementSections, normalizeAnnouncementEmoji, normalizeAnnouncementSectionText, validAnnouncementEmojiChoice, announcementSectionFailure, announcementContentSignature, announcementSectionBody, hasMeaningfulAnnouncementContent } from "@/lib/walkthrough-structured-announcement";
+import { announcementStructurePlan, assembleAnnouncementSections, recoverAnnouncementSections, sectionsFromPlaceholderMap, normalizeAnnouncementEmoji, normalizeAnnouncementSectionText, validAnnouncementEmojiChoice, announcementSectionFailure, announcementContentSignature, announcementSectionBody, hasMeaningfulAnnouncementContent } from "@/lib/walkthrough-structured-announcement";
 import { verifiedStyledAnnouncement } from "@/lib/walkthrough-styled-announcement";
 import { applyWalkthroughFidelity } from "@/lib/walkthrough-announcement-fidelity";
 import { matchQuizDetailsBullets } from "@/lib/walkthrough-quiz-list";
@@ -405,29 +405,22 @@ function composeProviderPrompt(input: WalkthroughAnnouncementDraftInput, styleBl
   return [
     "You are an instructor writing a course announcement for students.",
     bodyInstruction,
-    input.matchExample && validRichTemplate(input.outline.richTemplate) && !richTreePlan(input.outline.richTree) ? [
-      "Return ONLY valid JSON with title and richSlots. Generate current announcement content once, directly in the slots.",
-      `richSlots is an array of {index, entries}, using these zero-based blocks and fragment counts: ${JSON.stringify(input.outline.richTemplate.blocks.map((block, index) => ({ index, kind: block.tag, entries: block.entries.map(entry => entry.runs.length) })))}.`,
-      "Entries are arrays of arrays of new text fragments. Fill every fragment in an included entry; omit unsupported blocks. Keep each Markdown link entirely within one fragment. Never use example facts or invent facts to fill a block. Put additional supported material that does not fit in an optional extra array of plain paragraphs. Do not include sections, a message, or other fields.",
-      "Do not use emoji in the title or content.",
+    input.matchExample && richTreePlan(input.outline.richTree) ? [
+      "Return ONLY valid JSON with title and placeholders, a flat object mapping IDs to current text.",
+      `The content-free layout is ${JSON.stringify(richTreePlan(input.outline.richTree)!.shape)}. Use key s followed by the slot number.`,
+      "Fill every slot in an included top-level branch; omit unsupported branches. Keep Markdown links within one value. Never reuse example facts. Put additional supported paragraphs in optional extra_0 through extra_39 keys, in order. Do not return any other fields.",
+      input.emojiPolicy === "requested" ? "Slots marked emoji accept one selected emoji; do not put emoji in other slots." : "Omit slots marked emoji; do not put emoji in other slots.",
+    ].join("\n") : input.matchExample && validRichTemplate(input.outline.richTemplate) ? [
+      "Return ONLY valid JSON with title and placeholders, where placeholders is an object mapping placeholder IDs to current text. Generate content once.",
+      `The content-free blocks and grouped placeholder IDs are: ${JSON.stringify(input.outline.richTemplate.blocks.map((block, index) => ({ kind: block.tag, entries: richTemplatePlaceholders(input.outline.richTemplate!)[index].map((entry, e) => entry.map((id, r) => ({ id, kind: block.entries[e].runs[r].emoji ? "emoji" : "text" }))) })))}.`,
+      "Fill every ID in an included entry; omit unsupported blocks. Within a list block include a consecutive prefix of entries, with no gaps. Keep each Markdown link entirely within one placeholder. Never use example facts or invent facts to fill a block. Put additional supported paragraphs in optional extra_0 through extra_39 keys, in order. Do not return any other fields.",
+      input.emojiPolicy === "requested" ? "For each emoji placeholder choose one relevant emoji; do not put emoji in text placeholders." : "Omit emoji placeholders and do not put emoji in text placeholders.",
     ].join("\n") : input.matchExample ? [
-      "Return ONLY valid JSON with title and sections:",
-      '{"title":"...","sections":[{"index":1,"heading":null,"paragraphs":["..."],"items":[],"emojis":[]}]}',
-      "The title must be plain text with no emoji; emoji may appear only in the specified body positions.",
-      "Sections are identified by the 1-based positions in the example outline. Include only sections supported by current materials, in ascending order; never invent facts to fill an example section.",
-      "For a heading section use the exact canonical heading when one is specified; otherwise provide a current-material heading. For a paragraph-break section set heading to null. For prose use paragraphs and no items; for a list use items, with optional introductory paragraphs. Each heading, paragraph and item must be a single string without emoji, line breaks or Markdown list or heading prefixes.",
-      input.emojiPolicy === "requested" ? "For every applicable example emoji position in an included section, choose one relevant single emoji and put it in emojis as {target: heading, paragraph, or item; index: zero-based position; position: prefix or suffix; value: emoji}. Use only listed positions. The extra section has no emoji positions." : "Set every emojis array to empty; do not use emoji in the message or section fields.",
-      "Write each piece of content once, in its section. Do not return a duplicate message or text outside these fields.",
-      "If the supplied section shape cannot represent the current material faithfully, return title and a complete Markdown message instead of sections.",
-      ...(validRichTemplate(input.outline.richTemplate) && input.outline.richTemplate.blocks.some(block => block.entries.some(entry => entry.runs.length > 1)) ? [
-        `For the saved mixed formatting also return richSlots: an array of {index, entries}, using these zero-based blocks and required fragment counts: ${JSON.stringify(input.outline.richTemplate.blocks.map((block, index) => ({ index, kind: block.tag, entries: block.entries.map(entry => entry.runs.length) })))}.`,
-        "Each entries array holds new text fragments for its block. Together the fragments must reproduce the section content exactly, in order, without old example words. Keep each Markdown link in one fragment.",
-      ] : []),
-      ...(richTreePlan(input.outline.richTree) ? [
-        `For the saved nested layout also return treeSlots as {slot, text} and treeExtra as extra paragraphs. The layout is: ${JSON.stringify(richTreePlan(input.outline.richTree)!.shape)}.`,
-        "Omit unsupported branches entirely; fill every slot in an included branch. The slots and extra paragraphs must reproduce the section content exactly, in order, without old example words.",
-      ] : []),
-      `There are ${announcementStructurePlan(input.outline).length} available section positions. The final position is optional unheaded prose for current facts that do not fit any supported example section.`,
+      "Return ONLY JSON with title and placeholders, a flat map of IDs to current text. No other fields.",
+      `The section positions and shapes are ${JSON.stringify(announcementStructurePlan(input.outline))}.`,
+      "For section N, use sN_p0, sN_p1 and so on for paragraphs; sN_i0, sN_i1 and so on for list items. Number each kind consecutively from zero without gaps. For a heading with no canonical heading use sN_heading. Omit sections unsupported by current materials. The last section is optional extra prose. Keep each value one line, and do not include Markdown block prefixes.",
+      input.emojiPolicy === "requested" ? "For each saved emoji position, use sN_emoji0, sN_emoji1 and so on in its listed order; each value is one selected emoji. Do not put emoji in text values." : "Do not include emoji.",
+      "Use only current materials for facts. Never reuse example facts or invent facts to fill placeholders.",
     ].join("\n") : [
       "Return ONLY valid JSON:",
       "{",
@@ -540,7 +533,7 @@ export async function draftWalkthroughAnnouncementAction(
     }
     const title = parsed.title.trim();
     const message = "message" in parsed && typeof parsed.message === "string" ? parsed.message.trim() : "";
-    if (!title || (!message && !(input.matchExample && useDefaultPrompt && ("sections" in parsed || "richSlots" in parsed)))) {
+    if (!title || (!message && !(input.matchExample && useDefaultPrompt && ("sections" in parsed || "richSlots" in parsed || "placeholders" in parsed)))) {
       return { error: "Generated announcement is empty. Try again.", diag: diagBase };
     }
 
@@ -565,29 +558,49 @@ export async function draftWalkthroughAnnouncementAction(
     let structuredMessage = permittedMessage;
     let formatFallback = false;
     let singleSourceRich: string | null = null;
+    const treePlan = richTreePlan(input.outline.richTree);
     if (input.matchExample && useDefaultPrompt) {
-      if (Object.keys(parsed).some(key => !["title", "message", "sections", "richSlots", "treeSlots", "treeExtra", "extra"].includes(key))) return { error: "The draft contained content outside its sections. Try again.", diag: diagBase };
+      if (Object.keys(parsed).some(key => !["title", "message", "sections", "richSlots", "treeSlots", "treeExtra", "extra", "placeholders"].includes(key))) return { error: "The draft contained content outside its sections. Try again.", diag: diagBase };
       if (containsEmoji(title)) return { error: "The draft title included an unsupported emoji. Try again.", diag: diagBase };
-      const slotsOnly = !message && !("sections" in parsed) && validRichTemplate(input.outline.richTemplate) && "richSlots" in parsed && Array.isArray(parsed.richSlots);
-      if (!slotsOnly && "extra" in parsed) return { error: "The draft contained content outside its sections. Try again.", diag: diagBase };
+      const slotsOnly = !message && !("sections" in parsed) && ((validRichTemplate(input.outline.richTemplate) && "richSlots" in parsed && Array.isArray(parsed.richSlots)) || (!!treePlan || validRichTemplate(input.outline.richTemplate)) && "placeholders" in parsed);
+      const plainMap = !slotsOnly && !message && !("sections" in parsed) && "placeholders" in parsed && !treePlan && !validRichTemplate(input.outline.richTemplate);
+      if (!slotsOnly && !plainMap && ("extra" in parsed || "placeholders" in parsed)) return { error: "The draft contained content outside its sections. Try again.", diag: diagBase };
+      if (plainMap && Object.keys(parsed).some(key => !["title", "placeholders"].includes(key))) return { error: "The draft contained content outside its sections. Try again.", diag: diagBase };
       if (slotsOnly) {
-        if (input.emojiPolicy === "requested" && input.outline.sections.some(section => section.emojiPlacements?.length)) formatFallback = true;
-        if (Object.keys(parsed).some(key => !["title", "richSlots", "extra"].includes(key))) return { error: "The draft contained content outside its formatting slots. Try again.", diag: diagBase };
-        const extra = "extra" in parsed ? parsed.extra : [];
+        if (Object.keys(parsed).some(key => !["title", "richSlots", "placeholders", "extra"].includes(key)) || ("richSlots" in parsed && "placeholders" in parsed)) return { error: "The draft contained content outside its formatting slots. Try again.", diag: diagBase };
+        const placeholderMap = "placeholders" in parsed && parsed.placeholders && typeof parsed.placeholders === "object" && !Array.isArray(parsed.placeholders) ? parsed.placeholders as Record<string, unknown> : null;
+        const extraKeys = placeholderMap ? Object.keys(placeholderMap).filter(key => /^extra_(?:[0-9]|[1-3][0-9])$/.test(key)).sort((a, b) => Number(a.slice(6)) - Number(b.slice(6))) : [];
+        if (extraKeys.some((key, index) => key !== `extra_${index}`)) return { error: "The draft contained invalid additional content. Try again.", diag: diagBase };
+        const extra = "extra" in parsed ? parsed.extra : extraKeys.map(key => placeholderMap![key]);
+        if ("extra" in parsed && extraKeys.length) return { error: "The draft contained duplicate additional content. Try again.", diag: diagBase };
         if (!Array.isArray(extra) || extra.length > 40 || !extra.every(value => typeof value === "string" && value.trim() && value.length <= 8000 && !/[\r\n]/.test(value))) return { error: "The draft contained invalid additional content. Try again.", diag: diagBase };
-        const rawSlots = ("richSlots" in parsed ? parsed.richSlots : []) as Parameters<typeof renderRichTemplate>[1];
+        const contentMap = placeholderMap && Object.fromEntries(Object.entries(placeholderMap).filter(([key]) => !extraKeys.includes(key)));
+        if (treePlan && "placeholders" in parsed) {
+          const treeSlots = richTreeSlotsFromMap(input.outline.richTree, contentMap);
+          if (!treeSlots || treeSlots.some(slot => treePlan.emojiSlots.includes(slot.slot) ? !isSingleEmoji(slot.text) : containsEmoji(slot.text)) || extra.some(value => containsEmoji(value))) return { error: "The draft could not be matched safely to the saved formatting. Try again.", diag: diagBase };
+          if (input.emojiPolicy === "requested" && treePlan.emojiSlots.some(id => !treeSlots.some(slot => slot.slot === id))) formatFallback = true;
+          const cleanedTree = treeSlots.filter(slot => input.emojiPolicy === "requested" || !treePlan.emojiSlots.includes(slot.slot)).map(slot => ({ ...slot, text: stripUnpermittedUrls(slot.text, permitted).text }));
+          const cleanedExtra = extra.map(value => stripUnpermittedUrls(value, permitted).text).filter(value => value.trim());
+          singleSourceRich = renderRichTree(input.outline.richTree!, cleanedTree, cleanedExtra);
+          if (!singleSourceRich) return { error: "The draft could not be matched safely to the saved formatting. Try again.", diag: diagBase };
+          structuredMessage = htmlToMarkdown(singleSourceRich);
+          if (cleanedExtra.length) formatFallback = true;
+        } else {
+        const rawSlots = ("placeholders" in parsed ? richTemplateSlotsFromMap(input.outline.richTemplate!, contentMap) : "richSlots" in parsed ? parsed.richSlots : null) as Parameters<typeof renderRichTemplate>[1] | null;
+        if (!rawSlots) return { error: "The draft could not be matched safely to the saved formatting. Try again.", diag: diagBase };
         const rawHtml = rawSlots.length ? renderRichTemplate(input.outline.richTemplate!, rawSlots) : "";
         if (rawHtml === null || (!rawHtml && !extra.length)) return { error: "The draft could not be matched safely to the saved formatting. Try again.", diag: diagBase };
-        const rawMarkdown = htmlToMarkdown(rawHtml);
-        if (containsEmoji(`${rawMarkdown}\n${extra.join("\n")}`)) return { error: "The draft included emoji that could not be positioned safely. Try again.", diag: diagBase };
-        const cleanedSlots = rawSlots.map(slot => ({ index: slot.index, entries: slot.entries.map(entry => entry.map(fragment => stripUnpermittedUrls(fragment, permitted).text)) }));
+        if (input.emojiPolicy === "requested" && rawSlots.some(slot => slot.entries.some((entry, e) => entry.some((fragment, r) => input.outline.richTemplate!.blocks[slot.index]?.entries[e]?.runs[r]?.emoji && !fragment)))) formatFallback = true;
+        if (extra.some(value => containsEmoji(value))) return { error: "The draft included emoji that could not be positioned safely. Try again.", diag: diagBase };
+        const cleanedSlots = rawSlots.map(slot => ({ index: slot.index, entries: slot.entries.map((entry, e) => entry.map((fragment, r) => input.emojiPolicy !== "requested" && input.outline.richTemplate!.blocks[slot.index].entries[e].runs[r].emoji ? "" : stripUnpermittedUrls(fragment, permitted).text)) }));
         singleSourceRich = cleanedSlots.length ? renderRichTemplate(input.outline.richTemplate!, cleanedSlots) : "";
         if (singleSourceRich === null) return { error: "Generated announcement has no content after removing unverified links. Try again.", diag: diagBase };
         const extraMarkdown = extra.map(value => stripUnpermittedUrls(value, permitted).text).filter(value => value.trim()).join("\n\n");
         if (extraMarkdown) { singleSourceRich += markdownToHtml(extraMarkdown); formatFallback = true; }
         structuredMessage = htmlToMarkdown(singleSourceRich);
+        }
       } else {
-      const rawSections = "sections" in parsed ? parsed.sections : undefined;
+      const rawSections = plainMap && "placeholders" in parsed ? sectionsFromPlaceholderMap(parsed.placeholders, input.outline, input.emojiPolicy === "requested") : "sections" in parsed ? parsed.sections : undefined;
       const normalizedText = !message ? normalizeAnnouncementSectionText(rawSections) : { sections: rawSections, adjusted: false };
       const normalized = input.emojiPolicy === "requested" && !message ? normalizeAnnouncementEmoji(normalizedText.sections, input.outline) : { sections: normalizedText.sections, adjusted: false };
       const sections = normalized.sections;
@@ -636,7 +649,8 @@ export async function draftWalkthroughAnnouncementAction(
     }
 
     const wantsRich = !!(validRichTemplate(input.outline.richTemplate) || richTreePlan(input.outline.richTree));
-    let richHtml = singleSourceRich && verifiedStyledAnnouncement(enforcedMessage, singleSourceRich) ? singleSourceRich : input.matchExample && useDefaultPrompt && input.outline.richTemplate
+    const treeReference = enforcedMessage.replace(/^ {0,3}(?:#{1,6}[ \t]+|[-*+][ \t]+|\d+[.)][ \t]+)/gm, "");
+    let richHtml = singleSourceRich && verifiedStyledAnnouncement(treePlan ? treeReference : enforcedMessage, singleSourceRich, treePlan ? "plain-tree" : "structured") ? singleSourceRich : input.matchExample && useDefaultPrompt && input.outline.richTemplate
       ? projectRichTemplate(enforcedMessage, input.outline.richTemplate) : null;
     let richExtraNotice = false;
     if (!singleSourceRich && input.matchExample && useDefaultPrompt && validRichTemplate(input.outline.richTemplate) && "richSlots" in parsed && Array.isArray(parsed.richSlots)) {

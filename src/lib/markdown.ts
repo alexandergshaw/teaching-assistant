@@ -50,6 +50,9 @@ function renderInline(node: Node): string {
     }
     case "br":
       return "  \n";
+    case "ul":
+    case "ol":
+      return ` ${node.childNodes.map(renderInline).join(" ")} `;
     default:
       return inner;
   }

@@ -16,6 +16,36 @@ export function announcementStructurePlan(outline: AnnouncementOutline): readonl
   return [...sections, extra];
 }
 
+/** Turn a flat model map into section data using only saved positions. */
+export function sectionsFromPlaceholderMap(value: unknown, outline: AnnouncementOutline, emojiRequested: boolean): unknown[] | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const map = value as Record<string, unknown>, plan = announcementStructurePlan(outline);
+  if (Object.keys(map).length > 1000 || Object.values(map).some(text => typeof text !== "string")) return null;
+  const used = new Set<string>(), sections: unknown[] = [];
+  for (let i = 0; i < plan.length; i++) {
+    const section = plan[i], prefix = `s${i + 1}_`;
+    const collect = (kind: string, max: number): string[] | null => {
+      const values: string[] = [];
+      for (let n = 0; n < max; n++) {
+        const key = `${prefix}${kind}${n}`;
+        if (!Object.hasOwn(map, key)) break;
+        used.add(key); values.push(map[key] as string);
+      }
+      return values;
+    };
+    const paragraphs = collect("p", 40)!, items = collect("i", 100)!;
+    const headingKey = `${prefix}heading`;
+    const heading = section.break === "heading" ? section.heading ?? (Object.hasOwn(map, headingKey) ? (used.add(headingKey), map[headingKey] as string) : null) : null;
+    const emojis = (section.emojiPlacements ?? []).flatMap((slot, n) => {
+      const key = `${prefix}emoji${n}`;
+      if (!emojiRequested || !Object.hasOwn(map, key)) return [];
+      used.add(key); return [{ ...slot, value: map[key] as string }];
+    });
+    if (paragraphs.length || items.length || Object.hasOwn(map, headingKey) || emojis.length) sections.push({ index: i + 1, heading, paragraphs, items, emojis });
+  }
+  return used.size === Object.keys(map).length ? sections : null;
+}
+
 function plainLine(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0 && value.length <= 8000 && !/[\r\n]/.test(value) && !containsEmoji(value) && !/^\s*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|`{3,}|~{3,})/.test(value);
 }

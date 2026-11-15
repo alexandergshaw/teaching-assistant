@@ -9,14 +9,17 @@ export class VideoReadError extends Error {
   constructor(public readonly code: string) { super(code); }
 }
 
-const AUDIO_FAILURE_CODES = new Set(["audio-duration", "audio-decode-timeout", "audio-close-timeout", "audio-prepare-timeout", "audio-empty-decode", "audio-incomplete", "audio-wire-limit", "transcription-timeout", "transcription-failed", "narration-limit", "audio-context-failed", "audio-close-failed", "audio-prepare-failed", "audio-decode-failed", "audio-chunk-failed"]);
+const AUDIO_FAILURE_CODES = new Set(["audio-duration", "audio-decode-timeout", "audio-close-timeout", "audio-prepare-timeout", "audio-empty-decode", "audio-incomplete", "audio-wire-limit", "transcription-timeout", "transcription-failed", "transcription-request-rejected", "transcription-access-denied", "transcription-rate-limited", "transcription-provider-unavailable", "narration-limit", "audio-context-failed", "audio-close-failed", "audio-prepare-failed", "audio-decode-failed", "audio-chunk-failed"]);
 export function safeAudioFailureCode(error: unknown): string {
   return error instanceof VideoReadError && AUDIO_FAILURE_CODES.has(error.code) ? error.code : "audio-read-failed";
 }
 export function audioFailureMessage(code: string): string {
   if (code === "audio-incomplete") return "The decoded audio did not cover the full video. Try exporting the video again.";
   if (code === "audio-empty-decode") return "The browser decoded no audio samples. Try another video export.";
-  if (code === "transcription-failed" || code === "transcription-timeout") return "The transcription service could not complete narration. Try again or select another provider.";
+  if (code === "transcription-failed" || code === "transcription-timeout") return "The transcription service could not complete narration. Try again and check provider configuration.";
+  if (code === "transcription-access-denied") return "The transcription provider denied access. Check the configured provider credentials and access, then retry.";
+  if (code === "transcription-request-rejected") return "The transcription provider rejected the audio request. Try another recording or check provider configuration.";
+  if (code === "transcription-rate-limited" || code === "transcription-provider-unavailable") return "The transcription provider is unavailable or rate limited. Retry later.";
   if (code === "audio-duration" || code === "narration-limit") return "The narration exceeds the supported duration or transcript length. Try a shorter video.";
   if (code === "audio-wire-limit") return "A narration segment exceeded the upload limit. Try a shorter video.";
   if (code === "audio-context-failed" || code === "audio-close-failed") return "The browser could not start or release its audio decoder. Try another browser or reload and retry.";

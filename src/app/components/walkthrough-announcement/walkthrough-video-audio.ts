@@ -19,6 +19,17 @@ const browserAudio: AudioAdapters = {
 };
 export type VideoAudioOutcome = { status: "complete"; text: string; chunks: number } | { status: "silence"; chunks: number };
 
+/** Map only fixed server responses; never propagate provider or account text. */
+export function transcriptionFailureCode(error: string): string {
+  const status = /^Transcription failed: HTTP (\d{3})$/.exec(error)?.[1];
+  if (status === "400" || status === "404" || status === "413") return "transcription-request-rejected";
+  if (status === "401" || status === "403") return "transcription-access-denied";
+  if (status === "429") return "transcription-rate-limited";
+  if (status === "408" || (status && Number(status) >= 500 && Number(status) <= 599)) return "transcription-provider-unavailable";
+  if (/^Audio clip is too large to transcribe \(~\d+(?:\.\d+)?MB, limit ~\d+MB per request\)\. Send a shorter clip\.$/.test(error)) return "transcription-request-rejected";
+  return "transcription-failed";
+}
+
 export async function readVideoAudio(blob: Blob, duration: number, provider: LlmProvider, signal: AbortSignal,
   progress: (stage: string, completed: number, total: number) => void, adapters = browserAudio): Promise<VideoAudioOutcome> {
   if (!Number.isFinite(duration) || duration <= 0 || decideRealTimeGuard(duration)) throw new VideoReadError("audio-duration");
@@ -70,7 +81,7 @@ export async function readVideoAudio(blob: Blob, duration: number, provider: Llm
       if (!checkWireBudget(wav.length, "Narration chunk").ok) throw new VideoReadError("audio-wire-limit");
       failurePhase = "transcription-failed";
       const result = await videoWait(() => adapters.transcribe(wav, { provider }), signal, VIDEO_PROVIDER_WAIT_MS, "transcription-timeout");
-      if ("error" in result) throw new VideoReadError("transcription-failed");
+      if ("error" in result) throw new VideoReadError(transcriptionFailureCode(result.error));
       parts.push(result.text);
       if (parts.reduce((sum, text) => sum + text.length, 0) > VIDEO_NARRATION_CHARS) throw new VideoReadError("narration-limit");
     }

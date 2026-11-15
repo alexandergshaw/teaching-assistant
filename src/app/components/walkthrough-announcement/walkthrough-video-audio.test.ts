@@ -4,7 +4,7 @@ vi.mock("../recording/takeAnnouncementTranscription", async original => {
   const actual = await original<typeof import("../recording/takeAnnouncementTranscription")>();
   return { ...actual };
 });
-import { readVideoAudio, type AudioAdapters } from "./walkthrough-video-audio";
+import { readVideoAudio, transcriptionFailureCode, type AudioAdapters } from "./walkthrough-video-audio";
 import { LIVE_SAMPLE_RATE } from "@/lib/live-class/wav";
 import { UPLOAD_WIRE_BUDGET_BYTES } from "@/lib/upload-budget";
 import { VIDEO_LOCAL_WAIT_MS, VIDEO_PROVIDER_WAIT_MS } from "./walkthrough-video-limits";
@@ -19,6 +19,16 @@ function harness(seconds = 125) {
 }
 afterEach(() => vi.useRealTimers());
 describe("uploaded narration production adapter", () => {
+  it("maps only fixed transcription errors to safe categories", () => {
+    expect(transcriptionFailureCode("Transcription failed: HTTP 403")).toBe("transcription-access-denied");
+    expect(transcriptionFailureCode("Transcription failed: HTTP 429")).toBe("transcription-rate-limited");
+    expect(transcriptionFailureCode("Transcription failed: HTTP 503")).toBe("transcription-provider-unavailable");
+    expect(transcriptionFailureCode("Transcription failed: HTTP 408")).toBe("transcription-provider-unavailable");
+    expect(transcriptionFailureCode("Transcription failed: HTTP 404")).toBe("transcription-request-rejected");
+    expect(transcriptionFailureCode("Transcription failed: HTTP 413")).toBe("transcription-request-rejected");
+    expect(transcriptionFailureCode("Transcription failed: HTTP 999")).toBe("transcription-failed");
+    expect(transcriptionFailureCode("PRIVATE_PROVIDER_ERROR 403")).toBe("transcription-failed");
+  });
   it.each(["context", "prepare", "decode", "transcribe"] as const)("classifies an untyped %s failure without exposing its message", async phase => {
     const h = harness();
     if (phase === "context") vi.mocked(h.adapters.context).mockImplementation(() => { throw new Error("PRIVATE_DETAIL"); });

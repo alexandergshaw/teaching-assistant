@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { AnnouncementOutline } from "./announcement-outline-types";
-import { assembleAnnouncementSections, announcementContentSignature, announcementSectionFailure, normalizeAnnouncementEmoji, normalizeAnnouncementSectionText } from "./walkthrough-structured-announcement";
+import { assembleAnnouncementSections, announcementContentSignature, announcementSectionFailure, normalizeAnnouncementEmoji, normalizeAnnouncementSectionText, sectionsFromPlaceholderMap, plainPlaceholderFailure } from "./walkthrough-structured-announcement";
 
 const outline: AnnouncementOutline = { sections: [
   { index: 1, heading: null, break: "paragraph-break", listKind: null, sentenceRange: [1, 3] },
@@ -12,6 +12,15 @@ it("classifies invalid section shapes without returning supplied text", () => {
   expect(announcementSectionFailure([{ index: 1, heading: null, paragraphs: ["private"], items: ["private"] }], outline)).toBe("list shape");
   expect(announcementSectionFailure([{ index: 9, heading: null, paragraphs: ["private"], items: [] }], outline)).toBe("section order or index");
   expect(announcementSectionFailure([{ index: 1, heading: null, paragraphs: ["private\ntext"], items: [] }], outline)).toBe("paragraph or item text");
+});
+
+it("accepts a repeated canonical heading and classifies map errors without content", () => {
+  const sections = sectionsFromPlaceholderMap({ s2_heading: "Complete", s2_i0: "Current work" }, outline, false);
+  expect(assembleAnnouncementSections(sections, outline)).toBe("## Complete\n\n- Current work");
+  expect(sectionsFromPlaceholderMap({ s2_heading: "Different", s2_i0: "Current work" }, outline, false)).toBeNull();
+  expect(plainPlaceholderFailure({ s2_heading: "Different", s2_i0: "Current work" }, outline, false)).toBe("heading-not-applicable");
+  expect(plainPlaceholderFailure({ s2_i1: "Private content" }, outline, false)).toBe("position-gap");
+  expect(plainPlaceholderFailure({ s2_i0: ["Private content"] }, outline, false)).toBe("non-string-value");
 });
 
 it("places model-selected emoji at saved positions and preserves content if none are selected", () => {

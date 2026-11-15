@@ -35,6 +35,7 @@ export function sectionsFromPlaceholderMap(value: unknown, outline: Announcement
     };
     const paragraphs = collect("p", 40)!, items = collect("i", 100)!;
     const headingKey = `${prefix}heading`;
+    if (Object.hasOwn(map, headingKey) && section.break === "heading" && section.heading !== null && map[headingKey] === section.heading) used.add(headingKey);
     const heading = section.break === "heading" ? section.heading ?? (Object.hasOwn(map, headingKey) ? (used.add(headingKey), map[headingKey] as string) : null) : null;
     const emojis = (section.emojiPlacements ?? []).flatMap((slot, n) => {
       const key = `${prefix}emoji${n}`;
@@ -44,6 +45,29 @@ export function sectionsFromPlaceholderMap(value: unknown, outline: Announcement
     if (paragraphs.length || items.length || Object.hasOwn(map, headingKey) || emojis.length) sections.push({ index: i + 1, heading, paragraphs, items, emojis });
   }
   return used.size === Object.keys(map).length ? sections : null;
+}
+
+/** Fixed categories only; never return model-supplied keys or values. */
+export function plainPlaceholderFailure(value: unknown, outline: AnnouncementOutline, emojiRequested: boolean): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "not-object";
+  const map = value as Record<string, unknown>, keys = Object.keys(map), plan = announcementStructurePlan(outline);
+  if (keys.length > 1000) return "too-many-keys";
+  if (Object.values(map).some(text => typeof text !== "string")) return "non-string-value";
+  for (const key of keys) {
+    const match = /^s(\d+)_(heading|p\d+|i\d+|emoji\d+)$/.exec(key);
+    if (!match) return "unrecognized-key";
+    const n = Number(match[1]), section = plan[n - 1];
+    if (!section) return "section-out-of-range";
+    const part = match[2];
+    if (part === "heading" && (section.break !== "heading" || (section.heading !== null && map[key] !== section.heading))) return "heading-not-applicable";
+    if (part.startsWith("emoji") && (!emojiRequested || Number(part.slice(5)) >= (section.emojiPlacements?.length ?? 0))) return "emoji-not-applicable";
+    if (/^[pi]\d+$/.test(part)) {
+      const index = Number(part.slice(1)), max = part[0] === "p" ? 40 : 100;
+      if (index >= max) return "position-out-of-range";
+      if (Array.from({ length: index }, (_, i) => `s${n}_${part[0]}${i}`).some(previous => !Object.hasOwn(map, previous))) return "position-gap";
+    }
+  }
+  return "unknown";
 }
 
 function plainLine(value: unknown): value is string {

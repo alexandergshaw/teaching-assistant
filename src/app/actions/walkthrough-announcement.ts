@@ -45,7 +45,7 @@ import { renderRichTemplate, validRichTemplate, richTemplatePlaceholders, richTe
 import { renderRichTree, richTreePlan, richTreeSlotsFromMap } from "@/lib/announcement-rich-tree";
 import { projectRichTemplate } from "@/lib/walkthrough-rich-projection";
 import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown";
-import { announcementStructurePlan, assembleAnnouncementSections, recoverAnnouncementSections, sectionsFromPlaceholderMap, normalizeAnnouncementEmoji, normalizeAnnouncementSectionText, validAnnouncementEmojiChoice, announcementSectionFailure, announcementContentSignature, announcementSectionBody, hasMeaningfulAnnouncementContent } from "@/lib/walkthrough-structured-announcement";
+import { announcementStructurePlan, assembleAnnouncementSections, recoverAnnouncementSections, sectionsFromPlaceholderMap, plainPlaceholderFailure, normalizeAnnouncementEmoji, normalizeAnnouncementSectionText, validAnnouncementEmojiChoice, announcementSectionFailure, announcementContentSignature, announcementSectionBody, hasMeaningfulAnnouncementContent } from "@/lib/walkthrough-structured-announcement";
 import { verifiedStyledAnnouncement } from "@/lib/walkthrough-styled-announcement";
 import { applyWalkthroughFidelity } from "@/lib/walkthrough-announcement-fidelity";
 import { matchQuizDetailsBullets } from "@/lib/walkthrough-quiz-list";
@@ -652,6 +652,7 @@ export async function draftWalkthroughAnnouncementAction(
         }
       } else {
       const rawSections = plainMap && "placeholders" in parsed ? sectionsFromPlaceholderMap(parsed.placeholders, input.outline, input.emojiPolicy === "requested") : "sections" in parsed ? parsed.sections : undefined;
+      if (plainMap && rawSections === null && "placeholders" in parsed) console.warn("Walkthrough placeholder validation", plainPlaceholderFailure(parsed.placeholders, input.outline, input.emojiPolicy === "requested"));
       const normalizedText = !message ? normalizeAnnouncementSectionText(rawSections) : { sections: rawSections, adjusted: false };
       const normalized = input.emojiPolicy === "requested" && !message ? normalizeAnnouncementEmoji(normalizedText.sections, input.outline) : { sections: normalizedText.sections, adjusted: false };
       const sections = normalized.sections;

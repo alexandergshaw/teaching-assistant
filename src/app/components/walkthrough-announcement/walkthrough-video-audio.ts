@@ -11,10 +11,11 @@ export interface AudioAdapters {
   prepare: typeof extractAudioOnly;
   context(): AudioContext;
   decode: typeof decodeBlobToMono;
+  decodeDirect?: typeof decodeBlobToMono;
   transcribe: typeof transcribeLiveAudioAction;
 }
 const browserAudio: AudioAdapters = {
-  prepare: extractAudioOnly, context: () => new AudioContext(), decode: decodeBlobToMono, transcribe: transcribeLiveAudioAction,
+  prepare: extractAudioOnly, context: () => new AudioContext(), decode: decodeBlobToMono, decodeDirect: decodeBlobToMono, transcribe: transcribeLiveAudioAction,
 };
 export type VideoAudioOutcome = { status: "complete"; text: string; chunks: number } | { status: "silence"; chunks: number };
 
@@ -26,15 +27,33 @@ export async function readVideoAudio(blob: Blob, duration: number, provider: Llm
   signal.addEventListener("abort", abort, { once: true });
   let context: AudioContext | undefined;
   let mono: Float32Array | undefined;
+  const durationTolerance = Math.min(2, duration * 0.02);
   try {
-    const audio = await videoWait(() => adapters.prepare(blob, pct => {
+    if (adapters.decodeDirect) {
+      context = adapters.context();
+      try {
+        progress("decoding-narration", 0, 1);
+        const direct = await videoWait(() => adapters.decodeDirect!(context!, blob), signal, VIDEO_LOCAL_WAIT_MS, "audio-decode-timeout");
+        if (direct.length && direct.length / LIVE_SAMPLE_RATE >= duration - durationTolerance) mono = direct;
+      } catch (error) {
+        if (signal.aborted || (error instanceof VideoReadError && (error.code === "cancelled" || error.code === "audio-decode-timeout"))) throw error;
+      }
+      if (!mono) {
+        await videoWait(() => context!.close(), signal, VIDEO_LOCAL_WAIT_MS, "audio-close-timeout");
+        context = undefined;
+      }
+    }
+    if (!mono) {
+      const audio = await videoWait(() => adapters.prepare(blob, pct => {
       if (!signal.aborted && !prepare.signal.aborted) progress("preparing-narration", pct, 100);
-    }, prepare.signal), signal, duration * 1000 + VIDEO_LOCAL_WAIT_MS, "audio-prepare-timeout");
-    context = adapters.context();
-    mono = await videoWait(() => adapters.decode(context!, audio), signal, VIDEO_LOCAL_WAIT_MS, "audio-decode-timeout");
+      }, prepare.signal), signal, duration * 1000 + VIDEO_LOCAL_WAIT_MS, "audio-prepare-timeout");
+      context = adapters.context();
+      mono = await videoWait(() => adapters.decode(context!, audio), signal, VIDEO_LOCAL_WAIT_MS, "audio-decode-timeout");
+    }
     if (mono.length === 0) throw new VideoReadError("audio-empty-decode");
     const decodedDuration = mono.length / LIVE_SAMPLE_RATE;
     if (decodedDuration > VIDEO_MAX_SECONDS) throw new VideoReadError("audio-duration");
+    if (decodedDuration < duration - durationTolerance) throw new VideoReadError("audio-incomplete");
     const plans = planTranscriptChunks(decodedDuration);
     const parts: string[] = [];
     for (const [index, plan] of plans.entries()) {

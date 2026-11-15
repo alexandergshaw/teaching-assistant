@@ -79,6 +79,8 @@ export interface Drafted {
   readonly title: string;
   readonly message: string;
   readonly builtFrom: ResolvedTemplate;
+  /** Safe template shape pinned to the generation, if structure matching was requested. */
+  readonly templateOutline?: AnnouncementOutline;
   /** G3 Ruling 14/30: REQUIRED, not optional - an optional field lets a
    * caller omit it with every gate green, which is exactly how this notice
    * shipped dead in an earlier round. Rendered by AnnouncementDraftSlot.tsx. */

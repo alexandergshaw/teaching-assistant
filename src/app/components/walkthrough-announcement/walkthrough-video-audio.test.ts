@@ -19,6 +19,72 @@ function harness(seconds = 125) {
 }
 afterEach(() => vi.useRealTimers());
 describe("uploaded narration production adapter", () => {
+  it("decodes a supported video directly without real-time preparation", async () => {
+    const h = harness(); h.adapters.decodeDirect = vi.fn(async () => new Float32Array(125 * LIVE_SAMPLE_RATE));
+    expect((await h.run()).status).toBe("complete");
+    expect(h.adapters.prepare).not.toHaveBeenCalled(); expect(h.adapters.decodeDirect).toHaveBeenCalledOnce();
+  });
+  it("falls back when direct decoding is unsupported or empty", async () => {
+    for (const direct of [async () => { throw new Error("unsupported"); }, async () => new Float32Array(0)]) {
+      const h = harness(); h.adapters.decodeDirect = vi.fn(direct);
+      expect((await h.run()).status).toBe("complete"); expect(h.adapters.prepare).toHaveBeenCalledOnce();
+      expect(h.close).toHaveBeenCalledTimes(2);
+    }
+  });
+  it("does not fall back after direct decoding is cancelled", async () => {
+    const h = harness(); const entered = deferred<void>(); const pending = deferred<Float32Array>();
+    h.adapters.decodeDirect = vi.fn(() => { entered.resolve(); return pending.promise; });
+    const run = h.run(); const rejected = expect(run).rejects.toMatchObject({ code: "cancelled" });
+    await entered.promise; h.controller.abort(); await rejected;
+    pending.resolve(new Float32Array(10)); expect(h.adapters.prepare).not.toHaveBeenCalled(); expect(h.close).toHaveBeenCalledOnce();
+  });
+  it("does not start a second decode after the direct decode times out", async () => {
+    vi.useFakeTimers(); const h = harness(); const late = deferred<Float32Array>();
+    h.adapters.decodeDirect = vi.fn(() => late.promise);
+    const run = h.run(); const rejected = expect(run).rejects.toMatchObject({ code: "audio-decode-timeout" });
+    await vi.advanceTimersByTimeAsync(VIDEO_LOCAL_WAIT_MS + 1); await rejected;
+    expect(h.adapters.prepare).not.toHaveBeenCalled(); expect(h.close).toHaveBeenCalledOnce();
+    late.resolve(new Float32Array(10));
+  });
+  it("retries a short direct decode and rejects an incomplete fallback", async () => {
+    const h = harness(100); h.adapters.decodeDirect = vi.fn(async () => new Float32Array(100 * LIVE_SAMPLE_RATE));
+    await expect(h.run()).rejects.toMatchObject({ code: "audio-incomplete" });
+    expect(h.adapters.prepare).toHaveBeenCalledOnce(); expect(h.adapters.transcribe).not.toHaveBeenCalled();
+  });
+  it("accepts small duration discrepancies from media timestamps", async () => {
+    const h = harness(); h.adapters.decodeDirect = vi.fn(async () => new Float32Array(123 * LIVE_SAMPLE_RATE));
+    expect((await h.run()).status).toBe("complete"); expect(h.adapters.prepare).not.toHaveBeenCalled();
+  });
+  it("does not accept ten missing seconds from a twenty-minute recording", async () => {
+    const h = harness(); const incomplete = new Float32Array(1190 * LIVE_SAMPLE_RATE);
+    h.adapters.decodeDirect = vi.fn(async () => incomplete);
+    vi.mocked(h.adapters.decode).mockResolvedValue(incomplete);
+    await expect(readVideoAudio(new Blob(["video"]), 1200, "gemini", h.controller.signal, h.progress, h.adapters)).rejects.toMatchObject({ code: "audio-incomplete" });
+    expect(h.adapters.prepare).toHaveBeenCalledOnce(); expect(h.adapters.transcribe).not.toHaveBeenCalled();
+  });
+  it("does not accept a fraction of a short recording as complete", async () => {
+    const h = harness(); const incomplete = new Float32Array(LIVE_SAMPLE_RATE / 10);
+    h.adapters.decodeDirect = vi.fn(async () => incomplete); vi.mocked(h.adapters.decode).mockResolvedValue(incomplete);
+    await expect(readVideoAudio(new Blob(["video"]), 2, "gemini", h.controller.signal, h.progress, h.adapters)).rejects.toMatchObject({ code: "audio-incomplete" });
+    expect(h.adapters.transcribe).not.toHaveBeenCalled();
+  });
+  it("waits for the direct decode context to close before fallback", async () => {
+    const h = harness(); const closed = deferred<undefined>();
+    h.adapters.decodeDirect = vi.fn(async () => { throw new Error("unsupported"); });
+    h.close.mockImplementationOnce(() => closed.promise);
+    const run = h.run(); await vi.waitFor(() => expect(h.close).toHaveBeenCalledOnce());
+    expect(h.adapters.prepare).not.toHaveBeenCalled(); closed.resolve(undefined);
+    expect((await run).status).toBe("complete");
+  });
+  it.each(["cancel", "timeout"])("does not fall back after %s while closing the direct context", async mode => {
+    vi.useFakeTimers(); const h = harness(); const entered = deferred<void>(); const pending = deferred<undefined>();
+    h.adapters.decodeDirect = vi.fn(async () => { throw new Error("unsupported"); });
+    h.close.mockImplementation(() => { entered.resolve(); return pending.promise; });
+    const run = h.run(); const rejected = expect(run).rejects.toMatchObject({ code: mode === "cancel" ? "cancelled" : "audio-close-timeout" });
+    await entered.promise;
+    if (mode === "cancel") h.controller.abort(); else await vi.advanceTimersByTimeAsync(VIDEO_LOCAL_WAIT_MS + 1);
+    await rejected; expect(h.adapters.prepare).not.toHaveBeenCalled(); pending.resolve(undefined);
+  });
   it("rejects an empty decode as preparation failure rather than a complete silence pass", async () => {
     const h = harness(0);
     await expect(h.run()).rejects.toMatchObject({ code: "audio-empty-decode" });

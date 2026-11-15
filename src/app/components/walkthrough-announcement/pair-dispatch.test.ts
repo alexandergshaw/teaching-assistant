@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { deriveAnnouncementOutline } from "@/lib/announcement-outline";
 import { buildWalkthroughAnnouncementPrompt } from "@/lib/walkthrough-announcement-prompt";
-import { createPairDraftRunner, type PairDraftAdapters } from "./pair-dispatch";
+import { createPairDraftRunner, dispatchResolvedAnnouncementDraft, type PairDraftAdapters } from "./pair-dispatch";
 import { makeSlot, slotsReducer, type DraftSlot, type SlotsAction, type ResourceOutcome } from "./announcement-draft-slots";
 import { createPairPreferenceStore, preferenceChoice } from "./pair-preferences";
 import type { AnnouncementDraftRequestContext } from "./useAnnouncementDraftSlots";
@@ -270,4 +270,15 @@ it("carries selected-example fidelity to the provider without enabling it for no
   h.dispatch({ type: "choose", id: "wta-slot-2", choice: { kind: "none" } });
   await h.runner.retry("wta-slot-2");
   expect(h.draftOne.mock.calls[1][0].matchExample).toBe(false);
+});
+
+it("pins the safe example shape to the draft and skips comparisons after a prompt edit", async () => {
+  const h = harness(false);
+  const ctx = { ...context, timing: "beginning-of-week" as const, researchOutcome: { kind: "off" as const } };
+  const resolved = { template: { kind: "saved" as const, exemplarId: "A", label: "Weekly" }, outline: h.entries[0].outline };
+  const generated = await dispatchResolvedAnnouncementDraft(ctx, resolved, async () => ({ title: "T", message: "M", researchNotice: { kind: "off" }, compareTemplate: true }));
+  expect(generated).toHaveProperty("templateOutline");
+  expect(JSON.stringify(generated)).not.toContain("OLD_TOPIC");
+  const custom = await dispatchResolvedAnnouncementDraft(ctx, resolved, async () => ({ title: "T", message: "M", researchNotice: { kind: "off" }, compareTemplate: false }));
+  expect(custom).not.toHaveProperty("templateOutline");
 });

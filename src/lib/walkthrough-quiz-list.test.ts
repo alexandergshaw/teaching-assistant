@@ -11,3 +11,22 @@ it("leaves ambiguous or already correct structures untouched", () => {
   const ordered = { ...outline, sections: [{ ...outline.sections[0], listKind: "ordered" as const }] };
   expect(matchQuizDetailsBullets("Quiz Details\n1. A\n2. B", ordered)).toBe("Quiz Details\n1. A\n2. B");
 });
+
+it("matches renamed assessment metadata without changing procedural steps", () => {
+  const details = "Assessment Details\n1. Due: Thursday\n2. Points: 10";
+  expect(matchQuizDetailsBullets(details, outline)).toBe("Assessment Details\n- Due: Thursday\n- Points: 10");
+  const steps = "Assessment Details\n1. Open the editor.\n2. Submit the project.";
+  expect(matchQuizDetailsBullets(steps, outline)).toBe(steps);
+  const multiple = details + "\n\nQuiz Information\n1. Due: Friday\n2. Points: 20";
+  expect(matchQuizDetailsBullets(multiple, outline)).toBe(multiple);
+});
+
+it("does not change quoted, fenced, or indented code examples", () => {
+  for (const input of [
+    "```\nQuiz Details\n1. Due: Thursday\n2. Points: 10\n```",
+    "~~~\nQuiz Details\n1. Due: Thursday\n2. Points: 10\n~~~",
+    "> Quiz Details\n> 1. Due: Thursday\n> 2. Points: 10",
+    "    Quiz Details\n    1. Due: Thursday\n    2. Points: 10",
+    "Quiz Details\n    1. Due: Thursday\n    2. Points: 10",
+  ]) expect(matchQuizDetailsBullets(input, outline)).toBe(input);
+});

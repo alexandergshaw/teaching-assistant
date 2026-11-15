@@ -32,7 +32,7 @@ import {
   type TemplateChoice,
   type TemplateOptionSource,
 } from "./announcement-draft-slots";
-import { hasCaptureProcessReference } from "./announcement-review";
+import { hasCaptureProcessReference, reviewTemplateStructure } from "./announcement-review";
 import { pairRole } from "./pair-preferences";
 import { resolveScheduledVisibility } from "./scheduled-visibility";
 
@@ -99,6 +99,8 @@ export default function AnnouncementDraftSlot({
   const options = useMemo(() => optionsForSlot(slot, optionSource), [slot, optionSource]);
   const selectedOption = options.find((o) => o.id === choiceId(slot.choice)) ?? options[0];
   const phase = slot.draft.phase;
+  const structureReview = slot.draft.phase === "drafted" && slot.draft.draft.templateOutline
+    ? reviewTemplateStructure(slot.draft.draft.message, slot.draft.draft.templateOutline) : null;
   const [formatInput, setFormatInput] = useState(selectedOption.label);
   const searching = useRef(false);
   const selectedFormatLabel = selectedOption.unavailable ? `${selectedOption.label} (no longer available)` : selectedOption.label;
@@ -221,6 +223,8 @@ export default function AnnouncementDraftSlot({
 
       {phase === "drafted" && slot.draft.phase === "drafted" && (
         <>
+          {structureReview?.orderChanged && <Alert severity="warning">Named sections appear in a different order from the saved example. Review their sequence.</Alert>}
+          {structureReview?.muchShorter && <Alert severity="warning">This draft has far fewer sections than the saved example. Check that it covers the relevant material.</Alert>}
           {hasCaptureProcessReference(slot.draft.draft.title, slot.draft.draft.message) && <Alert severity="warning">This draft may refer to the recording process. Review the wording; a course video mentioned as an assignment may be intentional.</Alert>}
           <p className={styles.fieldHint}>{receiptLabel(slot.draft.draft.builtFrom)}</p>
           <p className={styles.fieldHint}>{timingLabel(slot.draft.draft.timing)}</p>

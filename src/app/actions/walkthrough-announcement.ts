@@ -579,6 +579,7 @@ export async function draftWalkthroughAnnouncementAction(
         parsed = { title: parsed.title, placeholders: Object.fromEntries(entries) };
       }
     }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || !("title" in parsed) || typeof parsed.title !== "string") return { error: "Could not parse the draft from the model response.", diag: diagBase };
     const title = parsed.title.trim();
     const message = "message" in parsed && typeof parsed.message === "string" ? parsed.message.trim() : "";
     if (!title || (!message && !(input.matchExample && useDefaultPrompt && ("sections" in parsed || "richSlots" in parsed || "placeholders" in parsed)))) {

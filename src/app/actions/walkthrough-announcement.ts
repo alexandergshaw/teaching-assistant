@@ -575,7 +575,7 @@ export async function draftWalkthroughAnnouncementAction(
         if (Object.keys(parsed).some(key => !["title", "richSlots", "extra"].includes(key))) return { error: "The draft contained content outside its formatting slots. Try again.", diag: diagBase };
         const extra = "extra" in parsed ? parsed.extra : [];
         if (!Array.isArray(extra) || extra.length > 40 || !extra.every(value => typeof value === "string" && value.trim() && value.length <= 8000 && !/[\r\n]/.test(value))) return { error: "The draft contained invalid additional content. Try again.", diag: diagBase };
-        const rawSlots = (parsed as { richSlots: Parameters<typeof renderRichTemplate>[1] }).richSlots;
+        const rawSlots = ("richSlots" in parsed ? parsed.richSlots : []) as Parameters<typeof renderRichTemplate>[1];
         const rawHtml = rawSlots.length ? renderRichTemplate(input.outline.richTemplate!, rawSlots) : "";
         if (rawHtml === null || (!rawHtml && !extra.length)) return { error: "The draft could not be matched safely to the saved formatting. Try again.", diag: diagBase };
         const rawMarkdown = htmlToMarkdown(rawHtml);

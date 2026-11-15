@@ -21,7 +21,15 @@ const browserAudio: AudioAdapters = {
 // characters, leaving generous headroom for action framing under 1 MiB.
 export const WALKTHROUGH_AUDIO_CHUNK_SECONDS = 10;
 
-export type VideoAudioOutcome = { status: "complete"; text: string; chunks: number } | { status: "silence"; chunks: number };
+export type VideoAudioOutcome = { status: "complete"; text: string; chunks: number; lowLevelChunks?: number } | { status: "silence"; chunks: number; lowLevelChunks?: number };
+
+/** Level is a review signal only; it never discards a quiet recording. */
+export function lowAudioLevel(samples: Float32Array): boolean {
+  if (!samples.length) return false;
+  let power = 0;
+  for (const sample of samples) { if (!Number.isFinite(sample)) return true; power += sample * sample; }
+  return Math.sqrt(power / samples.length) < Math.pow(10, -50 / 20);
+}
 
 /** Map only fixed server responses; never propagate provider or account text. */
 export function transcriptionFailureCode(error: string): string {
@@ -82,11 +90,14 @@ export async function readVideoAudio(blob: Blob, duration: number, provider: Llm
     failurePhase = "audio-chunk-failed";
     const plans = planTranscriptChunks(decodedDuration, WALKTHROUGH_AUDIO_CHUNK_SECONDS);
     const parts: string[] = [];
+    let lowLevelChunks = 0;
     for (const [index, plan] of plans.entries()) {
       if (signal.aborted) throw new VideoReadError("cancelled");
       progress("transcribing-narration", index, plans.length);
       failurePhase = "audio-chunk-failed";
-      const wav = base64FromArrayBuffer(encodeWav(sliceMonoSamples(mono, LIVE_SAMPLE_RATE, plan), LIVE_SAMPLE_RATE));
+      const samples = sliceMonoSamples(mono, LIVE_SAMPLE_RATE, plan);
+      const lowLevel = lowAudioLevel(samples);
+      const wav = base64FromArrayBuffer(encodeWav(samples, LIVE_SAMPLE_RATE));
       if (!checkWireBudget(wav.length, "Narration chunk").ok) throw new VideoReadError("audio-wire-limit");
       failurePhase = "transcription-call-failed";
       const chunkRequest = new AbortController();
@@ -101,10 +112,11 @@ export async function readVideoAudio(blob: Blob, duration: number, provider: Llm
       }
       if ("error" in result) throw new VideoReadError(transcriptionFailureCode(result.error));
       parts.push(result.text);
+      if (lowLevel) lowLevelChunks++;
       if (parts.reduce((sum, text) => sum + text.length, 0) > VIDEO_NARRATION_CHARS) throw new VideoReadError("narration-limit");
     }
     const text = joinTranscriptChunks(parts);
-    return text ? { status: "complete", text, chunks: plans.length } : { status: "silence", chunks: plans.length };
+    return text ? { status: "complete", text, chunks: plans.length, ...(lowLevelChunks && { lowLevelChunks }) } : { status: "silence", chunks: plans.length, ...(lowLevelChunks && { lowLevelChunks }) };
   } catch (error) {
     if (error instanceof VideoReadError) throw error;
     throw new VideoReadError(failurePhase);

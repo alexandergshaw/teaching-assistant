@@ -44,7 +44,7 @@ import { announcementTemplateLabel, announcementTemplateLabels } from "./announc
 import { useAnnouncementLibrary } from "./useAnnouncementLibrary";
 import AnnouncementLibrary from "./AnnouncementLibrary";
 import { listAnnouncementLibraryAction, saveAnnouncementLibraryEntryAction, deleteAnnouncementLibraryEntryAction } from "@/app/actions/announcement-library";
-import { Button, TextField } from "@mui/material";
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Button, TextField } from "@mui/material";
 import ConfirmArmButtons from "../ui/ConfirmArmButtons";
 import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
@@ -565,6 +565,11 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
             {" "}{upload.result.gaps} sampling gaps, {upload.result.illegible} unreadable blocks, {upload.result.failedBatches} failed batches, {upload.result.emptyBatches} confirmed empty batches.
             {" "}{upload.result.blocks.reduce((sum, batch) => sum + batch.length, 0)} content blocks extracted. Narration: {upload.result.audio}.
             This is sampled visual coverage, not a complete account of the video.</p>
+          {!!upload.result.narrationLowLevelChunks && <Alert severity="warning">Some audio was very quiet. It was sent for transcription, but speech may be missed or words may be inaccurate. Review any transcript below and correct the provider prompt before generating.</Alert>}
+          {upload.result.audio === "complete" && upload.result.narration && <Accordion disableGutters>
+            <AccordionSummary>Review extracted narration</AccordionSummary>
+            <AccordionDetails><TextField label="Extracted narration (read only)" value={upload.result.narration} multiline minRows={3} fullWidth slotProps={{ input: { readOnly: true } }} /></AccordionDetails>
+          </Accordion>}
           {upload.result.audio === "silence" && <p>No speech text was returned by the complete narration pass; this does not establish that the video has no audio track.</p>}
           {upload.result.status === "needs-visible-only" && <>
             <p>{audioFailureMessage(upload.result.code)} ({upload.result.code})</p>

@@ -51,6 +51,24 @@ describe("uploaded video production runner", () => {
       expect(value.status === "ready").toBe(accepted); expect(h.adapters.reader).toHaveBeenCalledTimes(accepted ? 1 : 0);
     }
   });
+  it("exposes a low-level narration warning while retaining the transcript", async () => {
+    const h = harness(2);
+    h.audio.mockResolvedValue({ status: "complete", text: "Quiet spoken text", chunks: 1, lowLevelChunks: 1 });
+    const result = await runVideoRead(h.input, h.adapters);
+    expect(result.status).toBe("ready");
+    expect(result.narrationLowLevelChunks).toBe(1);
+    expect(result.narration).toContain("Quiet spoken text");
+    expect(result.narration).toContain("very quiet");
+  });
+  it("reports quiet audio even when no transcript was returned", async () => {
+    const h = harness(2);
+    h.audio.mockResolvedValue({ status: "silence", chunks: 1, lowLevelChunks: 1 });
+    const result = await runVideoRead(h.input, h.adapters);
+    expect(result.status).toBe("ready");
+    expect(result.audio).toBe("silence");
+    expect(result.narrationLowLevelChunks).toBe(1);
+    expect(result.narration).toBe("");
+  });
   it("keeps visuals after audio failure and requires explicit visible-only selection", async () => {
     const h = harness(2); h.audio.mockRejectedValue(new Error("PRIVATE_UPSTREAM_ERROR"));
     const value = await runVideoRead(h.input, h.adapters);

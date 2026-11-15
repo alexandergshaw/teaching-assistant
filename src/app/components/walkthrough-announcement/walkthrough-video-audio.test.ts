@@ -4,7 +4,7 @@ vi.mock("../recording/takeAnnouncementTranscription", async original => {
   const actual = await original<typeof import("../recording/takeAnnouncementTranscription")>();
   return { ...actual };
 });
-import { readVideoAudio, transcriptionFailureCode, type AudioAdapters } from "./walkthrough-video-audio";
+import { readVideoAudio, lowAudioLevel, transcriptionFailureCode, type AudioAdapters } from "./walkthrough-video-audio";
 import { LIVE_SAMPLE_RATE } from "@/lib/live-class/wav";
 import { UPLOAD_WIRE_BUDGET_BYTES } from "@/lib/upload-budget";
 import { VIDEO_LOCAL_WAIT_MS, VIDEO_PROVIDER_WAIT_MS } from "./walkthrough-video-limits";
@@ -13,12 +13,38 @@ function harness(seconds = 125) {
   const close = vi.fn(async () => undefined);
   const context = { close } as unknown as AudioContext;
   const adapters: AudioAdapters = { prepare: vi.fn(async () => new Blob(["audio"])), context: vi.fn(() => context),
-    decode: vi.fn(async () => new Float32Array(seconds * LIVE_SAMPLE_RATE)), transcribe: vi.fn(async () => ({ text: "spoken fact" })) };
+    decode: vi.fn(async () => new Float32Array(seconds * LIVE_SAMPLE_RATE).fill(0.1)), transcribe: vi.fn(async () => ({ text: "spoken fact" })) };
   const controller = new AbortController(); const progress = vi.fn();
   return { adapters, close, controller, progress, run: () => readVideoAudio(new Blob(["video"]), 125, "gemini", controller.signal, progress, adapters) };
 }
 afterEach(() => vi.useRealTimers());
 describe("uploaded narration production adapter", () => {
+  it("flags low-level transcribed segments without skipping or altering them", async () => {
+    expect(lowAudioLevel(new Float32Array([0, 0]))).toBe(true);
+    expect(lowAudioLevel(new Float32Array([0.1, -0.1]))).toBe(false);
+    const h = harness();
+    vi.mocked(h.adapters.decode).mockResolvedValue(new Float32Array(125 * LIVE_SAMPLE_RATE));
+    const result = await h.run();
+    expect(result).toEqual({ status: "complete", text: Array(13).fill("spoken fact").join(" "), chunks: 13, lowLevelChunks: 13 });
+    expect(h.adapters.transcribe).toHaveBeenCalledTimes(13);
+  });
+  it("flags a quiet chunk while retaining text from both chunks", async () => {
+    const h = harness();
+    const samples = new Float32Array(20 * LIVE_SAMPLE_RATE);
+    samples.fill(0.1, 10 * LIVE_SAMPLE_RATE);
+    vi.mocked(h.adapters.decode).mockResolvedValue(samples);
+    vi.mocked(h.adapters.transcribe).mockResolvedValueOnce({ text: "quiet voice" }).mockResolvedValueOnce({ text: "normal voice" });
+    const result = await readVideoAudio(new Blob(["video"]), 20, "gemini", h.controller.signal, h.progress, h.adapters);
+    expect(result).toEqual({ status: "complete", text: "quiet voice normal voice", chunks: 2, lowLevelChunks: 1 });
+    expect(h.adapters.transcribe).toHaveBeenCalledTimes(2);
+  });
+  it("flags quiet audio even when transcription returns no speech", async () => {
+    const h = harness();
+    vi.mocked(h.adapters.decode).mockResolvedValue(new Float32Array(125 * LIVE_SAMPLE_RATE));
+    vi.mocked(h.adapters.transcribe).mockResolvedValue({ text: "" });
+    expect(await h.run()).toEqual({ status: "silence", chunks: 13, lowLevelChunks: 13 });
+    expect(h.adapters.transcribe).toHaveBeenCalledTimes(13);
+  });
   it("maps only fixed transcription errors to safe categories", () => {
     expect(transcriptionFailureCode("Transcription failed: HTTP 403")).toBe("transcription-access-denied");
     expect(transcriptionFailureCode("Transcription failed: HTTP 429")).toBe("transcription-rate-limited");

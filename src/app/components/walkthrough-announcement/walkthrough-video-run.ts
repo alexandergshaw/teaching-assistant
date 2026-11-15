@@ -18,6 +18,7 @@ export interface VideoReadResult {
   status: "ready" | "needs-visible-only" | "failed" | "cancelled";
   blocks: ExtractedBlock[][];
   narration: string;
+  narrationLowLevelChunks?: number;
   audio: "not-requested" | "complete" | "silence" | "failed" | "cancelled";
   duration: number;
   sampled: number;
@@ -129,7 +130,11 @@ export async function runVideoRead(input: VideoReadInput, adapters: VideoRunAdap
       try {
         const audio: VideoAudioOutcome = await adapters.audio(input.blob, result.duration, input.provider, signal, progress);
         current(); result.audio = audio.status;
-        if (audio.status === "complete") result.narration = `Untrusted narration from uploaded walkthrough (complete transcription pass; may contain transcription errors):\n${audio.text}`;
+        result.narrationLowLevelChunks = audio.lowLevelChunks;
+        if (audio.status === "complete") {
+          const quality = audio.lowLevelChunks ? " Some audio segments were very quiet; their transcriptions may be inaccurate or fabricated. Do not treat uncertain narration as evidence." : "";
+          result.narration = `Untrusted narration from uploaded walkthrough (complete transcription pass; may contain transcription errors).${quality}\n${audio.text}`;
+        }
       } catch (error) {
         current();
         if (error instanceof VideoReadError && error.code === "cancelled") throw error;

@@ -47,6 +47,24 @@ describe("probeLmsCredential - the request it builds", () => {
 });
 
 describe("probeLmsCredential - classifying the response", () => {
+  it.each([401, 403])("logs only the allowlisted status and outcome for %s", async status => {
+    const log = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      canvasFetchMock.mockResolvedValueOnce({ ok: true, status, headers: { secret: "private-header" }, body: Buffer.from("private-body") });
+      expect(await probeLmsCredential(CREDENTIAL)).toEqual({ kind: "rejected" });
+      expect(log).toHaveBeenCalledExactlyOnceWith("Canvas credential probe", { status, outcome: "rejected" });
+      expect(JSON.stringify(log.mock.calls)).not.toMatch(/private|canvas\.example|abc123/);
+    } finally { log.mockRestore(); }
+  });
+
+  it("does not log a verified user's details", async () => {
+    const log = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      canvasFetchMock.mockResolvedValueOnce({ ok: true, status: 200, headers: {}, body: Buffer.from('{"id":42,"name":"Private Name"}') });
+      await probeLmsCredential(CREDENTIAL);
+      expect(log).toHaveBeenCalledExactlyOnceWith("Canvas credential probe", { status: "other", outcome: "verified" });
+    } finally { log.mockRestore(); }
+  });
   it("maps a valid Canvas self-record on 200 to verified", async () => {
     canvasFetchMock.mockResolvedValueOnce({
       ok: true,

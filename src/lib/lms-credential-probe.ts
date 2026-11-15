@@ -102,5 +102,8 @@ export async function probeLmsCredential(
     { timeoutMs: LMS_CREDENTIAL_PROBE_TIMEOUT_MS },
     { token: credential.token }
   );
-  return classifyCanvasProbeOutcome(toProbeExchange(result));
+  const outcome = classifyCanvasProbeOutcome(toProbeExchange(result));
+  const status = result.ok && (result.status === 401 || result.status === 403) ? result.status : "other";
+  console.info("Canvas credential probe", { status, outcome: outcome.kind });
+  return outcome;
 }

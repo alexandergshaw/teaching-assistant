@@ -3,6 +3,7 @@ import { MAX_STATIC_PROJECT_CONTENT_CHARS } from "@/lib/grade/static-project-lim
 import { pastedSubmissionUrl } from "@/lib/grade/pasted-submission-url";
 import { isLengthDeductionThresholdWords } from "@/lib/grade/length-deduction-policy";
 import { isSubmissionFileInventories } from "@/lib/grade/submission-file-inventory";
+import { hasUnreviewedNotebook } from "@/lib/grade/unavailable-evidence";
 import { NextRequest, NextResponse } from "next/server";
 
 import { requireAppOwner } from "@/lib/supabase/auth";
@@ -425,7 +426,14 @@ export async function POST(req: NextRequest) {
           if (url.username || url.password) return { unavailablePastedLink: true };
         }
         const resolved = await resolveEntryLinks(needsLink ? { ...entry, gradedRepo: null, gradedRef: null, repoReadNote: null, linkFetch: undefined } : entry);
-        if (needsLink && (resolved.linkFetch === "failed" || resolved.linkFetch === "flagged" || (resolved.content === entry.content && resolved.submittedFiles.length === entry.submittedFiles.length))) return { unavailablePastedLink: true };
+        // A GitHub repository can resolve successfully while its notebook or
+        // tree remains incomplete. Let the grading engine produce its
+        // copyable, unscored evidence-hold row for that precise case. Other
+        // flagged links still fail closed before grading.
+        const resolvedNotebookHold = resolved.linkFetch === "flagged" && !!resolved.gradedRepo
+          && !!resolved.repositoryInventories?.length && isSubmissionFileInventories(resolved.repositoryInventories)
+          && hasUnreviewedNotebook(resolved.repositoryInventories);
+        if (needsLink && (resolved.linkFetch === "failed" || (resolved.linkFetch === "flagged" && !resolvedNotebookHold) || (resolved.content === entry.content && resolved.submittedFiles.length === entry.submittedFiles.length))) return { unavailablePastedLink: true };
         const unreadableAttachment = resolved.submittedFiles.find((file) => file.mimeType === UNREADABLE_CANVAS_ATTACHMENT_MIME);
         if (unreadableAttachment) return { unreadableAttachment: { name: unreadableAttachment.name } };
         const omittedAttachment = resolved.submittedFiles.find((file) => file.mimeType === OMITTED_CANVAS_ATTACHMENT_MIME);

@@ -606,6 +606,32 @@ describe("POST /api/grade-run-item (behavioral, mocked seam)", () => {
       expect(mockResolveEntryLinks.mock.calls[0][0].linkFetch).toBeUndefined();
       expect(mockGradeEntries).not.toHaveBeenCalled();
     });
+    it("preserves a copyable unscored hold when a fetched repository notebook has unreviewed visuals", async () => {
+      const url = "https://github.com/student/project";
+      const file = { name: "link.html", extension: "html", previewContent: "", previewTruncated: false };
+      const inventory = [{ source: "student/project @ abc", scope: { kind: "repository" as const, path: null }, enumerationComplete: true, files: [{ path: "optimization_engine.ipynb", content: "truncated" as const }] }];
+      mockResolveEntryLinks.mockImplementationOnce(async (entry) => ({ ...entry, content: "inspected notebook source", linkFetch: "flagged", gradedRepo: "student/project", repoReadNote: "The linked GitHub repository could not be read completely.", repositoryInventories: inventory }));
+      mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice", totalScore: "", strengths: "Thank you for submitting your work.", rubricAreas: [], ungraded: { kind: "grading-failed", message: "Notebook output needs review." } }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
+      settle();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, content: `File: link.html\n\nSubmitted link: ${url}`, submittedFiles: [file], submissionUrl: url } }) as any);
+      expect(res.status).toBe(200);
+      expect(mockGradeEntries.mock.calls[0][0][0].repositoryInventories).toEqual(inventory);
+      expect((await res.json()).result).toMatchObject({ totalScore: "", strengths: "Thank you for submitting your work.", linkFetch: "flagged", ungraded: { kind: "grading-failed" } });
+    });
+    it("routes a fetched incomplete notebook through the real engine without assigning a score", async () => {
+      const url = "https://github.com/student/project";
+      const file = { name: "link.html", extension: "html", previewContent: "", previewTruncated: false };
+      const inventory = [{ source: "student/project @ abc", scope: { kind: "repository" as const, path: null }, enumerationComplete: true, files: [{ path: "optimization_engine.ipynb", content: "truncated" as const }] }];
+      const actual = await vi.importActual<typeof import("@/lib/grade/engine")>("@/lib/grade/engine");
+      mockGradeEntries.mockImplementationOnce(actual.gradeEntries);
+      mockResolveEntryLinks.mockImplementationOnce(async (entry) => ({ ...entry, content: "inspected notebook source", linkFetch: "flagged", gradedRepo: "student/project", repoReadNote: "The linked GitHub repository could not be read completely.", repositoryInventories: inventory }));
+      settle();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, content: `File: link.html\n\nSubmitted link: ${url}`, submittedFiles: [file], submissionUrl: url } }) as any);
+      expect(res.status).toBe(200);
+      expect((await res.json()).result).toMatchObject({ totalScore: "", strengths: "Thank you for submitting your work.", rubricAreas: [], ungraded: { kind: "grading-failed" } });
+    });
     it("grades the fetched Canvas ZIP document only after its contents resolve", async () => {
       const url = "https://docs.google.com/document/d/example123/edit";
       const file = { name: "link.html", extension: "html", previewContent: "", previewTruncated: false };

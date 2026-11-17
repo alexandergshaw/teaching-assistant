@@ -3,6 +3,28 @@ import JSZip from "jszip";
 import { inspectLargeZipDirectory } from "./recoverable-zip-directory";
 import { buildReviewedBrightspaceProject, inspectBrightspaceProject } from "./brightspace-project-inventory";
 
+it("records Visual Studio databases and an executable as excluded evidence", async () => {
+  const project = new JSZip(); project.file("project.vcxproj", "config"); project.file(".vs/project/v17/Browse.VC.db", "database"); project.file(".vs/project/v17/Solution.VC.db", "database"); project.file("x64/Debug/project.exe", "binary");
+  const outer = new JSZip(); outer.file("100-200 - project.zip", await project.generateAsync({ type: "uint8array" }));
+  const source = new Blob([new Uint8Array(await outer.generateAsync({ type: "uint8array" })).buffer]);
+  const directory = await inspectLargeZipDirectory(source); expect(directory.ok).toBe(true); if (!directory.ok) return;
+  const inventory = await inspectBrightspaceProject(source, directory.members[0]); expect(inventory.ok).toBe(true); if (!inventory.ok) return;
+  expect(inventory.files.find((file) => file.path.endsWith("Browse.VC.db"))?.disposition).toBe("candidate-build-artifact");
+  expect(inventory.files.find((file) => file.path.endsWith("Solution.VC.db"))?.disposition).toBe("candidate-build-artifact");
+  expect(inventory.files.find((file) => file.path.endsWith("project.exe"))?.disposition).toBe("unexamined-binary");
+  const excluded = inventory.files.filter((file) => file.disposition !== "retain").map((file) => file.path);
+  const built = await buildReviewedBrightspaceProject(source, directory.members[0], excluded); expect(built.ok).toBe(true);
+  if (built.ok) expect(built.excludedPaths).toEqual(excluded);
+});
+
+it("does not treat arbitrary databases as disposable Visual Studio artifacts", async () => {
+  const project = new JSZip(); project.file("project.vcxproj", "config"); project.file("data/Browse.VC.db", "possibly student work");
+  const outer = new JSZip(); outer.file("100-200 - project.zip", await project.generateAsync({ type: "uint8array" }));
+  const source = new Blob([new Uint8Array(await outer.generateAsync({ type: "uint8array" })).buffer]);
+  const directory = await inspectLargeZipDirectory(source); expect(directory.ok).toBe(true); if (!directory.ok) return;
+  const inventory = await inspectBrightspaceProject(source, directory.members[0]); expect(inventory.ok).toBe(true); if (inventory.ok) expect(inventory.files.find((file) => file.path.endsWith("Browse.VC.db"))?.disposition).toBe("needs-review");
+});
+
 it("preserves readable project evidence and records artifacts when no source is present", async () => {
   const nested = new JSZip(); nested.file("build.log", "build failed"); nested.file("Debug/main.obj", "object");
   const outer = new JSZip(); outer.file("100-200 - project.zip", await nested.generateAsync({ type: "uint8array" }));

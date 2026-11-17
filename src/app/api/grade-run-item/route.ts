@@ -494,10 +494,12 @@ export async function POST(req: NextRequest) {
     }
     if (!outcome.value.graded) return NextResponse.json({ error: "an unexpected error" }, { status: 502 });
     const result = outcome.value.graded.results[0];
-    if (entry.missingSource) {
+    const unexaminedExecutable = entry.evidenceOmissions?.some((path) => /\.exe$/i.test(path)) ?? false;
+    if (entry.missingSource || unexaminedExecutable) {
       const unidentified = Object.fromEntries(Object.entries(result).filter(([key]) => key !== "userId"));
-      const message = "Not graded: no supported source-code file was identified. Review the available evidence before assigning a grade.";
-      return NextResponse.json({ sourceIndex, result: { ...unidentified, overallComment: message, strengths: message, improvements: "", resubmitNotice: "", feedback: `Provisional source review (not a grade):\n${result.feedback}`, totalScore: "", rubricAreas: [], missingSource: true, linkFetch: outcome.value.linkFetch, ...(entry.evidenceOmissions?.length ? { evidenceOmissions: entry.evidenceOmissions } : {}), ...(entry.staticOnly ? { staticOnly: true } : {}), ungraded: { kind: "grading-failed", sourceIndex, student: entry.student, message } }, ...diagnosticFor() });
+      const reasons = [entry.missingSource ? "no supported source-code file was identified" : "", unexaminedExecutable ? "a submitted executable was excluded and not examined" : ""].filter(Boolean);
+      const message = `Not graded: ${reasons.join("; ")}. Review the available evidence before assigning a grade.`;
+      return NextResponse.json({ sourceIndex, result: { ...unidentified, overallComment: message, strengths: message, improvements: "", resubmitNotice: "", feedback: message, totalScore: "", rubricAreas: [], ...(entry.missingSource ? { missingSource: true } : {}), linkFetch: outcome.value.linkFetch, ...(entry.evidenceOmissions?.length ? { evidenceOmissions: entry.evidenceOmissions } : {}), ...(entry.staticOnly ? { staticOnly: true } : {}), ungraded: { kind: "grading-failed", sourceIndex, student: entry.student, message } }, ...diagnosticFor() });
     }
     return NextResponse.json({ sourceIndex, result: { ...result, linkFetch: outcome.value.linkFetch, ...(entry.evidenceOmissions?.length ? { evidenceOmissions: entry.evidenceOmissions } : {}), ...(entry.staticOnly ? { staticOnly: true } : {}) }, ...diagnosticFor() });
   } catch (err) {

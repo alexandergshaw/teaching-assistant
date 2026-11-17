@@ -10,9 +10,10 @@ const artifactExtensions = new Set(["obj", "pdb", "ilk", "idb", "ipch", "tlog", 
 const sourceExtensions = new Set(["c", "cc", "cpp", "cxx", "h", "hpp", "txt", "md", "markdown", "csv", "tsv", "json", "xml", "vcxproj", "sln", "slnx", "filters", "props", "targets", "docx", "doc", "pdf", "ppt", "pptx", "xls", "xlsx", "odt", "odp", "ods", "rtf", "ipynb", "py", "js", "jsx", "ts", "tsx", "java", "cs", "css", "html", "htm", "yml", "yaml", "sql", "png", "jpg", "jpeg", "webp", "heic", "heif"]);
 export function isBrightspaceProjectSource(path: string): boolean { const ext = path.split(".").pop()?.toLowerCase() ?? ""; return sourceExtensions.has(ext) || GUARDED_TEXT_EXTENSIONS.has(ext); }
 
-export type ProjectFileDisposition = "retain" | "candidate-build-artifact" | "course-fixture" | "needs-review";
+export type ProjectFileDisposition = "retain" | "candidate-build-artifact" | "course-fixture" | "unexamined-binary" | "needs-review";
 export interface ProjectInventoryFile { readonly path: string; readonly declaredBytes: number; readonly disposition: ProjectFileDisposition }
 export type ProjectInventory = { readonly ok: true; readonly files: readonly ProjectInventoryFile[] } | { readonly ok: false; readonly reason: string };
+export function isExcludedProjectFile(file: ProjectInventoryFile): boolean { return file.disposition === "candidate-build-artifact" || file.disposition === "course-fixture" || file.disposition === "unexamined-binary"; }
 
 async function readProject(source: Blob, outer: LargeZipMember): Promise<{ ok: true; blob: Blob } | { ok: false; reason: string }> {
   if (!outer.nestedArchive || outer.declaredBytes > MAX_PROJECT_ARCHIVE_BYTES) return { ok: false, reason: "nested archive exceeds the project inspection limit" };
@@ -39,6 +40,8 @@ async function inspectProjectBlob(blob: Blob): Promise<ProjectInventory> {
   for (const member of nested.members) {
     const extension = member.path.split(".").pop()?.toLowerCase() ?? "";
     let disposition: ProjectFileDisposition = member.nestedArchive ? "needs-review" : sourceExtensions.has(extension) ? "retain" : artifactExtensions.has(extension) ? "candidate-build-artifact" : "needs-review";
+    if (/(?:^|\/)\.vs\/[^/]+\/v\d+\/(?:Browse|Solution)\.VC\.db$/i.test(member.path)) disposition = "candidate-build-artifact";
+    if (extension === "exe") disposition = "unexamined-binary";
     // These extensions are admitted as text only after a full CRC check and
     // strict UTF-8 validation; retain the student's original filename.
     if (GUARDED_TEXT_EXTENSIONS.has(extension) && await validateGuardedZipText(blob, member)) disposition = "retain";
@@ -61,7 +64,7 @@ export async function buildReviewedBrightspaceProject(source: Blob, outer: Large
   const project = await readProject(source, outer); if (!project.ok) return project;
   const inventory = await inspectProjectBlob(project.blob); if (!inventory.ok) return inventory;
   if (inventory.files.some((file) => file.disposition === "needs-review")) return { ok: false, reason: "project contains unclassified files that cannot be safely excluded" };
-  const excluded = new Set(excludedPaths), expected = inventory.files.filter((file) => file.disposition === "candidate-build-artifact" || file.disposition === "course-fixture");
+  const excluded = new Set(excludedPaths), expected = inventory.files.filter(isExcludedProjectFile);
   if (excluded.size !== excludedPaths.length || excluded.size !== expected.length || expected.some((file) => !excluded.has(file.path))) return { ok: false, reason: "project exclusions must be explicitly reviewed" };
   const retained = inventory.files.filter((file) => file.disposition === "retain");
   if (!retained.length) return { ok: false, reason: "no usable project files were found" };

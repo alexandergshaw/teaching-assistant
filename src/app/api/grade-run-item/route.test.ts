@@ -222,13 +222,28 @@ beforeEach(() => {
 });
 
 describe("POST /api/grade-run-item (behavioral, mocked seam)", () => {
+  it("reports missing source and unexamined executable together", async () => {
+    mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice", totalScore: "100/100", feedback: "Provisional" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
+    mockRaceWithTimeout.mockImplementationOnce(async (work) => ({ kind: "settled", value: await work } as never));
+    const response = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, missingSource: true, evidenceOmissions: ["project/program.exe"] } }) as never);
+    const result = (await response.json()).result;
+    expect(result.totalScore).toBe(""); expect(result.overallComment).toMatch(/no supported source-code file/i); expect(result.overallComment).toMatch(/executable was excluded/i);
+  });
+  it("withholds a numeric result when an executable was excluded even if source exists", async () => {
+    mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice", userId: 9, totalScore: "100/100", rubricAreas: [{ score: "25/25" }], feedback: "Total Score: 100/100\nImplementation: 25/25" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
+    mockRaceWithTimeout.mockImplementationOnce(async (work) => ({ kind: "settled", value: await work } as never));
+    const response = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, content: "int main() {}", evidenceOmissions: ["project/bin/program.exe"] } }) as never);
+    expect(response.status).toBe(200); const result = (await response.json()).result;
+    expect(result).toMatchObject({ totalScore: "", rubricAreas: [], ungraded: { kind: "grading-failed" } });
+    expect(result.userId).toBeUndefined(); expect(result.overallComment).toMatch(/executable was excluded/i); expect(JSON.stringify(result)).not.toMatch(/100\/100|25\/25|Total Score/);
+  });
   it("withholds a numeric result when project source is missing", async () => {
     mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice", userId: 9, totalScore: "100/100", rubricAreas: [{ score: "25/25" }], feedback: "Provisional feedback" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
     mockRaceWithTimeout.mockImplementationOnce(async (work) => ({ kind: "settled", value: await work } as never));
     const response = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, missingSource: true } }) as never);
     expect(response.status).toBe(200); const result = (await response.json()).result;
     expect(result).toMatchObject({ totalScore: "", rubricAreas: [], missingSource: true, ungraded: { kind: "grading-failed" } });
-    expect(result.userId).toBeUndefined(); expect(result.feedback).toContain("Provisional source review");
+    expect(result.userId).toBeUndefined(); expect(result.feedback).not.toMatch(/100\/100|25\/25|Total Score/); expect(result.feedback).toMatch(/Not graded/);
     expect(mockGradeEntries.mock.calls[0][1]).toContain("source-dependent criteria");
   });
   it("refuses index evidence before any model call when the owner session differs", async () => {

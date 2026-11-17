@@ -144,9 +144,10 @@ function coerceGradeResult(value: unknown): GradeResult | null {
     // idiom as the fields above: wrong type or absent both default to
     // undefined.
     staticOnly: o.staticOnly === true ? true as const : undefined,
+    missingSource: o.missingSource === true ? true as const : undefined,
     evidenceOmissions: Array.isArray(o.evidenceOmissions) && o.evidenceOmissions.length > 0 && o.evidenceOmissions.length <= 1000 && o.evidenceOmissions.every((path: unknown) => typeof path === "string" && !!path && path.length <= 4096) ? o.evidenceOmissions as string[] : undefined,
     submissionTruncated: typeof o.submissionTruncated === "boolean" ? o.submissionTruncated : undefined,
-    evidenceProvenanceUnknown: o.evidenceProvenanceUnknown !== false || (o.staticOnly !== undefined && o.staticOnly !== true) || (o.evidenceOmissions !== undefined && !(Array.isArray(o.evidenceOmissions) && o.evidenceOmissions.length > 0 && o.evidenceOmissions.length <= 1000 && o.evidenceOmissions.every((path: unknown) => typeof path === "string" && !!path && path.length <= 4096))) || (o.submissionTruncated !== undefined && typeof o.submissionTruncated !== "boolean"),
+    evidenceProvenanceUnknown: o.evidenceProvenanceUnknown !== false || (o.staticOnly !== undefined && o.staticOnly !== true) || (o.missingSource !== undefined && o.missingSource !== true) || (o.evidenceOmissions !== undefined && !(Array.isArray(o.evidenceOmissions) && o.evidenceOmissions.length > 0 && o.evidenceOmissions.length <= 1000 && o.evidenceOmissions.every((path: unknown) => typeof path === "string" && !!path && path.length <= 4096))) || (o.submissionTruncated !== undefined && typeof o.submissionTruncated !== "boolean"),
     linkFetch: o.linkFetch === "ok" || o.linkFetch === "failed" || o.linkFetch === "flagged" ? o.linkFetch : o.linkFetch === undefined ? undefined : "flagged" as "ok" | "failed" | "flagged" | undefined,
   };
 

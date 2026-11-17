@@ -80,6 +80,7 @@ export function stripGradeResultForDraft(result: GradeResult): GradeResult {
     // restored run does.
     evidenceOmissions: result.evidenceOmissions,
     staticOnly: result.staticOnly,
+    missingSource: result.missingSource,
     submissionTruncated: result.submissionTruncated,
     linkFetch: result.linkFetch,
     evidenceProvenanceUnknown: result.evidenceProvenanceUnknown ?? false,

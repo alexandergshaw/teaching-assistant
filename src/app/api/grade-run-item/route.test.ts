@@ -222,6 +222,15 @@ beforeEach(() => {
 });
 
 describe("POST /api/grade-run-item (behavioral, mocked seam)", () => {
+  it("withholds a numeric result when project source is missing", async () => {
+    mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice", userId: 9, totalScore: "100/100", rubricAreas: [{ score: "25/25" }], feedback: "Provisional feedback" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
+    mockRaceWithTimeout.mockImplementationOnce(async (work) => ({ kind: "settled", value: await work } as never));
+    const response = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, missingSource: true } }) as never);
+    expect(response.status).toBe(200); const result = (await response.json()).result;
+    expect(result).toMatchObject({ totalScore: "", rubricAreas: [], missingSource: true, ungraded: { kind: "grading-failed" } });
+    expect(result.userId).toBeUndefined(); expect(result.feedback).toContain("Provisional source review");
+    expect(mockGradeEntries.mock.calls[0][1]).toContain("source-dependent criteria");
+  });
   it("refuses index evidence before any model call when the owner session differs", async () => {
     const body = { ...VALID_BODY, entry: { ...VALID_BODY.entry, submittedFiles: [{ name: "10-20 - brightspace-index-evidence.txt", extension: "txt", previewContent: "note", previewTruncated: false }] } };
     expect((await POST(jsonRequest(body) as never)).status).toBe(401); expect(mockGradeEntries).not.toHaveBeenCalled();

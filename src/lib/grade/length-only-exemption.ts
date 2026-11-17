@@ -3,18 +3,20 @@ import { isReplySectionMarker } from "./rubric-reply-marker";
 
 /** Detect rubric length rules that need a proven exemption before grading. */
 export function hasRubricLengthRule(rubric: string): boolean {
-  return /\b(?:length|word\s*count|character\s*count|page\s*count|(?:word|page|character)\s+(?:limit|minimum|requirement)|\d+(?:\s*[-–]\s*\d+)?\s*[-–]?\s*(?:words?|characters?|pages?)|(?:fewer|less|under|below|at\s+least|minimum(?:\s+of)?)\s+(?:than\s+)?\d+\s*(?:words?|characters?|pages?))\b/i.test(rubric);
+  return /\b(?:length|word\s*count|character\s*count|page\s*count|(?:word|page|character|paragraph)\s+(?:limit|minimum|requirement)|\d+(?:\s*(?:[-–—]|to)\s*\d+)?\s*[-–]?\s*(?:words?|characters?|pages?|paragraphs?)|(?:fewer|less|under|below|at\s+least|minimum(?:\s+of)?)\s+(?:than\s+)?\d+\s*(?:words?|characters?|pages?|paragraphs?))\b/i.test(rubric);
 }
 
 /** Remove only an unambiguous numeric modifier from a create/submit instruction. */
 export function withoutSupportedInstructionLength(instructions: string): string | null {
   const cleaned = instructions
-    .replace(/\b(create|submit|write)\s+(?:a|an)\s+\d+(?:\s*[-–]\s*\d+)?\s*[-–]?\s*word\s+((?:initial\s+)?discussion\s+post|reply|response)\b/gi, (_match, verb: string, subject: string) => `${verb} ${/^initial\b/i.test(subject) ? "an" : "a"} ${subject}`)
-    .replace(/\(\s*\d+\s*[-–]\s*\d+\s+words?\s*\)/gi, "")
+    .replace(/\b(create|submit|write)\s+(?:a|an)\s+\d+(?:\s*(?:[-–—]|to)\s*\d+)?\s*[-–]?\s*word\s+((?:initial\s+)?discussion\s+post|reply|response)\b/gi, (_match, verb: string, subject: string) => `${verb} ${/^initial\b/i.test(subject) ? "an" : "a"} ${subject}`)
+    .replace(/\(\s*\d+\s*(?:[-–—]|to)\s*\d+\s+words?\s*\)/gi, "")
     .replace(/(\(your purpose statement, your completed three-threat risk assessment table, and a brief analysis) of about 250 words(?=\) as a \.docx or PDF file\.)/gi, "$1")
     .replace(/(^|[.!?]\s+)the\s+assignment\s+requests\s+at\s+least\s+\d+\s+words?\.(?=\s|$)/gi, "$1")
-    .replace(/\b(?:each|every)\s+(?:peer\s+)?(?:response|reply|post)\s+(?:should|must)\s+be\s+\d+(?:\s*[-–]\s*\d+)?\s+words?(?:[.!?](?=\s|$)|\s*$)/gi, "");
-  return hasRubricLengthRule(cleaned) ? null : cleaned;
+    .replace(/\b(?:each|every)\s+(?:peer\s+)?(?:response|reply|post)\s+(?:should|must)\s+be\s+\d+(?:\s*(?:[-–—]|to)\s*\d+)?\s+words?(?:[.!?](?=\s|$)|\s*$)/gi, "");
+  const paragraphsRemoved = cleaned.replace(/(^|\n)([ \t]*(?:[-*]\s*)?)(write|create|submit)\s+(an?\s+)?((?:initial\s+)?(?:discussion\s+)?(?:post|response|reply))\s+of\s+\d+(?:\s*(?:[-–—]|to)\s*\d+)?\s+paragraphs?\s*\.(?=\s*(?:\n|$))/gi, (_match, line: string, indent: string, verb: string, article: string | undefined, subject: string) => `${line}${indent}${verb} ${article ?? "a "}${subject}.`);
+  const withoutStandaloneSentence = paragraphsRemoved.replace(/(^|\n|(?<=[.!?])\s+)([ \t]*(?:[-*]\s*)?)(?:your\s+)?(written\s+portion|(?:initial\s+)?(?:discussion\s+)?(?:post|response|reply))\s+(should|must)\s+be\s+\d+(?:\s*(?:[-–—]|to)\s*\d+)?\s+paragraphs?\s+in\s+length\s*\.(?=\s*(?:\n|$))/gi, "$1$2Your $3 $4 be included.");
+  return hasRubricLengthRule(withoutStandaloneSentence) ? null : withoutStandaloneSentence;
 }
 
 /** Remove isolated length phrases from known rating tiers while retaining their substantive descriptions and points. */

@@ -64,7 +64,7 @@ export async function buildReviewedBrightspaceProject(source: Blob, outer: Large
   const excluded = new Set(excludedPaths), expected = inventory.files.filter((file) => file.disposition === "candidate-build-artifact" || file.disposition === "course-fixture");
   if (excluded.size !== excludedPaths.length || excluded.size !== expected.length || expected.some((file) => !excluded.has(file.path))) return { ok: false, reason: "project exclusions must be explicitly reviewed" };
   const retained = inventory.files.filter((file) => file.disposition === "retain");
-  if (!retained.some((file) => /\.(?:c|cc|cpp|cxx|h|hpp|py|js|ts)$/i.test(file.path))) return { ok: false, reason: "no supported source code was found in this project" };
+  if (!retained.length) return { ok: false, reason: "no usable project files were found" };
   if (retained.reduce((total, file) => total + file.declaredBytes, 0) > 40 * 1024 * 1024 || retained.some((file) => file.declaredBytes > 40 * 1024 * 1024)) return { ok: false, reason: "retained project files exceed the safe extraction limit" };
   const nested = await inspectLargeZipDirectory(project.blob); if (!nested.ok) return { ok: false, reason: "nested project could not be rechecked" };
   const zip = new JSZip();

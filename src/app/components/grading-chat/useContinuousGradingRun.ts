@@ -337,7 +337,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
           // Restore the FULL submittedFiles (the POST carried the stripped copy)
           // so the Files-UI download of non-visual files survives.
           const full = retainedBodiesRef.current.get(request.sourceIndex) ?? request;
-          const completed = { ...result, submittedFiles: full.entry.submittedFiles, ...(full.entry.evidenceOmissions?.length ? { evidenceOmissions: full.entry.evidenceOmissions } : {}), ...(full.entry.staticOnly ? { staticOnly: true as const } : {}) };
+          const completed = { ...result, submittedFiles: full.entry.submittedFiles, ...(full.entry.evidenceOmissions?.length ? { evidenceOmissions: full.entry.evidenceOmissions } : {}), ...(full.entry.staticOnly ? { staticOnly: true as const } : {}), ...(full.entry.missingSource ? { missingSource: true as const } : {}) };
           if (trigger === "regrade") {
             const revision = regradeStartRef.current.get(request.sourceIndex);
             const admitted = regradeBodiesRef.current.get(request.sourceIndex);

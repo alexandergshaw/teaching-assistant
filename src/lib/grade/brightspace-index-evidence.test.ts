@@ -1,6 +1,11 @@
 import { expect, it } from "vitest";
 import { isBrightspaceFormattingOnly, parseBrightspaceIndexEvidence, partitionBrightspaceRows } from "./brightspace-index-evidence";
 
+it("extracts submitted dates from identified rows without trusting comments", () => {
+  const source = "<table><tr><td>Smith, Ada</td></tr><tr><td>10-20 - Student-Nov 15, 2026 735 PM<p><b>Comments:</b><br>note</p></td><td><b>Submitted:</b><br>Nov 15, 2026 735 PM</td></tr></table>";
+  expect(parseBrightspaceIndexEvidence(source, { "10-20": "Smith, Ada" }).attemptRows?.["10-20"]).toMatchObject([{ stem: "10-20 - Student-Nov 15, 2026 735 PM", submitted: "Nov 15, 2026 735 PM" }]);
+});
+
 it("keeps comments in their LMS group and retains the original index", () => {
   const rows = [
     { cellTexts: ["Smith, Ada"], html: "<tr><td>Smith, Ada</td></tr>" },

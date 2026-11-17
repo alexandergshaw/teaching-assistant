@@ -518,7 +518,7 @@ async function gradeStudentEntries(
       continue;
     }
     if (options.suppressLengthDeduction && (scoringInstructions === null || scoringRubric === null || (axes && axes.replyCount === 0 && lengthExemption?.exempt.axis === "reply"))) {
-      results.push(buildUngradedRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}This rubric contains a length rule that cannot be separated safely. Revise the rubric or review grading manually; no grade was produced.` }));
+      results.push(buildUngradedRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}${scoringInstructions === null ? "The assignment instructions contain a length rule that cannot be separated safely." : scoringRubric === null ? "The rubric contains a length rule that cannot be separated safely." : "The reply length exemption cannot be applied safely without reply evidence."} Review grading manually; no grade was produced.` }));
       continue;
     }
     if (limitedEntries[i].staticOnly === true && (content.length > MAX_STATIC_PROJECT_CONTENT_CHARS || content.length > maxCharsPerSubmission)) {

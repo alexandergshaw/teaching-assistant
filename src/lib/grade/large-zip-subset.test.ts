@@ -5,6 +5,15 @@ import { ingestZipEntries } from "./extraction";
 import { GRADING_ZIP_MAX_BYTES } from "./grading-zip-transport";
 
 describe("recoverable large ZIP subset", () => {
+  it("builds only the explicitly identified latest files while retaining earlier paths", async () => {
+    const zip = new JSZip(); zip.file("100-200 - earlier.zip", "old"); zip.file("100-200 - latest.txt", "new");
+    const source = new Blob([new Uint8Array(await zip.generateAsync({ type: "uint8array" })).buffer]);
+    const built = await buildRecoverableZip(source, ["100-200"], true, undefined, false, { "100-200": ["100-200 - latest.txt"] });
+    expect(built.ok).toBe(true); if (!built.ok) return;
+    expect(built.selected[0].historicalPaths).toEqual(["100-200 - earlier.zip"]);
+    const output = await JSZip.loadAsync(await built.archive.arrayBuffer());
+    expect(output.file("100-200 - earlier.zip")).toBeNull(); expect(await output.file("100-200 - latest.txt")!.async("string")).toBe("new");
+  });
   it("uses the same metadata limit when planning and building", async () => {
     const zip = new JSZip(); zip.file("ada_1_2_a.txt", "a"); zip.file("lin_3_4_b.txt", "b");
     const source = new Blob([new Uint8Array(await zip.generateAsync({ type: "uint8array" })).buffer]);

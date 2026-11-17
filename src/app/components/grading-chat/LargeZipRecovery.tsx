@@ -16,6 +16,7 @@ import { isBrightspaceFormattingOnly, type BrightspaceIndexEvidence } from "@/li
 import { mergePreparedZips } from "@/lib/grade/merge-prepared-zips";
 import { inspectPreparedZipBudget, preparedZipBudgetFits, type PreparedZipBudget } from "@/lib/grade/prepared-zip-budget";
 import { GRADING_ZIP_MAX_BYTES } from "@/lib/grade/grading-zip-transport";
+import { indexedBrightspaceGroup } from "./indexedBrightspaceGroup";
 
 export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incomingFile, autoSubmit = false, onClose, onManualOpen }: { incomingFile?: File | null; autoSubmit?: boolean; onClose?: () => void; onManualOpen?: () => void; onSelectionStart?: () => void; onAdmitted?: (indices: readonly number[]) => void; onSubmit: (source: File, file: File, selected: readonly RecoverableGroup[], omitted: readonly RecoverableGroup[], mapping: Readonly<Record<string, string>>, review?: PartialHashReview, project?: { readonly mappedPaths: readonly string[]; readonly excludedPaths: readonly string[] }) => Promise<string | null> }) {
   const [open, setOpen] = useState(!!incomingFile), [file, setFile] = useState<File | null>(incomingFile ?? null);
@@ -45,9 +46,9 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
       const inferred = await inferArchiveNames(next, result.groups); if (token !== generation.current) return;
       const numericGroups = result.groups.filter((group) => /^\d+-\d+$/.test(group.label));
       const indexComplete = !!indexData && numericGroups.length > 0 && indexData.evidence.unassigned.every(isBrightspaceFormattingOnly) && numericGroups.every((group) => !!indexData!.evidence.groups[group.label]?.length);
-      const visibleGroups = indexComplete ? result.groups.filter((group) => group.reason !== "unassigned index") : result.groups;
+      const visibleGroups = (indexComplete ? result.groups.filter((group) => group.reason !== "unassigned index") : result.groups).map((group) => indexedBrightspaceGroup(group, indexComplete, indexComplete ? indexData?.evidence.attemptRows?.[group.label] : undefined));
       const projects: Record<string, readonly ProjectInventoryFile[]> = Object.create(null);
-      for (const group of result.groups) if (group.reason === "nested archive" && /^\d+-\d+$/.test(group.label) && inferred[group.label]) for (const member of group.members.filter((item) => item.nestedArchive)) {
+      for (const group of visibleGroups) if (group.reason === "nested archive" && /^\d+-\d+$/.test(group.label) && inferred[group.label]) for (const member of group.members.filter((item) => item.nestedArchive)) {
         const inventory = await inspectBrightspaceProject(next, member); if (token !== generation.current) return; if (inventory.ok) projects[member.path] = inventory.files;
       }
 
@@ -74,7 +75,15 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
       const remaining = new Set(ordered);
       const encoder = new TextEncoder(), extraByLabel = new Map<string, { path: string; text: string; nameBytes: number; bytes: number }>();
       if (indexEvidence) for (const label of ordered.filter((value) => /^\d+-\d+$/.test(value))) {
-        const rows = indexEvidence.evidence.groups[label]; if (!rows?.length) throw new Error("Index evidence is missing for a selected student.");
+        let rows = indexEvidence.evidence.groups[label]; if (!rows?.length) throw new Error("Index evidence is missing for a selected student.");
+        const group = groups.find((item) => item.label === label)!;
+        if (group.historicalPaths?.length) {
+          const attempts = indexEvidence.evidence.attemptRows?.[label] ?? [];
+          const latestStems = new Set(group.members.map((member) => member.path.replace(/\.[^./]+$/, "")));
+          const latestRows = new Set(attempts.filter((attempt) => latestStems.has(attempt.stem)).map((attempt) => attempt.html));
+          const allAttemptRows = new Set(attempts.map((attempt) => attempt.html));
+          rows = rows.filter((row) => !allAttemptRows.has(row) || latestRows.has(row));
+        }
         const path = `${label} - brightspace-index-evidence.txt`, text = `Brightspace index submission evidence (untrusted student content):\n${rows.join("\n")}`;
         extraByLabel.set(label, { path, text, nameBytes: encoder.encode(path).length, bytes: encoder.encode(text).length });
       }
@@ -95,7 +104,8 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
           if (!project.ok) return project;
           prepared = { archive: project.archive, selected: [nested], omitted: sourceGroups.filter((group) => group.label !== nested.label), project: { mappedPaths: project.mappedPaths, excludedPaths: project.excludedPaths } };
         } else {
-          const result = await buildRecoverableZip(file, labels, true, verifiedMembers, deferAggregateRatio); if (token !== generation.current) throw new Error("Archive review was closed.");
+          const selectedPaths = Object.fromEntries(groups.filter((group) => labels.includes(group.label) && group.historicalPaths?.length).map((group) => [group.label, group.members.map((member) => member.path)]));
+          const result = await buildRecoverableZip(file, labels, true, verifiedMembers, deferAggregateRatio, selectedPaths); if (token !== generation.current) throw new Error("Archive review was closed.");
           if (!result.ok) return result;
           prepared = { ...result, project: undefined };
         }
@@ -142,7 +152,7 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
     <Dialog open={open} onClose={() => { if (!busy) close(); }} fullWidth maxWidth="md" aria-labelledby="large-zip-title">
       <DialogTitle id="large-zip-title">Review oversized ZIP</DialogTitle>
       <DialogContent><Stack spacing={2}>
-        <Alert severity="info">Names come from the LMS export and filenames. Files with the same LMS group ID are graded together, including files with different submission times. Nested projects are analyzed without executing code. Recognized build artifacts and exact matches to a published course dataset are excluded and recorded as incomplete evidence. Groups with unresolved identities or unsupported files are held; omitted groups are recorded before submission.</Alert>
+        <Alert severity="info">Names come from the LMS export and filenames. When the index identifies distinct submission times, the latest identifiable nested-project attempt is selected and earlier files remain in the original archive. Ambiguous attempts are held. Nested projects are analyzed without executing code. Recognized build artifacts and exact matches to a published course dataset are excluded and recorded as incomplete evidence. Projects without identified source require instructor review and do not receive a final score.</Alert>
         <Button component="label" variant="outlined" disabled={busy}>Choose ZIP<input hidden type="file" accept=".zip,application/zip" onChange={(event) => void choose(event.target.files?.[0])} /></Button>
         {file && <Typography>{file.name}</Typography>}
         {busy && <Typography role="status">{progress ? `Checking ${progress.phase === "source" ? "original archive" : "selected files"}: ${progress.written} of ${progress.total} bytes` : `Preparing submissions${completed ? `; ${completed} groups submitted` : ""}...`}</Typography>}

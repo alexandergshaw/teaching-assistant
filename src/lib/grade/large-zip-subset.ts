@@ -4,11 +4,20 @@ import { GRADING_ZIP_MAX_BYTES } from "./grading-zip-transport";
 import { inferStudentPrefix } from "./utils";
 
 type Reason = "nested archive" | "member size" | "unsupported type" | "compression ratio" | "group size" | "unassigned index" | "student identity could not be resolved" | "student identity is ambiguous" | "index evidence could not be assigned completely" | "nested project has unsupported files or no usable source" | "held for review" | "not selected";
-export interface RecoverableGroup { readonly label: string; readonly sourceIdentifier: string; readonly members: readonly LargeZipMember[]; readonly reason?: Reason }
+export interface RecoverableGroup { readonly label: string; readonly sourceIdentifier: string; readonly members: readonly LargeZipMember[]; readonly historicalPaths?: readonly string[]; readonly reason?: Reason }
 export type RecoverablePlan = { readonly ok: true; readonly groups: readonly RecoverableGroup[] } | { readonly ok: false; readonly reason: string };
 const supported = new Set(["txt", "md", "py", "ipynb", "csv", "pdf", "docx", "html", "mp4", "m4v", "mov", "webm", "c", "cc", "cpp", "cxx", "h", "hpp", "user", "recipe", "log", "command"]);
 const videos = new Set(["mp4", "m4v", "mov", "webm"]);
 const ext = (path: string) => path.split(".").pop()?.toLowerCase() ?? "";
+
+export function recoverableGroupReason(members: readonly LargeZipMember[]): Reason | undefined {
+  if (members.some((member) => member.nestedArchive)) return "nested archive";
+  if (members.some((member) => member.declaredBytes > ZIP_MAX_MEMBER_DECLARED_BYTES || member.compressedBytes > ZIP_MAX_MEMBER_DECLARED_BYTES)) return "member size";
+  if (members.some((member) => !supported.has(ext(member.path)))) return "unsupported type";
+  if (members.some((member) => member.declaredBytes >= ZIP_RATIO_FLOOR_BYTES && (!member.compressedBytes || member.declaredBytes / member.compressedBytes > ZIP_MAX_MEMBER_RATIO))) return "compression ratio";
+  if (members.reduce((sum, member) => sum + member.declaredBytes, 0) > ZIP_MAX_CUMULATIVE_DECLARED_BYTES || members.filter((member) => videos.has(ext(member.path))).length > ZIP_MAX_VIDEO_MEMBERS) return "group size";
+  return undefined;
+}
 
 /** Predict the existing subset builder's limits without reading or materializing members. */
 export function checkRecoverableBatch(groups: readonly RecoverableGroup[], allGroups: readonly RecoverableGroup[], extra: readonly { nameBytes: number; bytes: number }[] = [], deferAggregateRatio = false, inAppHandoff = false): string | null {
@@ -57,11 +66,7 @@ export async function planRecoverableZip(file: Blob): Promise<RecoverablePlan> {
   return { ok: true, groups: [...groups.values()].map((group) => {
     let reason: Reason | undefined;
     if (group.unassigned) reason = "unassigned index";
-    else if (group.members.some((member) => member.nestedArchive)) reason = "nested archive";
-    else if (group.members.some((member) => member.declaredBytes > ZIP_MAX_MEMBER_DECLARED_BYTES || member.compressedBytes > ZIP_MAX_MEMBER_DECLARED_BYTES)) reason = "member size";
-    else if (group.members.some((member) => !supported.has(ext(member.path)))) reason = "unsupported type";
-    else if (group.members.some((member) => member.declaredBytes >= ZIP_RATIO_FLOOR_BYTES && (!member.compressedBytes || member.declaredBytes / member.compressedBytes > ZIP_MAX_MEMBER_RATIO))) reason = "compression ratio";
-    else if (group.members.reduce((sum, member) => sum + member.declaredBytes, 0) > ZIP_MAX_CUMULATIVE_DECLARED_BYTES || group.members.filter((member) => videos.has(ext(member.path))).length > ZIP_MAX_VIDEO_MEMBERS) reason = "group size";
+    else reason = recoverableGroupReason(group.members);
     return { ...group, ...(reason ? { reason } : {}) };
   }) };
 }
@@ -90,10 +95,15 @@ export async function verifyMember(file: Blob, member: LargeZipMember): Promise<
 
 /** Build one reviewed, whole-group batch without materializing the source ZIP.
  * Caller must disclose omitted groups and confirm ownership/grouping before use. */
-export async function buildRecoverableZip(file: Blob, selectedLabels: readonly string[], inAppHandoff = false, verificationCache?: WeakMap<Blob, Set<string>>, deferAggregateRatio = false): Promise<{ ok: true; archive: Blob; selected: readonly RecoverableGroup[]; omitted: readonly RecoverableGroup[]; ownershipVerified: false } | { ok: false; reason: string }> {
+export async function buildRecoverableZip(file: Blob, selectedLabels: readonly string[], inAppHandoff = false, verificationCache?: WeakMap<Blob, Set<string>>, deferAggregateRatio = false, selectedPaths?: Readonly<Record<string, readonly string[]>>): Promise<{ ok: true; archive: Blob; selected: readonly RecoverableGroup[]; omitted: readonly RecoverableGroup[]; ownershipVerified: false } | { ok: false; reason: string }> {
   const plan = await planRecoverableZip(file); if (!plan.ok) return plan;
   const wanted = new Set(selectedLabels);
-  const groups = plan.groups.filter((group) => wanted.has(group.label));
+  const groups = plan.groups.filter((group) => wanted.has(group.label)).map((group) => {
+    const paths = selectedPaths?.[group.label]; if (!paths) return group;
+    const members = group.members.filter((member) => paths.includes(member.path));
+    if (!paths.length || new Set(paths).size !== paths.length || members.length !== paths.length) return { ...group, reason: "held for review" as const };
+    return { ...group, members, reason: recoverableGroupReason(members), historicalPaths: group.members.filter((member) => !paths.includes(member.path)).map((member) => member.path) };
+  });
   if (!groups.length || groups.length !== wanted.size || groups.some((group) => group.reason)) return { ok: false, reason: "invalid or blocked group selection" };
   const members = groups.flatMap((group) => group.members);
   const refusal = checkRecoverableBatch(groups, plan.groups, [], deferAggregateRatio, inAppHandoff); if (refusal) return { ok: false, reason: refusal };

@@ -3,6 +3,11 @@ import { bindPartialEvidence } from "./partialEvidence";
 import type { StudentSubmissionEntry } from "@/lib/grade/types";
 
 const row = (student: string) => ({ student, content: "work", mergedFileCount: 1, submittedFiles: [], staticOnly: true }) as StudentSubmissionEntry;
+it("binds missing source to the matching student and informs the source review", () => {
+  const result = bindPartialEvidence([row("Ada"), row("Lin")], undefined, undefined, [{ student: "Ada", omissions: [], staticOnly: true, missingSource: true }, { student: "Lin", omissions: [], staticOnly: false }]);
+  expect(result?.[0].missingSource).toBe(true); expect(result?.[0].content).toMatch(/source-dependent criteria are unverified/);
+  expect(result?.[1].missingSource).toBeUndefined();
+});
 it("binds nested omissions only to the matching student", () => {
   const result = bindPartialEvidence([row("Ada"), row("Lin")], undefined, true, [{ student: "Ada", omissions: ["Ada/debug.obj"], staticOnly: true }, { student: "Lin", omissions: [], staticOnly: false }]);
   expect(result?.[0]).toMatchObject({ student: "Ada", staticOnly: true, evidenceOmissions: ["Ada/debug.obj"] });

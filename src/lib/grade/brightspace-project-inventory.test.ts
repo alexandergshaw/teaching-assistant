@@ -3,6 +3,18 @@ import JSZip from "jszip";
 import { inspectLargeZipDirectory } from "./recoverable-zip-directory";
 import { buildReviewedBrightspaceProject, inspectBrightspaceProject } from "./brightspace-project-inventory";
 
+it("preserves readable project evidence and records artifacts when no source is present", async () => {
+  const nested = new JSZip(); nested.file("build.log", "build failed"); nested.file("Debug/main.obj", "object");
+  const outer = new JSZip(); outer.file("100-200 - project.zip", await nested.generateAsync({ type: "uint8array" }));
+  const source = new Blob([new Uint8Array(await outer.generateAsync({ type: "uint8array" })).buffer]);
+  const directory = await inspectLargeZipDirectory(source); expect(directory.ok).toBe(true); if (!directory.ok) return;
+  const built = await buildReviewedBrightspaceProject(source, directory.members[0], ["Debug/main.obj"]);
+  expect(built.ok).toBe(true); if (!built.ok) return;
+  expect(built.retainedPaths).toEqual(["build.log"]); expect(built.excludedPaths).toEqual(["Debug/main.obj"]);
+  const contents = await JSZip.loadAsync(await built.archive.arrayBuffer());
+  expect(await contents.file("build.log")!.async("string")).toBe("build failed");
+});
+
 it("retains source and data even inside build folders, flags binaries, and holds unknown files", async () => {
   const project = new JSZip(); project.file("Debug/main.cpp", "source"); project.file("Debug/input.csv", "data"); project.file("Debug/main.obj", "binary"); project.file("Debug/unknown.bin", "unknown");
   const nested = await project.generateAsync({ type: "uint8array" }); const zip = new JSZip(); zip.file("100-200 - project.zip", nested);

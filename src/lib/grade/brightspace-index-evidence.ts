@@ -4,6 +4,7 @@ export interface BrightspaceIndexEvidence {
   readonly sourceHtml: string;
   readonly groups: Readonly<Record<string, readonly string[]>>;
   readonly unassigned: readonly string[];
+  readonly attemptRows?: Readonly<Record<string, readonly { readonly stem: string; readonly submitted: string; readonly html: string }[]>>;
 }
 
 /** Only a narrow set of static layout wrappers can be treated as non-evidence. */
@@ -30,7 +31,7 @@ export function isBrightspaceFormattingOnly(fragment: string): boolean {
 /** Untrusted HTML must never be rendered. The caller must preserve the original
  * separately and supply every outside-row fragment; this helper does not parse HTML. */
 export function partitionBrightspaceRows(sourceHtml: string, rows: readonly BrightspaceIndexRow[], verifiedNames: Readonly<Record<string, string>>, outsideRows: readonly string[]): BrightspaceIndexEvidence {
-  const groups: Record<string, string[]> = Object.create(null), unassigned = [...outsideRows];
+  const groups: Record<string, string[]> = Object.create(null), attemptRows: Record<string, { stem: string; submitted: string; html: string }[]> = Object.create(null), unassigned = [...outsideRows];
   const normalize = (value: string) => value.normalize("NFKC").toLocaleLowerCase().trim().replace(/\s+/g, " ");
   const nameCounts = new Map<string, number>(); for (const name of Object.values(verifiedNames)) { const key = normalize(name); nameCounts.set(key, (nameCounts.get(key) ?? 0) + 1); }
   let header: string | null = null, headerName = "", headerUsed = false;
@@ -42,9 +43,12 @@ export function partitionBrightspaceRows(sourceHtml: string, rows: readonly Brig
     const entries = groups[label] ??= [];
     if (!headerUsed || !entries.includes(header)) entries.push(header);
     entries.push(row.html); headerUsed = true;
+    const submitted = /^Submitted:\s*(.+?)\s*$/i.exec(row.cellTexts[1].trim());
+    const stem = row.cellTexts[0].split(/\s*Comments:/i)[0].trim();
+    if (submitted && stem) (attemptRows[label] ??= []).push({ stem, submitted: submitted[1], html: row.html });
   }
   flushHeader();
-  return { sourceHtml, groups, unassigned };
+  return { sourceHtml, groups, unassigned, attemptRows };
 }
 import { parse, type DefaultTreeAdapterMap } from "parse5";
 

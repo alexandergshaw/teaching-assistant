@@ -1,6 +1,10 @@
 import { expect, it } from "vitest";
 import { incompleteEvidenceReason, evidencePostRefusal } from "./evidence-review";
 import type { GradeResult } from "./types";
+it("requires review when project source is absent", () => {
+  const row = { student: "Synthetic", totalScore: "1/1", strengths: "", improvements: "", resubmitNotice: "", overallComment: "", feedback: "", rubricAreas: [], mergedFileCount: 1, submittedFiles: [], missingSource: true } satisfies GradeResult;
+  expect(evidencePostRefusal(row, new Set())).toMatch(/no supported source-code file/i);
+});
 it("requires a fresh evidence review for a result with excluded files", () => {
   const row = { student: "Synthetic", totalScore: "1/1", strengths: "", improvements: "", resubmitNotice: "", overallComment: "", feedback: "", rubricAreas: [], mergedFileCount: 1, submittedFiles: [], evidenceOmissions: ["project/Debug/generated.obj"] } satisfies GradeResult;
   expect(incompleteEvidenceReason(row)).toMatch(/files were excluded/i);

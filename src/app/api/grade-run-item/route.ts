@@ -153,6 +153,7 @@ function isSubmittedFileInfo(value: unknown): value is SubmittedFileInfo {
 function partialEvidenceInstructions(instructions: string, entry: StudentSubmissionEntry): string {
   const notes: string[] = [];
   if (entry.staticOnly) notes.push("Code was not executed. Runtime behavior is unverified; do not claim that the program was run or that its output was observed.");
+  if (entry.missingSource) notes.push("No supported source-code file was identified in the project. Do not assert source-dependent criteria were met; describe them as unverified.");
   if (entry.evidenceOmissions?.length) notes.push("Files were excluded from the submitted evidence. Evidence is incomplete; do not infer their contents or penalize the student for their absence.");
   return notes.length ? `${instructions}\n\n${notes.join(" ")}` : instructions;
 }
@@ -194,6 +195,7 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
     return null;
   }
   if (rawEntry.staticOnly !== undefined && rawEntry.staticOnly !== true) return null;
+  if (rawEntry.missingSource !== undefined && rawEntry.missingSource !== true) return null;
   if (rawEntry.evidenceOmissions !== undefined && (!Array.isArray(rawEntry.evidenceOmissions) || rawEntry.evidenceOmissions.length < 1 || rawEntry.evidenceOmissions.length > 1000 || rawEntry.evidenceOmissions.some((path: unknown) => typeof path !== "string" || !path || path.length > 4096) || JSON.stringify(rawEntry.evidenceOmissions).length > 100000)) return null;
   if (!Array.isArray(rawEntry.submittedFiles) || !rawEntry.submittedFiles.every(isSubmittedFileInfo)) return null;
 
@@ -219,6 +221,7 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
     ...(axes !== undefined ? { discussionAxes: axes as NonNullable<StudentSubmissionEntry["discussionAxes"]> } : {}),
     ...(rawEntry.repositoryInventories !== undefined ? { repositoryInventories: rawEntry.repositoryInventories as StudentSubmissionEntry["repositoryInventories"] } : {}),
     ...(rawEntry.staticOnly === true ? { staticOnly: true as const } : {}),
+    ...(rawEntry.missingSource === true ? { missingSource: true as const } : {}),
     ...(rawEntry.evidenceOmissions !== undefined ? { evidenceOmissions: rawEntry.evidenceOmissions as string[] } : {}),
     student: rawEntry.student,
     content: rawEntry.content,
@@ -491,6 +494,11 @@ export async function POST(req: NextRequest) {
     }
     if (!outcome.value.graded) return NextResponse.json({ error: "an unexpected error" }, { status: 502 });
     const result = outcome.value.graded.results[0];
+    if (entry.missingSource) {
+      const unidentified = Object.fromEntries(Object.entries(result).filter(([key]) => key !== "userId"));
+      const message = "Not graded: no supported source-code file was identified. Review the available evidence before assigning a grade.";
+      return NextResponse.json({ sourceIndex, result: { ...unidentified, overallComment: message, strengths: message, improvements: "", resubmitNotice: "", feedback: `Provisional source review (not a grade):\n${result.feedback}`, totalScore: "", rubricAreas: [], missingSource: true, linkFetch: outcome.value.linkFetch, ...(entry.evidenceOmissions?.length ? { evidenceOmissions: entry.evidenceOmissions } : {}), ...(entry.staticOnly ? { staticOnly: true } : {}), ungraded: { kind: "grading-failed", sourceIndex, student: entry.student, message } }, ...diagnosticFor() });
+    }
     return NextResponse.json({ sourceIndex, result: { ...result, linkFetch: outcome.value.linkFetch, ...(entry.evidenceOmissions?.length ? { evidenceOmissions: entry.evidenceOmissions } : {}), ...(entry.staticOnly ? { staticOnly: true } : {}) }, ...diagnosticFor() });
   } catch (err) {
     return NextResponse.json({ error: describeError(err), ...diagnosticFor("route error") }, { status: 502 });

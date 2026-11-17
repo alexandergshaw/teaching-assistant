@@ -294,6 +294,7 @@ interface GradeResultBase {
   submittedFiles: SubmittedFileInfo[];
   /** Instructor-reviewed source files omitted before grading; evidence is partial. */
   evidenceOmissions?: readonly string[];
+  missingSource?: true;
   staticOnly?: true;
   // Result of running the submission's code in the sandbox, when it had runnable
   // code. Display-only on the Gemini path; the embedded engine also scores it.
@@ -493,6 +494,7 @@ export interface GradingRunEntry {
  */
 export interface StudentSubmissionEntry {
   evidenceOmissions?: readonly string[];
+  missingSource?: true;
   staticOnly?: true;
   repositoryInventories?: SubmissionFileInventory[];
   student: string;

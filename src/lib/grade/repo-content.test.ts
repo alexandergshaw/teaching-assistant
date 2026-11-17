@@ -40,6 +40,16 @@ beforeEach(() => {
 });
 
 describe("fetchGradableRepoContent - URL forms (AC2.2)", () => {
+  it("fetches Jupyter notebooks as submitted source instead of marking them unsupported", async () => {
+    mockGetRepo.mockResolvedValueOnce(fakeRepo("main"));
+    mockListCommits.mockResolvedValueOnce([{ sha: "sha1", message: "", author: "", date: "", htmlUrl: "" }]);
+    mockGetRepoTree.mockResolvedValueOnce({ entries: [{ path: "optimization_engine.ipynb", type: "blob", size: 120, sha: "x" }], truncated: false });
+    mockGetFileText.mockResolvedValueOnce('{"cells":[{"cell_type":"code","source":["print(42)"]}],"nbformat":4}');
+    const result = await fetchGradableRepoContent("https://github.com/octo/cat");
+    if ("error" in result) throw new Error(result.error);
+    expect(result.content).toContain("print(42)");
+    expect(result.inventory?.files).toEqual([{ path: "optimization_engine.ipynb", content: "read" }]);
+  });
   it("returns a clear error for a non-GitHub URL without calling GitHub", async () => {
     const result = await fetchGradableRepoContent("https://gitlab.com/octo/cat");
     expect(result).toHaveProperty("error");

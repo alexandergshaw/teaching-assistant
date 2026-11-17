@@ -1,6 +1,7 @@
 import { MAX_STATIC_PROJECT_CONTENT_CHARS } from "@/lib/grade/static-project-limits";
 import { prioritizeModelContent } from "./large-data-model-content";
 import { reportsLengthCriterionDeduction, reportsLengthPenalty } from "./reported-length-penalty";
+import { hasUnreviewedNotebook, reportsUnavailableEvidence, runtimeDependencyUnavailable } from "./unavailable-evidence";
 import { addLengthExemption, extractLengthOnlyExemption, withoutSupportedInstructionLength, withoutSupportedRubricLength } from "./length-only-exemption";
 import { canvasOmissionIdentityRefusal, canvasVideoRefusal } from "../canvas/omitted-video";
 import type { SubmissionFileInventory } from "./submission-file-inventory";
@@ -53,6 +54,8 @@ import { stampRubricProvenance } from "./rubric-provenance-stamp";
 // (never recovered from message text). Both leaves are import-free.
 import { GradeCallError, gradeFailureClassForFinishReason, gradeFailureClassForStatus } from "./grade-failure";
 import type { GradeCallSink } from "./grade-item-diagnostic";
+
+const UNSAFE_EVIDENCE_DEDUCTION = "The proposed grade refers to unavailable grading evidence or dependencies. Review the work before assigning a score; no grade was produced.";
 
 /**
  * One non-text part sent with a submission: inline bytes (image/PDF) or, for a
@@ -117,13 +120,13 @@ async function scoreAxis(
   // errors: no" here would let its own holistic judgment penalize the
   // student for a platform limitation, the same mistake gradeEntriesEmbedded
   // (embedded-grader/index.ts) avoids for its own deterministic criterion.
-  const codeNote = codeRun && !codeRun.error && !codeRun.neededStdin ? buildCodeExecutionNote(codeRun) : "";
+  const codeNote = codeRun && !codeRun.error && !codeRun.neededStdin && !runtimeDependencyUnavailable(codeRun) ? buildCodeExecutionNote(codeRun) : "";
   const fileListBlock = buildSubmittedFileNamesBlock(submittedFiles, repositoryInventories);
   if (repositoryInventories?.length && fileListBlock.length > getGeminiMaxCharsPerSubmission()) throw new GradeCallError("Repository file inventory exceeds the grading input budget.", "model unparseable");
 
   const parts: LlmPart[] = [
     {
-      text: `${systemPrompt}\n\nStudent: ${studentName}${fileListBlock}\n\nSubmission:\n${SUBMISSION_FRAMING_HEADER}\n\n${content}${imageNote}${codeNote}${videoGradeWindowSec ? buildVideoWindowNote(videoGradeWindowSec) : ""}`,
+      text: `${systemPrompt}\n\nDo not deduct points for unavailable evaluator access, missing sandbox dependencies, or other grading-environment limitations. A file listed in the repository inventory is present even if its content cannot be inspected.\n\nStudent: ${studentName}${fileListBlock}\n\nSubmission:\n${SUBMISSION_FRAMING_HEADER}\n\n${content}${imageNote}${codeNote}${videoGradeWindowSec ? buildVideoWindowNote(videoGradeWindowSec) : ""}`,
     },
     ...inlineFiles.map((f): LlmPart =>
       "fileUri" in f
@@ -179,6 +182,7 @@ async function scoreAxis(
 
   const feedback = result.text.trim() || "No feedback generated.";
   const parsed = parseRubricResponse(feedback);
+  if ([parsed.overallComment, parsed.improvements, extractStrengthsField(feedback), ...parsed.rubricAreas.map((area) => area.comment)].some(reportsUnavailableEvidence)) throw new GradeCallError(UNSAFE_EVIDENCE_DEDUCTION, "model unparseable");
   if (executionOptions?.suppressLengthDeduction && ([parsed.overallComment, parsed.improvements, extractStrengthsField(feedback), ...parsed.rubricAreas.map((area) => area.comment)].some(reportsLengthPenalty) || parsed.rubricAreas.some((area) => reportsLengthCriterionDeduction(area.area, area.score)))) throw new GradeCallError("The model reported a length penalty even though length deductions are disabled. Review or retry this submission; no grade was produced.", "model unparseable");
 
   // docs/grading-results-feedback-boxes-acceptance-criteria.md, A1: the model
@@ -448,6 +452,12 @@ function buildUngradedRow(
   };
 }
 
+function buildEvidenceHeldRow(entry: Parameters<typeof buildUngradedRow>[0], outcome: UngradedOutcome, codeRun: CodeRunResult | null = null, submissionTruncated?: boolean): UngradedResult {
+  const row = buildUngradedRow(entry, outcome, codeRun, submissionTruncated);
+  const comment = "Thank you for submitting your work.";
+  return { ...row, strengths: comment, overallComment: comment, feedback: formatFeedback(comment, [], "") };
+}
+
 /**
  * Grade a list of per-student submissions against the rubric. Shared by the zip
  * upload path and the Canvas discussion path so both produce identical runs.
@@ -513,6 +523,10 @@ async function gradeStudentEntries(
       break;
     }
     const { student, content, mergedFileCount, submittedFiles, userId, codeRun: precomputedCodeRun, gradedRepo, gradedRef, repositoryInventories } = limitedEntries[i];
+    if (hasUnreviewedNotebook(repositoryInventories)) {
+      results.push(buildEvidenceHeldRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}Repository evidence could not be fully inspected. No score was assigned; review the submission before grading.` }));
+      continue;
+    }
     const axes = limitedEntries[i].discussionAxes;
     if (limitedEntries[i].staticOnly === true && axes) {
       results.push(buildUngradedRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}Static project evidence cannot be graded as separate discussion sections. No grade was produced.` }));
@@ -640,6 +654,11 @@ async function gradeStudentEntries(
       if (modelExecution && error instanceof LlmOutcomeUnknownError) throw error;
       const message =
         error instanceof Error ? error.message : "An unexpected grading error occurred.";
+      if (message === UNSAFE_EVIDENCE_DEDUCTION) {
+        callSink?.recordFailure("model unparseable");
+        results.push(buildEvidenceHeldRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}${message}` }, codeRun, submissionTruncated));
+        continue;
+      }
       callSink?.recordFailure(error instanceof GradeCallError ? error.failureClass : "unclassified");
       // A grading failure has no improvement guidance or resubmit policy to
       // offer - the whole message lives in strengths, and overallComment is

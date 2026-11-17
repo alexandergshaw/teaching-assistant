@@ -57,6 +57,23 @@ beforeEach(() => {
 });
 
 describe("gradeEntries - compiler auto-run preference", () => {
+  it("does not assign a score when a submitted notebook is unreadable", async () => {
+    const run = await gradeEntries([entry({ repositoryInventories: [{ source: "owner/repo", scope: { kind: "repository", path: null }, enumerationComplete: true, files: [{ path: "optimization_engine.ipynb", content: "unsupported" }] }] })], "Grade it.", "Correctness (10 points).", "gemini");
+    expect(run.results[0]).toMatchObject({ totalScore: "", ungraded: { kind: "grading-failed" } });
+    expect(run.results[0].strengths).toBe("Thank you for submitting your work.");
+    expect(mockCallLlm).not.toHaveBeenCalled();
+  });
+  it("holds a model deduction that blames an unavailable evaluation environment", async () => {
+    mockCallLlm.mockResolvedValueOnce({ ok: true, text: JSON.stringify({ overallComment: "The provided environment was missing dependencies, so the output could not be verified.", rubricResults: [{ area: "Correctness", score: "5/10" }], totalScore: "5/10" }) });
+    const run = await gradeEntries([entry()], "Grade it.", "Correctness (10 points).", "gemini", null, { autoRunCode: false });
+    expect(run.results[0]).toMatchObject({ totalScore: "", ungraded: { kind: "grading-failed" } });
+    expect(run.results[0].strengths).toBe("Thank you for submitting your work.");
+  });
+  it("does not expose evaluator-access claims even when the model awards full credit", async () => {
+    mockCallLlm.mockResolvedValueOnce({ ok: true, text: JSON.stringify({ overallComment: "The notebook itself and the data/ directory were not fully visible in the scope for evaluation", rubricResults: [{ area: "Correctness", score: "10/10" }], totalScore: "10/10" }) });
+    const run = await gradeEntries([entry()], "Grade it.", "Correctness (10 points).", "gemini", null, { autoRunCode: false });
+    expect(run.results[0]).toMatchObject({ totalScore: "", strengths: "Thank you for submitting your work.", ungraded: { kind: "grading-failed" } });
+  });
   it("skips compiler service execution when explicitly disabled", async () => {
     mockCallLlm.mockResolvedValueOnce({ ok: true, text: OK_RESPONSE_TEXT });
     await gradeEntries(

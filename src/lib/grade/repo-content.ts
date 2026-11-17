@@ -1,4 +1,5 @@
 import { boundSubmissionInventory, inventoryPathInScope, type SubmissionFileInventory } from "./submission-file-inventory";
+import { notebookNeedsVisualReview } from "./unavailable-evidence";
 /**
  * Fetches a Canvas submission's linked GitHub repository so grading reads the
  * actual CODE, not the URL string (defect: canvasWorkToEntry used to note the
@@ -119,6 +120,7 @@ export async function fetchGradableRepoContent(submissionUrl: string): Promise<G
       continue;
     }
     const clamped = clampFileBytes(text);
+    if (/\.ipynb$/i.test(entry.path) && notebookNeedsVisualReview(text)) clamped.truncated = true;
     if (clamped.truncated) perFileTruncated = true;
     fetched.push({ path: entry.path, text: clamped.text, truncated: clamped.truncated });
   }

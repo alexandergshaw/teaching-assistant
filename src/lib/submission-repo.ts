@@ -133,7 +133,7 @@ export const SUBMISSION_SOURCE_EXTENSIONS = new Set([
   "py", "java", "c", "cc", "cpp", "cxx", "h", "hpp",
   "cs", "go", "rb", "php", "rs", "swift", "kt", "kts", "scala",
   "html", "htm", "css", "scss", "sass", "less", "vue", "svelte",
-  "json", "jsonc", "yml", "yaml", "toml", "ini", "xml",
+  "json", "jsonc", "ipynb", "yml", "yaml", "toml", "ini", "xml",
   "sql", "sh", "bash", "zsh", "r", "md", "mdx", "txt",
   "graphql", "proto", "dart", "lua", "pl",
 ]);

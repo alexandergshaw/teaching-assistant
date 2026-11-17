@@ -50,7 +50,7 @@ import { mergeIngestLedgers } from "./ingestLedger";
 import { countPendingVideos, pendingDisplay } from "./pendingVideoCount";
 import type { ChatGradingSetup } from "./chatVersionedSetup";
 import { bindVersionedResultRows, projectVersionedResults, type VersionedArrival, type VersionedResultRow } from "./versionedResultProjection";
-import { partialBatchNotice } from "./partialBatchNotice";
+import { noBatchAdmittedNotice, partialBatchNotice } from "./partialBatchNotice";
 import { postClassifyRecording, postPrepareVideo, videoFailureOf, type PrepareVideoFn } from "./videoClient";
 import { postPrepareSingleFile, type PrepareSingleFileFn } from "./singleFileClient";
 import { recordVideoSettled, recordZipVideoOutcomes } from "./videoDiagnostic";
@@ -169,7 +169,7 @@ export interface UseContinuousGradingRunResult {
 export function useContinuousGradingRun(params: UseContinuousGradingRunParams): UseContinuousGradingRunResult {
   const { provider, maxEntries = DEFAULT_MAX_ENTRIES, commentSplit } = params;
   const dispatchItem = params.dispatchItem ?? postGradeRunItem;
-  const ingestZip = params.ingestZip ?? ((path, provider, onEntry, mapping, staticOnly, ownerSession) => ingestStoragedZip(path, provider, onEntry, undefined, mapping, staticOnly, ownerSession));
+  const ingestZip = params.ingestZip ?? ((path, provider, onEntry, mapping, staticOnly, ownerSession, staticStudents) => ingestStoragedZip(path, provider, onEntry, undefined, mapping, staticOnly, ownerSession, staticStudents));
   const prepareVideo = params.prepareVideo ?? postPrepareVideo;
   const classifyRecording = params.classifyRecording ?? postClassifyRecording;
   const prepareSingleFile = params.prepareSingleFile ?? postPrepareSingleFile;
@@ -513,7 +513,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       let ingest: IngestOutcome;
       const classifyStartedAtMs = chatSeamNowMs();
       try {
-        ingest = await ingestZip(input.storagePath, provider, (entry) => collected.push(entry), input.reviewedZipMapping, input.staticOnly, input.expectedOwnerSession);
+        ingest = await ingestZip(input.storagePath, provider, (entry) => collected.push(entry), input.reviewedZipMapping, input.staticOnly, input.expectedOwnerSession, input.perStudentEvidence?.filter((item) => item.staticOnly).map((item) => item.student));
       } catch {
         // ingestStoragedZip never throws; this guards an injected replacement.
         ingest = { kind: "refused", reason: "The zip could not be prepared." };
@@ -734,6 +734,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     const skippedIntake = skippedEvidenceIntake(entries, ingestSkipped, storageLedger);
     if (skippedIntake) { setIngestLedger((prev) => mergeIngestLedgers(prev, skippedIntake.ledger)); return { kind: "refused", reason: skippedIntake.reason }; }
 
+    if ((input.kind === "file" || input.kind === "storaged-zip") && input.perStudentEvidence && ingestSkipped.length) return { kind: "refused", reason: noBatchAdmittedNotice(ingestSkipped) };
     const boundEntries = bindPartialEvidence(entries, input.kind === "file" || input.kind === "storaged-zip" ? input.evidenceOmissions : undefined, input.kind === "file" || input.kind === "storaged-zip" ? input.staticOnly : undefined, input.kind === "file" || input.kind === "storaged-zip" ? input.perStudentEvidence : undefined);
     if (!boundEntries) return { kind: "refused", reason: "Partial evidence record is invalid. Nothing was graded." }; else entries = boundEntries;
     // RES-GC-8: clip to what the session ceiling still allows; refuse only

@@ -133,21 +133,37 @@ function fileNeedsRawBytes(file: SubmittedFileInfo): boolean {
 /** Compact static text evidence without dropping its original bytes. */
 export function stripUnneededRawBase64(entry: StudentSubmissionEntry): StudentSubmissionEntry {
   let content = entry.content, sequence = 0;
-  const submittedFiles = entry.submittedFiles.map((file) => {
-    if (entry.staticOnly && isStaticProjectText(file.extension) && file.rawBase64 && file.rawBase64.length <= 4_000_000) {
-      try {
-        const binary = atob(file.rawBase64), bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-        const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
-        const first = text ? content.indexOf(text) : -1;
-        if (first >= 0 && content.indexOf(text, first + 1) < 0) {
-          let marker = "";
-          do { marker = `[[STATIC_TEXT_${sequence++}]]`; } while (content.includes(marker));
-          content = content.slice(0, first) + marker + content.slice(first + text.length);
-          return { ...file, staticTextMarker: marker };
-        }
-      } catch { /* The server will refuse unverifiable text evidence. */ }
-      return file;
+  const decoded = new Map<number, string>();
+  if (entry.staticOnly) entry.submittedFiles.forEach((file, index) => {
+    if (!isStaticProjectText(file.extension) || !file.rawBase64 || file.rawBase64.length > 4_000_000) return;
+    try {
+      const binary = atob(file.rawBase64), bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+      const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+      if (text) decoded.set(index, text);
+    } catch { /* The server will refuse unverifiable text evidence. */ }
+  });
+  const counts = new Map<string, number>();
+  for (const text of decoded.values()) counts.set(text, (counts.get(text) ?? 0) + 1);
+  const eligible = new Set<string>();
+  for (const [text, expected] of counts) {
+    // A substring of another file cannot be unambiguously assigned to a file.
+    if ([...counts.keys()].some((other) => other !== text && other.includes(text))) continue;
+    let occurrences = 0, offset = 0, position: number;
+    while ((position = content.indexOf(text, offset)) >= 0) { occurrences++; offset = position + text.length; }
+    if (occurrences === expected) eligible.add(text);
+  }
+  const submittedFiles = entry.submittedFiles.map((file, index) => {
+    const text = decoded.get(index);
+    if (text && eligible.has(text)) {
+      const first = content.indexOf(text);
+      if (first >= 0) {
+        let marker = "";
+        do { marker = `[[STATIC_TEXT_${sequence++}]]`; } while (content.includes(marker));
+        content = content.slice(0, first) + marker + content.slice(first + text.length);
+        return { ...file, staticTextMarker: marker };
+      }
     }
+    if (entry.staticOnly && isStaticProjectText(file.extension)) return file;
     if (!file.rawBase64 || fileNeedsRawBytes(file)) return file;
     const { rawBase64: _dropped, ...rest } = file; void _dropped; return rest;
   });

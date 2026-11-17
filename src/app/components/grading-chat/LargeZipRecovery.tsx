@@ -16,7 +16,7 @@ import { isBrightspaceFormattingOnly, type BrightspaceIndexEvidence } from "@/li
 import { mergePreparedZips } from "@/lib/grade/merge-prepared-zips";
 import { inspectPreparedZipBudget, preparedZipBudgetFits, type PreparedZipBudget } from "@/lib/grade/prepared-zip-budget";
 import { GRADING_ZIP_MAX_BYTES } from "@/lib/grade/grading-zip-transport";
-import { indexedBrightspaceGroup } from "./indexedBrightspaceGroup";
+import { includeAllReviewedFiles, indexedBrightspaceGroup } from "./indexedBrightspaceGroup";
 
 export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incomingFile, autoSubmit = false, onClose, onManualOpen }: { incomingFile?: File | null; autoSubmit?: boolean; onClose?: () => void; onManualOpen?: () => void; onSelectionStart?: () => void; onAdmitted?: (indices: readonly number[]) => void; onSubmit: (source: File, file: File, selected: readonly RecoverableGroup[], omitted: readonly RecoverableGroup[], mapping: Readonly<Record<string, string>>, review?: PartialHashReview, project?: { readonly mappedPaths: readonly string[]; readonly excludedPaths: readonly string[] }) => Promise<string | null> }) {
   const [open, setOpen] = useState(!!incomingFile), [file, setFile] = useState<File | null>(incomingFile ?? null);
@@ -48,7 +48,7 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
       const indexComplete = !!indexData && numericGroups.length > 0 && indexData.evidence.unassigned.every(isBrightspaceFormattingOnly) && numericGroups.every((group) => !!indexData!.evidence.groups[group.label]?.length);
       const visibleGroups = (indexComplete ? result.groups.filter((group) => group.reason !== "unassigned index") : result.groups).map((group) => indexedBrightspaceGroup(group, indexComplete, indexComplete ? indexData?.evidence.attemptRows?.[group.label] : undefined));
       const projects: Record<string, readonly ProjectInventoryFile[]> = Object.create(null);
-      for (const group of visibleGroups) if (group.reason === "nested archive" && /^\d+-\d+$/.test(group.label) && inferred[group.label]) for (const member of group.members.filter((item) => item.nestedArchive)) {
+      for (const group of result.groups) if (group.reason === "nested archive" && /^\d+-\d+$/.test(group.label) && inferred[group.label]) for (const member of group.members.filter((item) => item.nestedArchive)) {
         const inventory = await inspectBrightspaceProject(next, member); if (token !== generation.current) return; if (inventory.ok) projects[member.path] = inventory.files;
       }
 
@@ -67,6 +67,13 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
   const nameCounts = new Map<string, number>(); for (const group of groups) { const name = names[group.label]; if (name && (!group.reason || projectReady(group, projectFiles))) { const key = name.normalize("NFKC").toLocaleLowerCase(); nameCounts.set(key, (nameCounts.get(key) ?? 0) + 1); } }
   const blocked = (group: RecoverableGroup): RecoverableGroup["reason"] => (group.reason && !projectReady(group, projectFiles) ? (group.reason === "nested archive" ? "nested project has unsupported files or no usable source" : group.reason) : undefined) ?? (!names[group.label] ? "student identity could not be resolved" : nameCounts.get(names[group.label].normalize("NFKC").toLocaleLowerCase()) !== 1 ? "student identity is ambiguous" : undefined) ?? (indexEvidence && /^\d+-\d+$/.test(group.label) && !indexAccounted ? "index evidence could not be assigned completely" : undefined);
   const eligible = groups.filter((group) => !blocked(group));
+  const includeAll = (held: RecoverableGroup) => {
+    const original = sourceGroups.find((group) => group.label === held.label);
+    const reviewed = includeAllReviewedFiles(held, original);
+    if (!reviewed || !names[held.label] || (indexEvidence && !indexAccounted)) return;
+    automatic.current = null;
+    setGroups((previous) => previous.map((group) => group === held ? reviewed : group));
+  };
   const grade = async (automaticRun = false) => {
     if (!file || !selected.length || busy || uncertain || submitting.current || selected.some((label) => !eligible.some((group) => group.label === label))) return;
     submitting.current = true; onSelectionStart?.(); const token = generation.current, verifiedMembers = new WeakMap<Blob, Set<string>>(), sourceDigests = new WeakMap<File, string>(); let dispatched = 0, refusedBeforeDispatch = false; setBusy(true); setError(""); setCompleted(0);
@@ -107,7 +114,7 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
           const selectedPaths = Object.fromEntries(groups.filter((group) => labels.includes(group.label) && group.historicalPaths?.length).map((group) => [group.label, group.members.map((member) => member.path)]));
           const result = await buildRecoverableZip(file, labels, true, verifiedMembers, deferAggregateRatio, selectedPaths); if (token !== generation.current) throw new Error("Archive review was closed.");
           if (!result.ok) return result;
-          prepared = { ...result, project: undefined };
+          prepared = { ...result, selected: result.selected.map((item) => groups.find((group) => group.label === item.label && group.allFilesReviewed) ?? item), project: undefined };
         }
         if (!indexEvidence) return { ok: true, value: prepared };
         const covered = prepared.selected.filter((group) => extraByLabel.has(group.label));
@@ -152,14 +159,14 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
     <Dialog open={open} onClose={() => { if (!busy) close(); }} fullWidth maxWidth="md" aria-labelledby="large-zip-title">
       <DialogTitle id="large-zip-title">Review oversized ZIP</DialogTitle>
       <DialogContent><Stack spacing={2}>
-        <Alert severity="info">Names come from the LMS export and filenames. When the index identifies distinct submission times, the latest identifiable nested-project attempt is selected and earlier files remain in the original archive. Ambiguous attempts are held. Nested projects are analyzed without executing code. Recognized build artifacts, executables, and exact matches to a published course dataset are excluded and recorded as incomplete evidence; executables are not examined. Projects without identified source require instructor review and do not receive a final score.</Alert>
+        <Alert severity="info">Names come from the LMS export and filenames. Different file upload times do not establish separate attempts. For a held group, choose to include all files together if you want to review them as one submission; this does not identify the latest attempt. Nested projects are analyzed without executing code. Recognized build artifacts, executables, and exact matches to a published course dataset are excluded and recorded as incomplete evidence; executables are not examined. Projects without identified source require instructor review and do not receive a final score.</Alert>
         <Button component="label" variant="outlined" disabled={busy}>Choose ZIP<input hidden type="file" accept=".zip,application/zip" onChange={(event) => void choose(event.target.files?.[0])} /></Button>
         {file && <Typography>{file.name}</Typography>}
         {busy && <Typography role="status">{progress ? `Checking ${progress.phase === "source" ? "original archive" : "selected files"}: ${progress.written} of ${progress.total} bytes` : `Preparing submissions${completed ? `; ${completed} groups submitted` : ""}...`}</Typography>}
         {progress && <LinearProgress variant={progress.total ? "determinate" : "indeterminate"} value={progress.total ? progress.written / progress.total * 100 : undefined} aria-label="Archive verification progress" />}
         {error && <Alert severity="error">{error}</Alert>}{uncertain && <Alert severity="warning">Submission may have started. Check results before retrying.</Alert>}
         {!!groups.length && <FormControlLabel control={<Checkbox disabled={busy || !eligible.length} checked={eligible.length > 0 && selected.length === eligible.length} indeterminate={selected.length > 0 && selected.length < eligible.length} onChange={(_, checked) => { automatic.current = null; setSelected(checked ? eligible.map((group) => group.label) : []); }} />} label={`Select all eligible (${eligible.length})`} />}
-        <Stack spacing={0} sx={{ maxHeight: 320, overflowY: "auto" }}>{groups.map((group) => <Stack key={group.label} spacing={0.5}><FormControlLabel control={<Checkbox checked={selected.includes(group.label)} disabled={busy || !!blocked(group)} onChange={(_, checked) => { automatic.current = null; setSelected((previous) => checked ? [...previous, group.label] : previous.filter((label) => label !== group.label)); }} />} label={`${names[group.label] ?? group.label}${blocked(group) ? ` — held: ${blocked(group)}` : ""}`} /><Tooltip title={group.members.flatMap((member) => [member.path, ...(projectFiles[member.path] ?? []).filter(isExcludedProjectFile).map((item) => `Excluded: ${member.path}/${item.path}`)]).join("\n")} slotProps={{ tooltip: { sx: { whiteSpace: "pre-line", maxHeight: 300, overflowY: "auto" } } }}><Typography variant="body2" tabIndex={0}>{group.members.length} {group.members.length === 1 ? "file" : "files"}{projectReady(group, projectFiles) ? `; ${group.members.flatMap((member) => projectFiles[member.path] ?? []).filter(isExcludedProjectFile).length} artifacts, unexamined executables, or verified course datasets excluded` : ""}</Typography></Tooltip></Stack>)}</Stack>
+        <Stack spacing={0} sx={{ maxHeight: 320, overflowY: "auto" }}>{groups.map((group) => <Stack key={group.label} spacing={0.5}><FormControlLabel control={<Checkbox checked={selected.includes(group.label)} disabled={busy || !!blocked(group)} onChange={(_, checked) => { automatic.current = null; setSelected((previous) => checked ? [...previous, group.label] : previous.filter((label) => label !== group.label)); }} />} label={`${names[group.label] ?? group.label}${blocked(group) ? ` — held: ${blocked(group)}` : ""}`} /><Tooltip title={group.members.flatMap((member) => [member.path, ...(projectFiles[member.path] ?? []).filter(isExcludedProjectFile).map((item) => `Excluded: ${member.path}/${item.path}`)]).join("\n")} slotProps={{ tooltip: { sx: { whiteSpace: "pre-line", maxHeight: 300, overflowY: "auto" } } }}><Typography variant="body2" tabIndex={0}>{group.members.length} {group.members.length === 1 ? "file" : "files"}{projectReady(group, projectFiles) ? `; ${group.members.flatMap((member) => projectFiles[member.path] ?? []).filter(isExcludedProjectFile).length} artifacts, unexamined executables, or verified course datasets excluded` : ""}{group.allFilesReviewed ? "; all files included together by instructor choice" : ""}</Typography></Tooltip>{group.reason === "held for review" && !!names[group.label] && (!indexEvidence || indexAccounted) && <Button disabled={busy} size="small" onClick={() => includeAll(group)} sx={{ alignSelf: "flex-start" }}>Include all files together</Button>}</Stack>)}</Stack>
       </Stack></DialogContent>
       <DialogActions><Button disabled={busy && !progress} onClick={() => { if (busy && !hashing.current) return; if (hashing.current) setUncertain(false); close(); }}>{progress ? "Cancel verification" : "Close"}</Button><Button variant="contained" disabled={busy || uncertain || !selected.length} onClick={() => void grade()}>Grade selected ({selected.length})</Button></DialogActions>
     </Dialog>

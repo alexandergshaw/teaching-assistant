@@ -11,7 +11,7 @@ export interface UseContinuousGradingRunParams {
   /** Defaults to the real /api/grade-run-item POST. */
   readonly dispatchItem?: (request: GradeRunItemRequestBody, sink?: ItemDiagnosticSink) => Promise<GradeResult>;
   /** Defaults to the real never-throw NDJSON client for ZIP ingestion. */
-  readonly ingestZip?: (storagePath: string, provider: string, onEntry: (entry: StudentSubmissionEntry) => void, reviewedZipMapping?: Readonly<Record<string, string>>, staticOnly?: true, expectedOwnerSession?: { readonly accountId: string; readonly sessionId: string }) => Promise<IngestOutcome>;
+  readonly ingestZip?: (storagePath: string, provider: string, onEntry: (entry: StudentSubmissionEntry) => void, reviewedZipMapping?: Readonly<Record<string, string>>, staticOnly?: true, expectedOwnerSession?: { readonly accountId: string; readonly sessionId: string }, staticStudents?: readonly string[]) => Promise<IngestOutcome>;
   readonly prepareVideo?: PrepareVideoFn;
   readonly classifyRecording?: ClassifyRecordingFn;
   readonly prepareSingleFile?: PrepareSingleFileFn;

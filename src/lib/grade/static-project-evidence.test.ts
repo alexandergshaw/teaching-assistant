@@ -9,6 +9,17 @@ describe("static CSV evidence", () => {
     const compact = stripUnneededRawBase64(entry); expect(compact.content).not.toContain(csv); expect(compact.submittedFiles[0].rawBase64).toBe(rawBase64);
     expect(restoreStaticTextEvidence(compact)?.content).toBe(entry.content); expect(entry.content).toContain(csv);
   });
+  it("restores identical files independently without losing or duplicating their content", () => {
+    const duplicate = { ...entry, content: `first\n${csv}\nsecond\n${csv}\nthird\n${csv}`, submittedFiles: [file, { ...file, name: "copy/data.csv" }, { ...file, name: "debug/data.csv" }] };
+    const compact = stripUnneededRawBase64(duplicate);
+    expect(new Set(compact.submittedFiles.map(item => item.staticTextMarker)).size).toBe(3);
+    expect(restoreStaticTextEvidence(compact)?.content).toBe(duplicate.content);
+    expect(compact.submittedFiles.map(item => item.rawBase64)).toEqual([rawBase64, rawBase64, rawBase64]);
+  });
+  it("refuses ambiguous extra occurrences instead of changing evidence", () => {
+    const ambiguous = { ...entry, content: `${csv}\n${csv}` };
+    expect(restoreStaticTextEvidence(stripUnneededRawBase64(ambiguous))).toBeNull();
+  });
   it("refuses missing, invalid, mismatched and repeated source markers", () => {
     const compact = stripUnneededRawBase64(entry), marker = compact.submittedFiles[0].staticTextMarker!;
     for (const modified of [

@@ -16,6 +16,12 @@ it("persists omissions before dispatch and refuses a duplicate or mismatched set
   expect(reservePartialHandoff(storage, record)).toBe(false);
   expect(reservePartialHandoff(storage, { ...record, account: "account-b" })).toBe(true);
 });
+it("retains the explicit all-files grouping choice with both source paths", () => {
+ const records = new Map<string, string>(); const storage: LedgerStorage = { get length() { return records.size; }, key: (index) => [...records.keys()][index] ?? null, getItem: (key) => records.get(key) ?? null, setItem: (key, value) => { records.set(key, value); } };
+ const record: PartialHandoffRecord = { account: "owner", sourceDigest: "a".repeat(64), subsetDigest: "b".repeat(64), selected: [{ student: "Student", files: ["project.zip", "reflection.docx"], grouping: "all-files-reviewed" }], omitted: [], status: "pending" };
+ expect(reservePartialHandoff(storage, record)).toBe(true);
+ expect(listPartialHandoffs(storage as Storage, "owner")[0].selected).toEqual(record.selected);
+});
 it("keeps explicit repeat submissions in separate records without replacing an uncertain earlier attempt", () => {
  const records = new Map<string,string>(); const storage: LedgerStorage = { get length(){return records.size},key:(i)=>[...records.keys()][i]??null,getItem:(k)=>records.get(k)??null,setItem:(k,v)=>{records.set(k,v)} };
  const base: PartialHandoffRecord = {account:"owner",sourceDigest:"a".repeat(64),subsetDigest:"b".repeat(64),selected:[{student:"Student",files:["work.txt"]}],omitted:[],status:"pending"};

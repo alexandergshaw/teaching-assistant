@@ -4,7 +4,7 @@ export interface PartialHandoffRecord {
   readonly attemptId?: string;
   readonly sourceDigest: string;
   readonly subsetDigest: string;
-  readonly selected: readonly { readonly student: string; readonly files: readonly string[] }[];
+  readonly selected: readonly { readonly student: string; readonly files: readonly string[]; readonly grouping?: "all-files-reviewed" }[];
   readonly omitted: readonly { readonly student: string; readonly files: readonly string[]; readonly reason: string }[];
   readonly pendingAtHandoff?: readonly { readonly student: string; readonly files: readonly string[] }[];
   readonly indexDigest?: string;

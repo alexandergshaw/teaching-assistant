@@ -412,5 +412,10 @@ it("carries static review through stored ZIP extraction and preserves the origin
   expect(reviewed[0].type).toBe("entry");
   const returned = reviewed[0].entry as typeof entry & { staticOnly: boolean };
   expect(returned.staticOnly).toBe(true); expect(returned.content).toBe(text); expect(returned.submittedFiles[0].rawBase64).toBe(rawBase64);
+  const perStudent = await readLines(await POST(jsonRequest({ storagePath: GOOD_PATH, reviewedZipMapping: mapping, staticStudents: ["Synthetic"] })));
+  expect(perStudent[0].type).toBe("entry"); expect((perStudent[0].entry as { staticOnly?: boolean }).staticOnly).toBe(true);
+  const wrongStudent = await readLines(await POST(jsonRequest({ storagePath: GOOD_PATH, reviewedZipMapping: mapping, staticStudents: ["Other"] })));
+  expect(wrongStudent).toHaveLength(1); expect(String(wrongStudent[0].error)).toMatch(/mapping does not match/i);
   expect((await POST(jsonRequest({ storagePath: GOOD_PATH, staticOnly: true }))).status).toBe(400);
+  expect((await POST(jsonRequest({ storagePath: GOOD_PATH, staticStudents: ["Synthetic"] }))).status).toBe(400);
 });

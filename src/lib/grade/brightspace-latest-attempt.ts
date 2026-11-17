@@ -21,6 +21,10 @@ export function latestBrightspaceAttempt(paths: readonly string[], rows: readonl
   }
   const identified = paths.map((path) => ({ path, stem: path.replace(/\.[^./]+$/, "") }));
   if (identified.some(({ stem }) => !times.has(stem)) || [...times.keys()].some((stem) => !identified.some((item) => item.stem === stem))) return null;
+  // Brightspace records file upload times, not an authoritative attempt ID.
+  // Different timestamps can be files from one submission, so never discard
+  // an older file solely because a newer file appears in the same group.
+  if (new Set(identified.map(({ stem }) => times.get(stem)!)).size > 1) return null;
   const newest = Math.max(...identified.map(({ stem }) => times.get(stem)!));
   if (new Set(identified.filter(({ stem }) => times.get(stem) === newest).map(({ stem }) => stem)).size > 1) return null;
   return { latest: identified.filter(({ stem }) => times.get(stem) === newest).map(({ path }) => path), earlier: identified.filter(({ stem }) => times.get(stem) !== newest).map(({ path }) => path) };

@@ -140,6 +140,8 @@ export async function POST(req: NextRequest) {
   if (body.staticOnly !== undefined && (!staticOnly || body.reviewedZipMapping === undefined)) return NextResponse.json({ error: "Invalid static review request. Nothing was queued." }, { status: 400 });
   const reviewedMapping = body.reviewedZipMapping === undefined ? undefined : parseReviewedZipMapping(body.reviewedZipMapping);
   if (body.reviewedZipMapping !== undefined && !reviewedMapping) return NextResponse.json({ error: "The reviewed file mapping is invalid. Nothing was queued." }, { status: 400 });
+  const staticStudents = body.staticStudents;
+  if (staticStudents !== undefined && (!reviewedMapping || staticOnly || !Array.isArray(staticStudents) || !staticStudents.length || staticStudents.length > 1000 || staticStudents.some((name) => typeof name !== "string" || !name.trim() || name.length > 200))) return NextResponse.json({ error: "Invalid per-student static review request. Nothing was queued." }, { status: 400 });
   const includesIndexEvidence = !!reviewedMapping && Object.keys(reviewedMapping).some((path) => /brightspace-index-evidence\.txt$/i.test(path));
   if ((body.expectedOwnerSession !== undefined || includesIndexEvidence) && (!isExpectedOwnerSession(body.expectedOwnerSession) || !await verifySingleZipOwnerSession(body.expectedOwnerSession))) return NextResponse.json({ error: "The owner session changed. Nothing was queued." }, { status: 401 });
 
@@ -283,7 +285,13 @@ export async function POST(req: NextRequest) {
     const more = failedSupportedFiles.length > 3 ? ` and ${failedSupportedFiles.length - 3} more` : "";
     return ndjsonResponse([encodeIngestLine({ type: "done", error: `Some files in the archive could not be read: ${shown}${more}. Fix the archive and try again.` })]);
   }
-  const lines = buildIngestLines(staticOnly ? entries.map((entry) => ({ ...entry, staticOnly: true as const })) : entries, failedSupportedFiles, undefined, classification, videoOutcomes);
+  const key = (name: string) => name.normalize("NFKC").trim().toLocaleLowerCase();
+  const staticKeys = new Set((staticStudents as string[] | undefined)?.map(key) ?? []);
+  if (staticStudents && (staticKeys.size !== (staticStudents as string[]).length || [...staticKeys].some((name) => entries.filter((entry) => key(entry.student) === name).length !== 1 || !Object.values(reviewedMapping!).some((value) => key(value) === name)))) {
+    await discardStaged();
+    return ndjsonResponse([encodeIngestLine({ type: "done", error: "The per-student static review mapping does not match the archive. Nothing was queued." })]);
+  }
+  const lines = buildIngestLines(staticOnly || staticKeys.size ? entries.map((entry) => staticOnly || staticKeys.has(key(entry.student)) ? { ...entry, staticOnly: true as const } : entry) : entries, failedSupportedFiles, undefined, classification, videoOutcomes);
   const emittedRefs = new Set(lines.flatMap((line) => line.type === "entry"
     ? line.entry.submittedFiles.flatMap((file) => file.videoRef ? [file.videoRef.storagePath] : [])
     : []));

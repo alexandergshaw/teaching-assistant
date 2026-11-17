@@ -640,7 +640,8 @@ export async function runSubmittedCode(
       return finalizeCodeRunResult(await runVercelCode(selection.language, selection.runFiles, signal), selection.entryPoint, selection.skipped);
     } catch (error) {
       const timedOut = isTimeoutError(error) || signal.aborted;
-      return finalizeCodeRunResult({ language: selection.language, files: selection.runFiles.map((file) => file.name), ran: false, exitCode: null, stdout: "", stderr: "", error: timedOut ? "Isolated code execution timed out; no execution result was established." : "Isolated code execution is unavailable; no execution result was established.", timedOut }, selection.entryPoint, selection.skipped);
+      const configurationFailure = error instanceof Error && ["A digest-pinned prebuilt sandbox image is required.", "The configured sandbox image does not provide the required toolchain."].includes(error.message) ? error.message : null;
+      return finalizeCodeRunResult({ language: selection.language, files: selection.runFiles.map((file) => file.name), ran: false, exitCode: null, stdout: "", stderr: "", error: timedOut ? "Isolated code execution timed out; no execution result was established." : configurationFailure ?? "Isolated code execution is unavailable; no execution result was established.", timedOut }, selection.entryPoint, selection.skipped);
     }
   }
 

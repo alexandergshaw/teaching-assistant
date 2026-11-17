@@ -1,3 +1,4 @@
+import { notebookVisualsEnabled } from "./notebook-visuals-enabled";
 import { createGithubBoundedReadContext } from "../github-bounded-read";
 import { prepareNotebookVisuals, projectNotebookText } from "./notebook-visuals";
 import { boundSubmissionInventory, inventoryPathInScope, type SubmissionFileInventory } from "./submission-file-inventory";
@@ -99,7 +100,7 @@ export async function fetchGradableRepoContent(submissionUrl: string): Promise<G
 
   const scope: SubmissionFileInventory["scope"] = { kind: subpath ? parsed.kind ?? "tree" : "repository", path: subpath ?? null };
   const scoped = tree.entries.filter((entry) => entry.type === "blob" && inventoryPathInScope(entry.path, scope));
-  const { selected, truncated: selectionTruncated } = selectSubmissionRepoFiles(scoped, undefined, process.env.GRADE_NOTEBOOK_VISUALS === "1" ? { maxNotebookBytes: 2_000_000 } : {});
+  const { selected, truncated: selectionTruncated } = selectSubmissionRepoFiles(scoped, undefined, notebookVisualsEnabled() ? { maxNotebookBytes: 2_000_000 } : {});
   const selectedPaths = new Set(selected.map((entry) => entry.path));
   const inventory = boundSubmissionInventory({ source: `${owner}/${repo} @ ${resolvedRef}`, scope, enumerationComplete: !tree.truncated && !tree.unenumerated, files: scoped.map((entry) => ({ path: entry.path, content: selectedPaths.has(entry.path) ? "unreadable" : selectSubmissionRepoFiles([entry], undefined, { maxFiles: 1, maxFileBytes: Number.MAX_SAFE_INTEGER }).selected.length ? "budget" : "unsupported" })) });
   if (selected.length === 0) {
@@ -116,7 +117,7 @@ export async function fetchGradableRepoContent(submissionUrl: string): Promise<G
   for (const entry of selected) {
     let text: string;
     try {
-      if (process.env.GRADE_NOTEBOOK_VISUALS === "1" && /\.ipynb$/i.test(entry.path)) {
+      if (notebookVisualsEnabled() && /\.ipynb$/i.test(entry.path)) {
         const context = createGithubBoundedReadContext(Date.now() + 20_000, 2_000_001);
         try { text = await getFileText(owner, repo, entry.path, resolvedRef, context, 2_000_000); }
         finally { context.dispose(); }
@@ -125,8 +126,8 @@ export async function fetchGradableRepoContent(submissionUrl: string): Promise<G
       // Skip a file that cannot be read rather than failing the whole pull.
       continue;
     }
-    const clamped = clampFileBytes(text, process.env.GRADE_NOTEBOOK_VISUALS === "1" && /\.ipynb$/i.test(entry.path) ? 2_000_000 : undefined);
-    if (/\.ipynb$/i.test(entry.path) && (process.env.GRADE_NOTEBOOK_VISUALS === "1" ? (await prepareNotebookVisuals(text, clamped.truncated)).status !== "complete" : notebookNeedsVisualReview(text))) clamped.truncated = true;
+    const clamped = clampFileBytes(text, notebookVisualsEnabled() && /\.ipynb$/i.test(entry.path) ? 2_000_000 : undefined);
+    if (/\.ipynb$/i.test(entry.path) && (notebookVisualsEnabled() ? (await prepareNotebookVisuals(text, clamped.truncated)).status !== "complete" : notebookNeedsVisualReview(text))) clamped.truncated = true;
     if (clamped.truncated) perFileTruncated = true;
     fetched.push({ path: entry.path, text: clamped.text, truncated: clamped.truncated });
   }
@@ -141,7 +142,7 @@ export async function fetchGradableRepoContent(submissionUrl: string): Promise<G
     if (read) file.content = read.truncated ? "truncated" : "read";
     else if (fetched.some((item) => item.path === file.path)) file.content = "budget";
   }
-  const content = budgeted.files.map((f) => `File: ${f.path}\n\n${process.env.GRADE_NOTEBOOK_VISUALS === "1" && /\.ipynb$/i.test(f.path) && !f.truncated ? projectNotebookText(f.text) : f.text}`).join("\n\n---\n\n");
+  const content = budgeted.files.map((f) => `File: ${f.path}\n\n${notebookVisualsEnabled() && /\.ipynb$/i.test(f.path) && !f.truncated ? projectNotebookText(f.text) : f.text}`).join("\n\n---\n\n");
 
   return {
     inventory,

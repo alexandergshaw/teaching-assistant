@@ -1,3 +1,4 @@
+import { notebookVisualsEnabled } from "./notebook-visuals-enabled";
 import { MAX_STATIC_PROJECT_CONTENT_CHARS } from "@/lib/grade/static-project-limits";
 import { prioritizeModelContent } from "./large-data-model-content";
 import { reportsLengthCriterionDeduction, reportsLengthPenalty } from "./reported-length-penalty";
@@ -523,8 +524,8 @@ async function gradeStudentEntries(
       break;
     }
     const { student, content, mergedFileCount, submittedFiles, userId, codeRun: precomputedCodeRun, gradedRepo, gradedRef, repositoryInventories } = limitedEntries[i];
-    const missingNotebookPayload = process.env.GRADE_NOTEBOOK_VISUALS === "1" && repositoryInventories?.some(inventory => inventory.files.some(file => /\.ipynb$/i.test(file.path) && submittedFiles.filter(item => item.name === file.path && item.extension.toLowerCase() === "ipynb" && !item.previewTruncated).length !== 1));
-    const unavailableDirectNotebook = process.env.GRADE_NOTEBOOK_VISUALS !== "1" && submittedFiles.some(file => file.extension.toLowerCase() === "ipynb" && (file.previewTruncated || notebookNeedsVisualReview(file.previewContent)));
+    const missingNotebookPayload = notebookVisualsEnabled() && repositoryInventories?.some(inventory => inventory.files.some(file => /\.ipynb$/i.test(file.path) && submittedFiles.filter(item => item.name === file.path && item.extension.toLowerCase() === "ipynb" && !item.previewTruncated).length !== 1));
+    const unavailableDirectNotebook = !notebookVisualsEnabled() && submittedFiles.some(file => file.extension.toLowerCase() === "ipynb" && (file.previewTruncated || notebookNeedsVisualReview(file.previewContent)));
     if (hasUnreviewedNotebook(repositoryInventories) || missingNotebookPayload || unavailableDirectNotebook) {
       results.push(buildEvidenceHeldRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}Submission evidence could not be fully inspected. No score was assigned; review the submission before grading.` }));
       continue;
@@ -563,7 +564,7 @@ async function gradeStudentEntries(
       results.push(buildUngradedRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: canvasVideo }));
       continue;
     }
-    if (process.env.GRADE_NOTEBOOK_VISUALS === "1" && submissionTruncated && submittedFiles.some(file => file.extension.toLowerCase() === "ipynb")) {
+    if (notebookVisualsEnabled() && submissionTruncated && submittedFiles.some(file => file.extension.toLowerCase() === "ipynb")) {
       results.push(buildEvidenceHeldRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}The notebook and its surrounding submission exceed the grading input budget. No score was assigned.` }));
       continue;
     }

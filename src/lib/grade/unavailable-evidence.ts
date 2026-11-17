@@ -25,6 +25,10 @@ export function notebookNeedsVisualReview(text: string): boolean {
     return (notebook as { cells: unknown[] }).cells.some((cell) => {
       if (!cell || typeof cell !== "object") return true;
       const record = cell as { outputs?: unknown; attachments?: unknown; source?: unknown; cell_type?: unknown };
+      if (!["code", "markdown", "raw"].includes(record.cell_type as string)) return true;
+      if (typeof record.source !== "string" && !(Array.isArray(record.source) && record.source.every((part: unknown) => typeof part === "string"))) return true;
+      if (record.cell_type === "code" && !Array.isArray(record.outputs)) return true;
+      if (record.cell_type !== "code" && record.outputs !== undefined) return true;
       if (record.attachments && (typeof record.attachments !== "object" || Object.keys(record.attachments).length)) return true;
       const source = Array.isArray(record.source) ? record.source.join("") : typeof record.source === "string" ? record.source : "";
       if (record.cell_type !== "code" && /!\[|<\s*\/?[a-z]/i.test(source)) return true;
@@ -33,8 +37,11 @@ export function notebookNeedsVisualReview(text: string): boolean {
       if (!Array.isArray(outputs)) return true;
       return outputs.some((output) => {
         if (!output || typeof output !== "object") return true;
-        const record = output as { data?: unknown; output_type?: unknown };
+        const record = output as { data?: unknown; output_type?: unknown; text?: unknown; ename?: unknown; evalue?: unknown; traceback?: unknown };
         const data = record.data;
+        if (record.output_type === "stream") return !(typeof record.text === "string" || (Array.isArray(record.text) && record.text.every((part: unknown) => typeof part === "string")));
+        if (record.output_type === "error") return !(typeof record.ename === "string" && typeof record.evalue === "string" && Array.isArray(record.traceback) && record.traceback.every((part: unknown) => typeof part === "string"));
+        if (record.output_type !== "display_data" && record.output_type !== "execute_result") return true;
         if ((record.output_type === "display_data" || record.output_type === "execute_result") && (data === undefined || data === null)) return true;
         return data !== undefined && (data === null || typeof data !== "object" || Array.isArray(data) || Object.keys(data).some((key) => key !== "text/plain"));
       });

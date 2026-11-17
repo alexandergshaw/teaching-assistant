@@ -84,7 +84,7 @@ describe("fetchGradableRepoContent - URL forms (AC2.2)", () => {
     mockGetRepo.mockResolvedValueOnce(fakeRepo("main"));
     mockListCommits.mockResolvedValueOnce([{ sha: "sha1", message: "", author: "", date: "", htmlUrl: "" }]);
     mockGetRepoTree.mockResolvedValueOnce({ entries: [{ path: "optimization_engine.ipynb", type: "blob", size: 120, sha: "x" }], truncated: false });
-    mockGetFileText.mockResolvedValueOnce('{"cells":[{"cell_type":"code","source":["print(42)"]}],"nbformat":4}');
+    mockGetFileText.mockResolvedValueOnce('{"cells":[{"cell_type":"code","source":["print(42)"],"outputs":[]}],"nbformat":4}');
     const result = await fetchGradableRepoContent("https://github.com/octo/cat");
     if ("error" in result) throw new Error(result.error);
     expect(result.content).toContain("print(42)");

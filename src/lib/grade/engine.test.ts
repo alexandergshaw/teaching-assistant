@@ -511,7 +511,7 @@ describe("notebook image dispatch", () => {
         expect(mockCallLlm).not.toHaveBeenCalled();
       }
       mockCallLlm.mockResolvedValueOnce({ ok: true, text: OK_RESPONSE_TEXT });
-      const textOnly = { name: "work.ipynb", extension: "ipynb", previewContent: JSON.stringify({ cells: [{ outputs: [{ data: { "text/plain": "42" } }] }] }), previewTruncated: false };
+      const textOnly = { name: "work.ipynb", extension: "ipynb", previewContent: JSON.stringify({ cells: [{ cell_type: "code", source: [], outputs: [{ output_type: "execute_result", data: { "text/plain": "42" } }] }] }), previewTruncated: false };
       await gradeEntries([entry({ submittedFiles: [textOnly] })], "Grade it.", "Correctness (10 points).", "gemini", null, { autoRunCode: false });
       expect(mockCallLlm).toHaveBeenCalledOnce();
     } finally { vi.unstubAllEnvs(); }
@@ -520,7 +520,7 @@ describe("notebook image dispatch", () => {
     vi.stubEnv("GRADE_NOTEBOOK_VISUALS", "1");
     try {
       const image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
-      const submittedFiles = [{ name: "work.ipynb", extension: "ipynb", previewContent: JSON.stringify({ cells: [{ cell_type: "code", outputs: [{ output_type: "display_data", data: { "image/png": image } }] }] }), previewTruncated: false }];
+      const submittedFiles = [{ name: "work.ipynb", extension: "ipynb", previewContent: JSON.stringify({ cells: [{ cell_type: "code", source: [], outputs: [{ output_type: "display_data", data: { "image/png": image } }] }] }), previewTruncated: false }];
       mockCallLlm.mockResolvedValueOnce({ ok: false, status: 400, body: "image unsupported" } as never);
       const result = await gradeEntries([entry({ submittedFiles })], "Grade it.", "Correctness (10 points).", "gemini", null, { autoRunCode: false });
       expect(mockCallLlm).toHaveBeenCalledOnce();
@@ -531,7 +531,7 @@ describe("notebook image dispatch", () => {
     vi.stubEnv("GRADE_NOTEBOOK_VISUALS", "1");
     try {
       const image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
-      const notebook = (data: object) => JSON.stringify({ cells: [{ cell_type: "code", outputs: [{ output_type: "display_data", data }] }] });
+      const notebook = (data: object) => JSON.stringify({ cells: [{ cell_type: "code", source: [], outputs: [{ output_type: "display_data", data }] }] });
       const studentFile = { name: "work.ipynb", extension: "IPYNB", previewContent: notebook({ "image/png": image }), previewTruncated: false };
       mockCallLlm.mockResolvedValueOnce({ ok: true, text: OK_RESPONSE_TEXT });
       await gradeEntries([entry({ submittedFiles: [studentFile] })], "Grade it.", "Correctness (10 points).", "gemini", null, { autoRunCode: false });

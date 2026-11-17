@@ -48,6 +48,8 @@ export async function prepareNotebookVisuals(text: string, truncated: boolean): 
     if (!notebook || !Array.isArray(notebook.cells)) return failed();
     for (const [cellIndex, cell] of notebook.cells.entries()) {
       if (!cell || typeof cell !== "object" || !["code", "markdown", "raw"].includes(cell.cell_type) || (cell.cell_type === "code" && !Array.isArray(cell.outputs)) || (cell.outputs !== undefined && !Array.isArray(cell.outputs))) return failed();
+      if (cell.cell_type !== "code" && cell.outputs !== undefined) return failed();
+      if (typeof cell.source !== "string" && !(Array.isArray(cell.source) && cell.source.every((part: unknown) => typeof part === "string"))) return failed();
       if (cell.attachments !== undefined && (typeof cell.attachments !== "object" || !cell.attachments || Object.keys(cell.attachments).length)) return failed();
       if (cell.cell_type !== "code" && /!\[|<\s*\/?[a-z]/i.test(Array.isArray(cell.source) ? cell.source.join("") : String(cell.source ?? ""))) return failed();
       for (const [outputIndex, output] of (cell.outputs ?? []).entries()) {

@@ -166,6 +166,15 @@ describe("gradeEntriesEmbedded", () => {
     expect(run.results[0].codeExecution?.ran).toBe(true);
   });
 
+  it("does not award Code runs for a menu program that exited on empty input", () => {
+    const base = entry("Lopez", "import pandas\ndef clean(df): return df", ["py"]);
+    const withRun = { ...base, codeRun: { language: "c++", files: ["main.cpp"], ran: true, exitCode: 0, stdout: "Menu\nGood bye.", stderr: "", stdinReadSuspected: true } };
+    const run = gradeEntriesEmbedded([withRun], rubric);
+    expect(run.rubricAreaNames).not.toContain("Code runs");
+    expect(run.results[0].rubricAreas.some(area => area.area === "Code runs")).toBe(false);
+    expect(run.results[0].codeExecution?.stdout).toBe("Menu\nGood bye.");
+  });
+
   it("scores Code runs as zero when the code did not run cleanly", () => {
     const base = entry("Fay", "import pandas\ndef clean(df): return df", ["py"]);
     const withRun = { ...base, codeRun: { language: "python", files: ["Fay.py"], ran: false, exitCode: 1, stdout: "", stderr: "boom" } };

@@ -8,6 +8,8 @@ import TextField from "@mui/material/TextField";
 import { postCanvasGradesAction, runSubmissionCodeAction } from "../actions";
 import type { PreviewFile } from "./FilePreviewModal";
 import type { CodeRunResult } from "@/lib/code-runner";
+import { codeRunDisplay } from "@/lib/code-run-display";
+import Typography from "@mui/material/Typography";
 import { ModalShell } from "./ui/ModalShell";
 import { RowFeedbackBoxes } from "./grading-results/RowFeedbackBoxes";
 import SubmittedFilesPanel from "./grading-results/SubmittedFilesPanel";
@@ -768,19 +770,11 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                       // embedded-grader/index.ts). Labeling it the same red
                       // "Code: errors" as a genuine failure would mislead the
                       // instructor into thinking it dragged the score down.
-                      const label = !cr
-                        ? null
-                        : cr.error
-                          ? "Code: runner error"
-                          : cr.neededStdin
-                            ? "Code: no input available (not scored)"
-                            : cr.ran
-                              ? "Code: ran cleanly"
-                              : "Code: errors";
+                      const label = codeRunDisplay(cr)?.label;
                       return (
                         <div style={{ marginTop: "var(--space-1)" }}>
                           {label && (
-                            <div
+                            <Typography component="div"
                               className={styles.fieldHint}
                               style={{
                                 color:
@@ -790,7 +784,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                               }}
                             >
                               {label}
-                            </div>
+                            </Typography>
                           )}
                           <div style={{ display: "flex", gap: "var(--space-1)", marginTop: "var(--space-1)" }}>
                             <Button
@@ -945,10 +939,10 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                     student's code being broken when it is not. Wording is
                     reused verbatim from the badge rather than re-invented, so
                     one vocabulary describes this state everywhere. */}
-                <p className={styles.previewMeta}>
+                <Typography component="p" className={styles.previewMeta}>
                   Ran without errors:{" "}
-                  {cr.neededStdin ? "no input available (not scored)" : cr.ran ? "yes" : "no"}
-                </p>
+                  {codeRunDisplay(cr)?.detail}
+                </Typography>
                 {cr.compileOutput && cr.compileOutput.trim() && (
                   <>
                     <p className={styles.previewMeta}>Compiler output</p>

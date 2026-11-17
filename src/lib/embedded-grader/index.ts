@@ -136,7 +136,7 @@ export function gradeEntriesEmbedded(
   // existing points model (mirrors the pre-existing `error` skip - the
   // network-outage case that established this pattern).
   const codeRunCounts = (run: CodeRunResult | null | undefined): run is CodeRunResult =>
-    !!run && !run.error && !run.neededStdin;
+    !!run && !run.error && !run.neededStdin && !run.stdinReadSuspected;
   const anyCodeRun = entries.some((e) => codeRunCounts(e.codeRun));
   const rubricAreaNames = [
     ...rubric.checks.map((check) => check.criterion),

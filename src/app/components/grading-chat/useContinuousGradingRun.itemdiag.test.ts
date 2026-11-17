@@ -173,6 +173,14 @@ describe("useContinuousGradingRun - per-attempt grade_item detail", () => {
     expect(d).toMatchObject({ hasPraise: false, hasAdvice: true, areas: 2, truncated: true, link: "failed", code: "needs-input", scored: true });
   });
 
+  it("records a clean exit with suspected stdin as input-unverified", async () => {
+    const driver = await useStartedDriver();
+    dispatchItemMock.mockResolvedValueOnce(gradedWith("A", { codeExecution: { ran: true, stdinReadSuspected: true } as unknown as GradeResult["codeExecution"] }));
+    await driver.submit({ kind: "text", content: "one" });
+    await flushMicrotasks();
+    expect(items()[0].detail?.code).toBe("input-unverified");
+  });
+
   it("AC-12: the server diagnostic filled into the sink is merged and netMs is derived", async () => {
     const driver = await useStartedDriver();
     dispatchItemMock.mockImplementationOnce(async (_req: unknown, sink?: Sink) => {

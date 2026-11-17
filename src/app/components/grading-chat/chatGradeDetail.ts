@@ -25,7 +25,7 @@ export type ChatDetailBag = Record<string, number | boolean | string>;
 
 export type GradeTrigger = "first" | "retry" | "regrade";
 export type GradeLinkState = "none" | "ok" | "failed" | "flagged";
-export type GradeCodeState = "none" | "ran" | "failed" | "needs-input";
+export type GradeCodeState = "none" | "ran" | "failed" | "needs-input" | "input-unverified";
 
 const MODEL_TOKEN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 // A CLOSED list of provider finish reasons; anything else is recorded as
@@ -96,7 +96,7 @@ export interface GradeItemClientSignals {
 
 const TRIGGERS: readonly string[] = ["first", "retry", "regrade"];
 const LINK_STATES: readonly string[] = ["none", "ok", "failed", "flagged"];
-const CODE_STATES: readonly string[] = ["none", "ran", "failed", "needs-input"];
+const CODE_STATES: readonly string[] = ["none", "ran", "failed", "needs-input", "input-unverified"];
 
 /** Project the server `diagnostic` (an UNTRUSTED parsed body: unknown) onto the
  * whitelisted keys, re-validating each. A malformed or future body degrades to
@@ -348,7 +348,7 @@ export function resultSignals(result: GradeResult, body: GradeRunItemRequestBody
     hasAdvice: result.improvements.trim() !== "",
     truncated: result.submissionTruncated === true,
     link: result.linkFetch ?? "none",
-    code: run === undefined ? "none" : run.neededStdin ? "needs-input" : run.ran ? "ran" : "failed",
+    code: run === undefined ? "none" : run.neededStdin ? "needs-input" : run.ran && run.stdinReadSuspected ? "input-unverified" : run.ran ? "ran" : "failed",
   };
 }
 

@@ -6,6 +6,8 @@ import { Button, TextField, MenuItem } from "@mui/material";
 import styles from "../../page.module.css";
 import { fetchSubmissionRepoAction, runSubmissionCodeAction } from "../../actions";
 import type { CodeRunResult } from "@/lib/code-runner";
+import { codeRunDisplay } from "@/lib/code-run-display";
+import Typography from "@mui/material/Typography";
 import type { SubmissionRepoFile } from "@/lib/submission-repo";
 
 // Monaco (the VS Code editor) is client-only; load it lazily with SSR
@@ -163,9 +165,9 @@ export default function SubmissionCodePanel({ submissionUrl }: { submissionUrl: 
             <p className={styles.previewNotice}>The code runner could not execute this submission: {runResult.error}</p>
           ) : runResult ? (
             <>
-              <p className={styles.previewMeta}>
-                Ran without errors: {runResult.neededStdin ? "no input available (not scored)" : runResult.ran ? "yes" : "no"}
-              </p>
+              <Typography component="p" className={styles.previewMeta}>
+                Ran without errors: {codeRunDisplay(runResult)?.detail}
+              </Typography>
               {runResult.compileOutput && runResult.compileOutput.trim() && (
                 <>
                   <p className={styles.previewMeta}>Compiler output</p>

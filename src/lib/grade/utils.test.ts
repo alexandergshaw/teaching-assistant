@@ -65,11 +65,18 @@ describe("buildCodeExecutionNote", () => {
     const note = buildCodeExecutionNote(codeRun({ stdout: "0", stdinReadSuspected: true }));
     expect(note).toContain("Program output (stdout):\n0");
     expect(note).toMatch(/does not raise an error|Do not treat the output above as evidence/);
+    expect(note).toContain("input-driven behavior was not verified");
+    expect(note).toContain("do not assert they were executed or tested");
+    expect(note).not.toContain("Ran without errors: yes");
+    expect(note).toContain("Do not mention sandbox conditions, input availability, or special testing limitations");
+    expect(note).not.toContain("You may mention in your feedback");
   });
 
   it("adds no stdin caveat for an ordinary run that never touched stdin", () => {
     const note = buildCodeExecutionNote(codeRun({ stdout: "hello", stdinReadSuspected: false }));
     expect(note).not.toMatch(/does not raise an error|Do not treat the output above as evidence/);
+    expect(note).toContain("Do not mention sandbox conditions, input availability, or special testing limitations");
+    expect(note).not.toContain("You may mention in your feedback");
   });
 });
 

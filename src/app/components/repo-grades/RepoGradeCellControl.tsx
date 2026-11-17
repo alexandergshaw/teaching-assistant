@@ -66,6 +66,7 @@ import { isConfirmArmed } from "../content-tab/modules/confirmArming";
 // component reading this server-only-runtime shape.
 import { runSubmissionCodeAction } from "@/app/actions";
 import type { CodeRunResult } from "@/lib/code-runner";
+import { codeRunDisplay } from "@/lib/code-run-display";
 import type { RepoGradeColumn, RepoGradeRow } from "./repoGradesRows";
 import type { RepoGradeCellEdit } from "./repoGradesCellEdits";
 // docs/grading-results-feedback-boxes-acceptance-criteria.md, brought to this
@@ -597,7 +598,7 @@ export default function RepoGradeCellControl({
             </div>
             {displayedCodeRun && (
               <>
-                <span className={styles.postReason}>
+                <Typography component="span" className={styles.postReason}>
                   {/* U12.52-style "never make the instructor guess" rule,
                       applied here (docs for this feature, request 2's "Always
                       show WHICH file was executed"): a manual run is labeled as
@@ -612,16 +613,14 @@ export default function RepoGradeCellControl({
                       : `could not execute - ${displayedCodeRun.error}`
                     : displayedCodeRun.neededStdin
                       ? `${displayedCodeRun.entryPoint ?? "the submission"} found no input available (not scored)`
-                      : `${displayedCodeRun.entryPoint ?? "the submission"} ${
-                          displayedCodeRun.ran ? "ran cleanly" : "did not run cleanly"
-                        }`}
-                </span>
+                      : `${displayedCodeRun.entryPoint ?? "the submission"}: ${codeRunDisplay(displayedCodeRun)?.label.replace(/^Code: /, "")}`}
+                </Typography>
                 {codeRunOpen && !displayedCodeRun.error && (
                   <div className={styles.codeRunOutput}>
-                    <p className={pageStyles.previewMeta}>
+                    <Typography component="p" className={pageStyles.previewMeta}>
                       Ran without errors:{" "}
-                      {displayedCodeRun.neededStdin ? "no input available (not scored)" : displayedCodeRun.ran ? "yes" : "no"}
-                    </p>
+                      {codeRunDisplay(displayedCodeRun)?.detail}
+                    </Typography>
                     {displayedCodeRun.compileOutput && displayedCodeRun.compileOutput.trim() && (
                       <>
                         <p className={pageStyles.previewMeta}>Compiler output</p>

@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, type RefObject } from "react";
-import { Button } from "@mui/material";
+import { Button, Typography } from "@mui/material";
 import styles from "../page.module.css";
 import { runSubmissionCodeAction } from "../actions";
 import type { CodeRunResult } from "@/lib/code-runner";
+import { codeRunDisplay } from "@/lib/code-run-display";
 import { ModalShell } from "./ui/ModalShell";
 
 const RUNNABLE_EXTENSIONS = new Set(["ts", "py", "java", "c", "cpp", "cc", "cxx", "hpp", "h", "js"]);
@@ -172,9 +173,9 @@ export default function FilePreviewModal({
               <p className={styles.previewNotice}>The code runner could not execute this file: {runResult.error}</p>
             ) : runResult ? (
               <>
-                <p className={styles.previewMeta}>
-                  Ran without errors: {runResult.neededStdin ? "no input available (not scored)" : runResult.ran ? "yes" : "no"}
-                </p>
+                <Typography component="p" className={styles.previewMeta}>
+                  Ran without errors: {codeRunDisplay(runResult)?.detail}
+                </Typography>
                 {runResult.compileOutput && runResult.compileOutput.trim() && (
                   <>
                     <p className={styles.previewMeta}>Compiler output</p>

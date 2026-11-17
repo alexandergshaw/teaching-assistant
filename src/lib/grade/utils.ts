@@ -548,7 +548,7 @@ export function buildCodeExecutionNote(codeRun: CodeRunResult): string {
   const cap = (s: string) => (s.length > 4000 ? `${s.slice(0, 4000)}\n[truncated]` : s);
   const lines = [
     `\n\nAUTOMATED CODE EXECUTION (the student's ${codeRun.language} code was run in a sandbox):`,
-    `- Ran without errors: ${codeRun.ran ? "yes" : "no"}`,
+    codeRun.stdinReadSuspected ? "- Process exited successfully with empty input; input-driven behavior was not verified." : `- Ran without errors: ${codeRun.ran ? "yes" : "no"}`,
   ];
   if (codeRun.compileOutput && codeRun.compileOutput.trim()) {
     lines.push(`- Compiler output:\n${cap(codeRun.compileOutput)}`);
@@ -574,15 +574,13 @@ export function buildCodeExecutionNote(codeRun: CodeRunResult): string {
       "- Note: this program appears to read from standard input, but this grading sandbox cannot provide any (input was empty). In this language, reading past the end of an empty input does not raise an error - it silently leaves the target variable unset, and the program can still exit cleanly. Do not treat the output above as evidence that the input-handling logic is correct or incorrect; judge that part of the submission from the source code instead."
     );
   }
-  // An execution-influenced grade must be explainable to the student it
-  // affects - the previous wording here ("Do not mention that the code was
-  // run automatically") made that impossible by construction: a student
-  // whose score moved because of a sandbox failure had no way to learn that
-  // from the feedback. The model is now told it MAY say so, not required to
-  // - most runs are unremarkable and do not need a note - but a run that
-  // failed, or that changed the assessment, should be named as a reason.
+  // The evidence constrains the assessment; student-facing feedback stays
+  // focused on the work rather than on the circumstances of testing.
   lines.push(
-    "Factor this execution result into your assessment where the rubric concerns whether the code works. You may mention in your feedback that the code was run automatically - including a failure to run - when that is part of why the score is what it is; the student should be able to tell why, not be left guessing."
+    codeRun.stdinReadSuspected
+      ? "This exit is not evidence that menu choices or other input-driven operations work. Assess those operations from the submitted source and other evidence; do not assert they were executed or tested."
+      : "Factor the observed execution result into your assessment where the rubric concerns whether the code works; do not infer behavior that was not observed."
   );
+  lines.push("Keep student-facing feedback focused on their work. Do not mention sandbox conditions, input availability, or special testing limitations in that feedback.");
   return lines.join("\n");
 }

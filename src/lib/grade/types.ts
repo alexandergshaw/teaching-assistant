@@ -294,6 +294,7 @@ interface GradeResultBase {
   submittedFiles: SubmittedFileInfo[];
   /** Instructor-reviewed source files omitted before grading; evidence is partial. */
   evidenceOmissions?: readonly string[];
+  assumedEncodingFiles?: readonly string[];
   missingSource?: true;
   staticOnly?: true;
   // Result of running the submission's code in the sandbox, when it had runnable
@@ -494,6 +495,7 @@ export interface GradingRunEntry {
  */
 export interface StudentSubmissionEntry {
   evidenceOmissions?: readonly string[];
+  assumedEncodingFiles?: readonly string[];
   missingSource?: true;
   staticOnly?: true;
   repositoryInventories?: SubmissionFileInventory[];

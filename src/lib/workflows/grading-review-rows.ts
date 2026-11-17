@@ -79,6 +79,7 @@ export function stripGradeResultForDraft(result: GradeResult): GradeResult {
     // compensating re-attachment of its own - should see the same fact a
     // restored run does.
     evidenceOmissions: result.evidenceOmissions,
+    assumedEncodingFiles: result.assumedEncodingFiles,
     staticOnly: result.staticOnly,
     missingSource: result.missingSource,
     submissionTruncated: result.submissionTruncated,

@@ -20,6 +20,17 @@ describe("static CSV evidence", () => {
     const ambiguous = { ...entry, content: `${csv}\n${csv}` };
     expect(restoreStaticTextEvidence(stripUnneededRawBase64(ambiguous))).toBeNull();
   });
+  it("restores legacy source bytes with an explicit encoding assumption", () => {
+    const raw = Buffer.from([47, 47, 32, 0xa9]).toString("base64");
+    const preview = new TextDecoder().decode(Buffer.from(raw, "base64"));
+    const legacy = { ...entry, content: `header\n${preview}`, submittedFiles: [{ ...file, name: "source.cpp", extension: "cpp", rawBase64: raw, previewContent: preview }] };
+    const compact = stripUnneededRawBase64(legacy);
+    const restored = restoreStaticTextEvidence(compact);
+    expect(restored?.content).toContain("Source encoding assumed Windows-1252");
+    expect(restored?.assumedEncodingFiles).toEqual(["source.cpp"]);
+    expect(restored?.content).toContain("// \u00a9");
+    expect(restored?.submittedFiles[0].rawBase64).toBe(raw);
+  });
   it("refuses missing, invalid, mismatched and repeated source markers", () => {
     const compact = stripUnneededRawBase64(entry), marker = compact.submittedFiles[0].staticTextMarker!;
     for (const modified of [

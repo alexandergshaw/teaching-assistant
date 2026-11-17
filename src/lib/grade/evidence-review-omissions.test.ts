@@ -1,6 +1,12 @@
 import { expect, it } from "vitest";
 import { incompleteEvidenceReason, evidencePostRefusal } from "./evidence-review";
 import type { GradeResult } from "./types";
+it("names files whose text encoding was assumed and requires review", () => {
+  const row = { student: "Synthetic", totalScore: "1/1", strengths: "", improvements: "", resubmitNotice: "", overallComment: "", feedback: "", rubricAreas: [], mergedFileCount: 1, submittedFiles: [], assumedEncodingFiles: ["src/legacy.cpp"] } satisfies GradeResult;
+  expect(incompleteEvidenceReason(row)).toMatch(/Windows-1252 encoding was assumed for src\/legacy\.cpp.*previews may show replacement characters.*original downloadable files/i);
+  expect(evidencePostRefusal(row, new Set())).toMatch(/review before posting/i);
+  expect(evidencePostRefusal(row, new Set([row]))).toBeNull();
+});
 it("requires review when project source is absent", () => {
   const row = { student: "Synthetic", totalScore: "1/1", strengths: "", improvements: "", resubmitNotice: "", overallComment: "", feedback: "", rubricAreas: [], mergedFileCount: 1, submittedFiles: [], missingSource: true } satisfies GradeResult;
   expect(evidencePostRefusal(row, new Set())).toMatch(/no supported source-code file/i);

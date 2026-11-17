@@ -241,11 +241,13 @@ function parseGradeResult(raw: unknown): GradeResult | null {
 
   if (raw.staticOnly !== undefined && raw.staticOnly !== true) return null;
   if (raw.missingSource !== undefined && raw.missingSource !== true) return null;
+  if (raw.assumedEncodingFiles !== undefined && (!Array.isArray(raw.assumedEncodingFiles) || raw.assumedEncodingFiles.length < 1 || raw.assumedEncodingFiles.length > 100 || raw.assumedEncodingFiles.some((name: unknown) => typeof name !== "string" || !name || name.length > 4096))) return null;
   if (raw.evidenceOmissions !== undefined && (!Array.isArray(raw.evidenceOmissions) || raw.evidenceOmissions.length < 1 || raw.evidenceOmissions.length > 1000 || raw.evidenceOmissions.some((path: unknown) => typeof path !== "string" || !path || path.length > 4096))) return null;
   const shared = {
     ...(raw.staticOnly === true ? { staticOnly: true as const } : {}),
     ...(raw.missingSource === true ? { missingSource: true as const } : {}),
     ...(raw.evidenceOmissions !== undefined ? { evidenceOmissions: raw.evidenceOmissions as string[] } : {}),
+    ...(raw.assumedEncodingFiles !== undefined ? { assumedEncodingFiles: raw.assumedEncodingFiles as string[] } : {}),
     student: raw.student,
     overallComment: raw.overallComment,
     strengths,

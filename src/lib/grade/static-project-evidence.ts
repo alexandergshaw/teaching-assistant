@@ -1,3 +1,4 @@
+import { decodeStaticProjectText } from "./static-project-decoding";
 import { isStaticProjectText } from "./static-project-text";
 import type { StudentSubmissionEntry } from "./types";
 import { MAX_STATIC_PROJECT_CONTENT_CHARS } from "./static-project-limits";
@@ -7,6 +8,7 @@ import { GUARDED_TEXT_EXTENSIONS } from "@/lib/guarded-text-formats";
 export function restoreStaticTextEvidence(entry: StudentSubmissionEntry): StudentSubmissionEntry | null {
   if (!entry.staticOnly) return entry.submittedFiles.some((file) => file.staticTextMarker !== undefined) ? null : entry;
   const replacements: Array<{ marker: string; text: string }> = [], markers = new Set<string>();
+  const assumedEncodingFiles: string[] = [];
   for (const file of entry.submittedFiles) {
     const isText = isStaticProjectText(file.extension);
     if (!isText) { if (file.staticTextMarker !== undefined) return null; continue; }
@@ -15,7 +17,12 @@ export function restoreStaticTextEvidence(entry: StudentSubmissionEntry): Studen
     markers.add(marker);
     try {
       const binary = atob(raw), bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-      const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+      const decoded = decodeStaticProjectText(bytes); if (!decoded) return null;
+      if (decoded.assumedWindows1252) {
+        if (!file.name || file.name.length > 4096 || assumedEncodingFiles.length >= 100) return null;
+        assumedEncodingFiles.push(file.name);
+      }
+      const text = decoded.assumedWindows1252 ? `[Source encoding assumed Windows-1252; verify characters against the original file.]\n${decoded.text}` : decoded.text;
       if (!text || (GUARDED_TEXT_EXTENSIONS.has(file.extension.toLowerCase()) && text.includes("\0")) || entry.content.indexOf(marker) < 0 || entry.content.indexOf(marker) !== entry.content.lastIndexOf(marker)) return null;
       replacements.push({ marker, text });
     } catch { return null; }
@@ -26,5 +33,5 @@ export function restoreStaticTextEvidence(entry: StudentSubmissionEntry): Studen
     if (content.length - marker.length + text.length > MAX_STATIC_PROJECT_CONTENT_CHARS) return null;
     content = content.replace(marker, () => text);
   }
-  return { ...entry, content };
+  return { ...entry, content, ...(assumedEncodingFiles.length ? { assumedEncodingFiles } : {}) };
 }

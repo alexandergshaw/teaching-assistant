@@ -1,3 +1,4 @@
+import { decodeStaticProjectText } from "@/lib/grade/static-project-decoding";
 import { isStaticProjectText } from "@/lib/grade/static-project-text";
 /**
  * A39 wave 4c (docs/a39-waves.md 8.4.3, step S3): the PURE plan leaf behind
@@ -138,8 +139,8 @@ export function stripUnneededRawBase64(entry: StudentSubmissionEntry): StudentSu
     if (!isStaticProjectText(file.extension) || !file.rawBase64 || file.rawBase64.length > 4_000_000) return;
     try {
       const binary = atob(file.rawBase64), bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-      const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
-      if (text) decoded.set(index, text);
+      const result = decodeStaticProjectText(bytes);
+      if (result?.text) decoded.set(index, result.assumedWindows1252 ? new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes) : result.text);
     } catch { /* The server will refuse unverifiable text evidence. */ }
   });
   const counts = new Map<string, number>();

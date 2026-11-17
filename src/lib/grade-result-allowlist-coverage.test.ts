@@ -76,6 +76,7 @@ const ALL_GRADE_RESULT_FIELDS = [
   "linkFetch",
   "evidenceProvenanceUnknown",
   "evidenceOmissions",
+  "assumedEncodingFiles",
   "missingSource",
   "staticOnly",
   "submissionTruncated",
@@ -164,6 +165,7 @@ function gradedSentinel(): GradedResult {
     linkFetch: "failed",
     evidenceProvenanceUnknown: true,
     evidenceOmissions: ["SENTINEL_excluded.obj"],
+    assumedEncodingFiles: ["SENTINEL_legacy.cpp"],
     missingSource: true,
     staticOnly: true,
     submissionTruncated: true,
@@ -205,6 +207,7 @@ function ungradedSentinel(): UngradedResult {
     linkFetch: "failed",
     evidenceProvenanceUnknown: true,
     evidenceOmissions: ["SENTINEL_excluded.obj"],
+    assumedEncodingFiles: ["SENTINEL_legacy.cpp"],
     missingSource: true,
     staticOnly: true,
     submissionTruncated: true,
@@ -444,6 +447,14 @@ describe("parseGradingRun, via serializeGithubGradingRun/parseStoredGithubGradin
 });
 
 describe("legacy evidence provenance", () => {
+  it("does not silently erase malformed encoding provenance", () => {
+    const raw = { ...gradedSentinel(), evidenceProvenanceUnknown: false, assumedEncodingFiles: [42] };
+    const payload = coerceGradingDraftPayload({ runs: [{ courseName: "C", assignmentName: "A", canvasUrl: "https://canvas.example.com", run: { results: [raw], rubricAreaNames: [], fullCreditChecklist: [] } }] });
+    expect(payload.runs[0].run.results[0].evidenceProvenanceUnknown).toBe(true);
+    const json = serializeGithubGradingRun({ run: { results: [gradedSentinel()], rubricAreaNames: [], fullCreditChecklist: [] }, gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", truncatedRepos: [], noSubmissionRepos: [], undeterminedRepos: [] });
+    const stored = JSON.parse(json); stored.run.results[0].assumedEncodingFiles = [42];
+    expect(parseStoredGithubGradingRun(JSON.stringify(stored))).toBeNull();
+  });
   it("treats old and malformed draft provenance as unknown", () => {
     for (const value of [undefined, "invalid"]) {
       const raw = { ...gradedSentinel(), evidenceProvenanceUnknown: value };

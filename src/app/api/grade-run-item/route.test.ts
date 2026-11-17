@@ -222,6 +222,17 @@ beforeEach(() => {
 });
 
 describe("POST /api/grade-run-item (behavioral, mocked seam)", () => {
+  it("withholds numeric scores when project CSV data was not examined", async () => {
+    mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice", totalScore: "100/100", rubricAreas: [{ score: "25/25" }], feedback: "Total Score: 100/100" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
+    mockRaceWithTimeout.mockImplementationOnce(async (work) => ({ kind: "settled", value: await work } as never));
+    const path = "project/data.csv";
+    const response = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, evidenceOmissions: [path], unexaminedDataPaths: [path] } }) as never);
+    expect(response.status).toBe(200); const result = (await response.json()).result;
+    expect(result).toMatchObject({ totalScore: "", rubricAreas: [], unexaminedDataPaths: [path], ungraded: { kind: "grading-failed" } });
+    expect(JSON.stringify(result)).not.toContain("100/100"); expect(result.feedback).toMatch(/CSV data was excluded and not examined/i);
+    expect(mockGradeEntries.mock.calls[0][1]).toContain("large CSV files were not examined");
+    expect((await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, evidenceOmissions: [path], unexaminedDataPaths: ["other.csv"] } }) as never)).status).toBe(400);
+  });
   it("reports missing source and unexamined executable together", async () => {
     mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice", totalScore: "100/100", feedback: "Provisional" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
     mockRaceWithTimeout.mockImplementationOnce(async (work) => ({ kind: "settled", value: await work } as never));

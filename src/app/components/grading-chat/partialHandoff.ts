@@ -1,7 +1,7 @@
 import type { RecoverableGroup } from "@/lib/grade/large-zip-subset";
 import type { DirectFileOutcome } from "./chatDirectFileIntake";
 import { claimIntake, releaseIntake, type IntakeFence } from "./intakeFence";
-import { listPartialHandoffs, reservePartialHandoff, settlePartialHandoff, type PartialHandoffRecord } from "./partialHandoffLedger";
+import { PROJECT_EXCLUSION_REASON, listPartialHandoffs, reservePartialHandoff, settlePartialHandoff, type PartialHandoffRecord } from "./partialHandoffLedger";
 import { partialArchiveDigest } from "./partialArchiveDigest";
 import { preserveBrightspaceIndex } from "@/lib/grade/brightspace-index-store";
 import type { BundleLease, createBundleAuthority } from "@/lib/grade/single-zip-authority";
@@ -9,7 +9,8 @@ import type { PerStudentEvidence } from "./partialEvidence";
 import type { ExpectedOwnerSession } from "@/lib/grade/owner-session-binding";
 
 export type PartialHashProgress = { readonly phase: "source" | "subset"; readonly written: number; readonly total: number };
-export type PartialProjects = Readonly<Record<string, { readonly mappedPaths: readonly string[]; readonly excludedPaths: readonly string[] }>>;
+export type PartialProject = { readonly mappedPaths: readonly string[]; readonly excludedPaths: readonly string[]; readonly unexaminedDataPaths?: readonly string[] };
+export type PartialProjects = Readonly<Record<string, PartialProject>>;
 export type PartialHashReview = { readonly current: () => boolean; readonly onProgress: (progress: PartialHashProgress | null) => void; readonly onAdmitted?: (indices: readonly number[]) => void; readonly onRefused?: () => void; readonly sourceDigests?: WeakMap<File, string>; readonly pendingAtHandoff?: readonly RecoverableGroup[]; readonly indexBytes?: Uint8Array; readonly extraMapping?: Readonly<Record<string, string>>; readonly bindOwnerSession?: true; readonly projects?: PartialProjects };
 
 export function createPartialHandoffHandler(args: {
@@ -18,7 +19,7 @@ export function createPartialHandoffHandler(args: {
   indexAuthority?: () => ReturnType<typeof createBundleAuthority>;
   submit: (file: File, mapping: Readonly<Record<string, string>>, evidenceOmissions?: readonly string[], staticOnly?: true, perStudentEvidence?: PerStudentEvidence, ownerSession?: ExpectedOwnerSession) => Promise<DirectFileOutcome[]>;
 }) {
-  return (source: File, file: File, selected: readonly RecoverableGroup[], omitted: readonly RecoverableGroup[], ownerMapping: Readonly<Record<string, string>>, review?: PartialHashReview, project?: { readonly mappedPaths: readonly string[]; readonly excludedPaths: readonly string[] }) => {
+  return (source: File, file: File, selected: readonly RecoverableGroup[], omitted: readonly RecoverableGroup[], ownerMapping: Readonly<Record<string, string>>, review?: PartialHashReview, project?: PartialProject) => {
     const epoch = args.getEpoch(), accountToken = args.capture();
     return partialHandoff({ source, file, selected, omitted, ownerMapping, project, latch: args.latch, account: args.account,
       current: () => args.getEpoch() === epoch && args.owns(args.account, accountToken) && (review?.current() ?? true), onHashProgress: review?.onProgress, onAdmitted: review?.onAdmitted, onRefused: review?.onRefused, sourceDigests: review?.sourceDigests, pendingAtHandoff: review?.pendingAtHandoff, indexBytes: review?.indexBytes, extraMapping: review?.extraMapping, bindOwnerSession: review?.bindOwnerSession, projects: review?.projects, indexAuthority: args.indexAuthority, onRecords: args.onRecords, onOmissions: args.onOmissions, submit: args.submit });
@@ -26,7 +27,7 @@ export function createPartialHandoffHandler(args: {
 }
 
 export async function partialHandoff(args: {
-  source: File; file: File; selected: readonly RecoverableGroup[]; omitted: readonly RecoverableGroup[]; ownerMapping: Readonly<Record<string, string>>; project?: { readonly mappedPaths: readonly string[]; readonly excludedPaths: readonly string[] };
+  source: File; file: File; selected: readonly RecoverableGroup[]; omitted: readonly RecoverableGroup[]; ownerMapping: Readonly<Record<string, string>>; project?: PartialProject;
   latch: IntakeFence; account?: string; current: () => boolean;
   onHashProgress?: (progress: PartialHashProgress | null) => void; onAdmitted?: (indices: readonly number[]) => void; onRefused?: () => void;
   sourceDigests?: WeakMap<File, string>;
@@ -77,7 +78,7 @@ export async function partialHandoff(args: {
       const attemptId = crypto.randomUUID();
       const record = { account, sourceDigest, subsetDigest, attemptId, status: "pending" as const,
         selected: selected.map((group) => ({ student: ownerMapping[group.label], files: [...group.members.map((member) => member.path), ...Object.entries(extraMapping).filter(([, name]) => name === ownerMapping[group.label]).map(([path]) => path)], ...(group.allFilesReviewed ? { grouping: "all-files-reviewed" as const } : {}) })), pendingAtHandoff: (args.pendingAtHandoff ?? []).map((group) => ({ student: ownerMapping[group.label] ?? group.label, files: group.members.map((member) => member.path) })), ...(indexDigest ? { indexDigest } : {}),
-        omitted: [...omitted.map((group) => ({ student: group.label, files: group.members.map((member) => member.path), reason: group.reason ?? "not selected" })), ...selected.filter((group) => group.historicalPaths?.length).map((group) => ({ student: group.label, files: [...group.historicalPaths!], reason: "earlier indexed submission retained in original archive" })), ...(args.project?.excludedPaths.length ? [{ student: selected[0].label, files: [...args.project.excludedPaths], reason: "build artifact, unexamined executable, or verified course dataset excluded from grading" }] : []), ...Object.entries(args.projects ?? {}).filter(([, project]) => project.excludedPaths.length).map(([label, project]) => ({ student: label, files: [...project.excludedPaths], reason: "build artifact, unexamined executable, or verified course dataset excluded from grading" }))] };
+        omitted: [...omitted.map((group) => ({ student: group.label, files: group.members.map((member) => member.path), reason: group.reason ?? "not selected" })), ...selected.filter((group) => group.historicalPaths?.length).map((group) => ({ student: group.label, files: [...group.historicalPaths!], reason: "earlier indexed submission retained in original archive" })), ...(args.project?.excludedPaths.length ? [{ student: selected[0].label, files: [...args.project.excludedPaths], reason: PROJECT_EXCLUSION_REASON }] : []), ...Object.entries(args.projects ?? {}).filter(([, project]) => project.excludedPaths.length).map(([label, project]) => ({ student: label, files: [...project.excludedPaths], reason: PROJECT_EXCLUSION_REASON }))] };
       if (!reservePartialHandoff(localStorage, record)) return "The intake record could not be saved. Nothing was submitted.";
       args.onRecords(listPartialHandoffs(localStorage, account)); args.onOmissions(omitted);
       try {
@@ -89,7 +90,8 @@ export async function partialHandoff(args: {
         const sourceFile = /\.(?:c|cc|cpp|cxx|h|hpp|py|js|jsx|ts|tsx|java|cs|sql|ipynb|html|htm|css)$/i;
         const projectFor = (group: RecoverableGroup) => args.projects?.[group.label] ?? (selected.length === 1 ? args.project : undefined);
         const missingSource = selected.some((group) => { const project = projectFor(group); return project && !project.mappedPaths.some((path) => sourceFile.test(path)); });
-        const perStudentEvidence = args.projects || missingSource ? selected.map((group) => { const project = projectFor(group); return { student: ownerMapping[group.label], omissions: project?.excludedPaths ?? [], staticOnly: !!project, ...(project && !project.mappedPaths.some((path) => sourceFile.test(path)) ? { missingSource: true as const } : {}) }; }) : undefined;
+        const hasUnexaminedData = selected.some((group) => !!projectFor(group)?.unexaminedDataPaths?.length);
+        const perStudentEvidence = args.projects || missingSource || hasUnexaminedData ? selected.map((group) => { const project = projectFor(group); return { student: ownerMapping[group.label], omissions: project?.excludedPaths ?? [], staticOnly: !!project, ...(project?.unexaminedDataPaths?.length ? { unexaminedDataPaths: project.unexaminedDataPaths } : {}), ...(project && !project.mappedPaths.some((path) => sourceFile.test(path)) ? { missingSource: true as const } : {}) }; }) : undefined;
         const outcomes = await args.submit(args.file, mapping, perStudentEvidence ? undefined : args.project?.excludedPaths, perStudentEvidence ? undefined : args.project ? true : undefined, perStudentEvidence, ownerSession), accepted = outcomes.length === 1 && outcomes[0].kind === "accepted";
         if (outcomes.length === 1 && (outcomes[0].kind === "accepted" || outcomes[0].kind === "partial") && outcomes[0].sourceIndices && args.current()) { try { args.onAdmitted?.(outcomes[0].sourceIndices); } catch { /* Display priority cannot change admission. */ } }
         const refused = outcomes.length === 1 && outcomes[0].kind === "refused";

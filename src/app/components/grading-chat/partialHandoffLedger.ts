@@ -1,4 +1,5 @@
 /** Persist reviewed partial intake before dispatch; an unresolved record is never retried automatically. */
+export const PROJECT_EXCLUSION_REASON = "build artifact, unexamined executable, unexamined CSV data, or verified course dataset excluded from grading";
 export interface PartialHandoffRecord {
   readonly account: string;
   readonly attemptId?: string;

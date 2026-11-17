@@ -3,6 +3,12 @@ import { bindPartialEvidence } from "./partialEvidence";
 import type { StudentSubmissionEntry } from "@/lib/grade/types";
 
 const row = (student: string) => ({ student, content: "work", mergedFileCount: 1, submittedFiles: [], staticOnly: true }) as StudentSubmissionEntry;
+it("binds only recorded unexamined data paths to the correct student", () => {
+  const evidence = [{ student: "Ada", omissions: ["Ada/data.csv"], unexaminedDataPaths: ["Ada/data.csv"], staticOnly: true }, { student: "Lin", omissions: [], staticOnly: false }];
+  const result = bindPartialEvidence([row("Ada"), row("Lin")], undefined, undefined, evidence);
+  expect(result?.[0].unexaminedDataPaths).toEqual(["Ada/data.csv"]); expect(result?.[1].unexaminedDataPaths).toBeUndefined();
+  expect(bindPartialEvidence([row("Ada")], undefined, undefined, [{ ...evidence[0], unexaminedDataPaths: ["other.csv"] }])).toBeNull();
+});
 it("binds missing source to the matching student and informs the source review", () => {
   const result = bindPartialEvidence([row("Ada"), row("Lin")], undefined, undefined, [{ student: "Ada", omissions: [], staticOnly: true, missingSource: true }, { student: "Lin", omissions: [], staticOnly: false }]);
   expect(result?.[0].missingSource).toBe(true); expect(result?.[0].content).toMatch(/source-dependent criteria are unverified/);

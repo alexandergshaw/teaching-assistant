@@ -1,5 +1,9 @@
 import { expect, it } from "vitest";
-import { reservePartialHandoff, settlePartialHandoff, listPartialHandoffs, type LedgerStorage, type PartialHandoffRecord } from "./partialHandoffLedger";
+import { PROJECT_EXCLUSION_REASON, reservePartialHandoff, settlePartialHandoff, listPartialHandoffs, type LedgerStorage, type PartialHandoffRecord } from "./partialHandoffLedger";
+
+it("labels excluded CSV data as unexamined in the handoff record", () => {
+  expect(PROJECT_EXCLUSION_REASON).toContain("unexamined CSV data");
+});
 
 it("persists omissions before dispatch and refuses a duplicate or mismatched settlement", () => {
   const records = new Map<string, string>();

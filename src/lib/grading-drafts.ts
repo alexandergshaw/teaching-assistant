@@ -96,6 +96,7 @@ function coerceGradeResult(value: unknown): GradeResult | null {
   const o = value as Record<string, unknown>;
   if (typeof o.student !== "string") return null;
   const validEncodingFiles = Array.isArray(o.assumedEncodingFiles) && o.assumedEncodingFiles.length > 0 && o.assumedEncodingFiles.length <= 100 && o.assumedEncodingFiles.every((name: unknown) => typeof name === "string" && !!name && name.length <= 4096);
+  const validUnexaminedData = Array.isArray(o.unexaminedDataPaths) && o.unexaminedDataPaths.length > 0 && o.unexaminedDataPaths.length <= 1000 && Array.isArray(o.evidenceOmissions) && o.unexaminedDataPaths.every((path: unknown) => typeof path === "string" && (o.evidenceOmissions as unknown[]).includes(path));
 
   const rubricAreas = Array.isArray(o.rubricAreas)
     ? o.rubricAreas
@@ -147,9 +148,10 @@ function coerceGradeResult(value: unknown): GradeResult | null {
     staticOnly: o.staticOnly === true ? true as const : undefined,
     missingSource: o.missingSource === true ? true as const : undefined,
     evidenceOmissions: Array.isArray(o.evidenceOmissions) && o.evidenceOmissions.length > 0 && o.evidenceOmissions.length <= 1000 && o.evidenceOmissions.every((path: unknown) => typeof path === "string" && !!path && path.length <= 4096) ? o.evidenceOmissions as string[] : undefined,
+    unexaminedDataPaths: validUnexaminedData ? o.unexaminedDataPaths as string[] : undefined,
     assumedEncodingFiles: validEncodingFiles ? o.assumedEncodingFiles as string[] : undefined,
     submissionTruncated: typeof o.submissionTruncated === "boolean" ? o.submissionTruncated : undefined,
-    evidenceProvenanceUnknown: o.evidenceProvenanceUnknown !== false || (o.staticOnly !== undefined && o.staticOnly !== true) || (o.missingSource !== undefined && o.missingSource !== true) || (o.assumedEncodingFiles !== undefined && !validEncodingFiles) || (o.evidenceOmissions !== undefined && !(Array.isArray(o.evidenceOmissions) && o.evidenceOmissions.length > 0 && o.evidenceOmissions.length <= 1000 && o.evidenceOmissions.every((path: unknown) => typeof path === "string" && !!path && path.length <= 4096))) || (o.submissionTruncated !== undefined && typeof o.submissionTruncated !== "boolean"),
+    evidenceProvenanceUnknown: o.evidenceProvenanceUnknown !== false || (o.staticOnly !== undefined && o.staticOnly !== true) || (o.missingSource !== undefined && o.missingSource !== true) || (o.assumedEncodingFiles !== undefined && !validEncodingFiles) || (o.unexaminedDataPaths !== undefined && !validUnexaminedData) || (o.evidenceOmissions !== undefined && !(Array.isArray(o.evidenceOmissions) && o.evidenceOmissions.length > 0 && o.evidenceOmissions.length <= 1000 && o.evidenceOmissions.every((path: unknown) => typeof path === "string" && !!path && path.length <= 4096))) || (o.submissionTruncated !== undefined && typeof o.submissionTruncated !== "boolean"),
     linkFetch: o.linkFetch === "ok" || o.linkFetch === "failed" || o.linkFetch === "flagged" ? o.linkFetch : o.linkFetch === undefined ? undefined : "flagged" as "ok" | "failed" | "flagged" | undefined,
   };
 

@@ -294,6 +294,7 @@ interface GradeResultBase {
   submittedFiles: SubmittedFileInfo[];
   /** Instructor-reviewed source files omitted before grading; evidence is partial. */
   evidenceOmissions?: readonly string[];
+  unexaminedDataPaths?: readonly string[];
   assumedEncodingFiles?: readonly string[];
   missingSource?: true;
   staticOnly?: true;
@@ -495,6 +496,7 @@ export interface GradingRunEntry {
  */
 export interface StudentSubmissionEntry {
   evidenceOmissions?: readonly string[];
+  unexaminedDataPaths?: readonly string[];
   assumedEncodingFiles?: readonly string[];
   missingSource?: true;
   staticOnly?: true;

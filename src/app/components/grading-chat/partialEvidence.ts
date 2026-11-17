@@ -2,7 +2,7 @@ import type { IngestLedger } from "@/lib/grade/ndjson-ingest-parser";
 import { noBatchAdmittedNotice } from "./partialBatchNotice";
 import type { StudentSubmissionEntry } from "@/lib/grade/types";
 
-export type PerStudentEvidence = readonly { readonly student: string; readonly omissions: readonly string[]; readonly staticOnly: boolean; readonly missingSource?: true }[];
+export type PerStudentEvidence = readonly { readonly student: string; readonly omissions: readonly string[]; readonly staticOnly: boolean; readonly missingSource?: true; readonly unexaminedDataPaths?: readonly string[] }[];
 
 /** Bind reviewed provenance to exactly the intended student before grading. */
 export function bindPartialEvidence(entries: StudentSubmissionEntry[], omissions: readonly string[] | undefined, staticOnly?: true, perStudent?: PerStudentEvidence): StudentSubmissionEntry[] | null {
@@ -14,14 +14,15 @@ export function bindPartialEvidence(entries: StudentSubmissionEntry[], omissions
       if (!item || typeof item.student !== "string" || !Array.isArray(item.omissions)) return null;
       const name = key(item.student);
       if (!name || byName.has(name) || typeof item.staticOnly !== "boolean" || (item.missingSource !== undefined && item.missingSource !== true) || item.omissions.length > 1000 || item.omissions.some((path: unknown) => typeof path !== "string" || !path || path.length > 4096)) return null;
+      if (item.unexaminedDataPaths !== undefined && (!Array.isArray(item.unexaminedDataPaths) || !item.unexaminedDataPaths.length || item.unexaminedDataPaths.length > 1000 || item.unexaminedDataPaths.some((path: unknown) => typeof path !== "string" || !item.omissions.includes(path)))) return null;
       byName.set(name, item);
     }
     const matched = new Set<string>(), result: StudentSubmissionEntry[] = [];
     for (const entry of entries) {
       if (typeof entry.student !== "string") return null;
       const name = key(entry.student), item = byName.get(name); if (!item || matched.has(name)) return null;
-      matched.add(name); const copy = { ...entry }; delete copy.staticOnly; delete copy.evidenceOmissions; delete copy.missingSource;
-      result.push({ ...copy, ...(item.omissions.length ? { evidenceOmissions: [...item.omissions] } : {}), ...(item.staticOnly ? { staticOnly: true as const } : {}), ...(item.missingSource ? { missingSource: true as const, content: `${copy.content}\n\nIntake evidence: No supported source-code file was identified. Assess only available evidence and state that source-dependent criteria are unverified.` } : {}) });
+      matched.add(name); const copy = { ...entry }; delete copy.staticOnly; delete copy.evidenceOmissions; delete copy.missingSource; delete copy.unexaminedDataPaths;
+      result.push({ ...copy, ...(item.omissions.length ? { evidenceOmissions: [...item.omissions] } : {}), ...(item.unexaminedDataPaths?.length ? { unexaminedDataPaths: [...item.unexaminedDataPaths] } : {}), ...(item.staticOnly ? { staticOnly: true as const } : {}), ...(item.missingSource ? { missingSource: true as const, content: `${copy.content}\n\nIntake evidence: No supported source-code file was identified. Assess only available evidence and state that source-dependent criteria are unverified.` } : {}) });
     }
     return result;
   }

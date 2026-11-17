@@ -2,11 +2,16 @@ import type { GradeResult } from "./types";
 
 /** Evidence acknowledgement is tied to a specific result object so regrading
  * or replacing a row requires a new review. */
-export function incompleteEvidenceReason(row: Pick<GradeResult, "linkFetch" | "submissionTruncated" | "evidenceProvenanceUnknown" | "evidenceOmissions" | "staticOnly" | "missingSource" | "assumedEncodingFiles">): string | null {
+export function incompleteEvidenceReason(row: Pick<GradeResult, "linkFetch" | "submissionTruncated" | "evidenceProvenanceUnknown" | "evidenceOmissions" | "staticOnly" | "missingSource" | "assumedEncodingFiles" | "unexaminedDataPaths">): string | null {
   const problems: string[] = [];
   if (row.staticOnly) problems.push("code was not executed; runtime behavior is unverified");
   if (row.missingSource) problems.push("no supported source-code file was identified in the submitted project");
   if (row.evidenceOmissions?.length) problems.push("files were excluded from the submission");
+  if (row.unexaminedDataPaths?.length) {
+    const names = row.unexaminedDataPaths.slice(0, 3).map((name) => name.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 200));
+    const rest = row.unexaminedDataPaths.length - names.length;
+    problems.push(`large CSV data was not examined: ${names.join(", ")}${rest ? ` and ${rest} more` : ""}`);
+  }
   if (row.assumedEncodingFiles?.length) {
     const names = row.assumedEncodingFiles.slice(0, 3).map((name) => name.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 200));
     const rest = row.assumedEncodingFiles.length - names.length;

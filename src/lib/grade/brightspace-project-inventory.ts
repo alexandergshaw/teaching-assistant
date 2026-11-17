@@ -11,10 +11,10 @@ const artifactExtensions = new Set(["obj", "pdb", "ilk", "idb", "ipch", "tlog", 
 const sourceExtensions = new Set(["c", "cc", "cpp", "cxx", "h", "hpp", "txt", "md", "markdown", "csv", "tsv", "json", "xml", "vcxproj", "sln", "slnx", "filters", "props", "targets", "docx", "doc", "pdf", "ppt", "pptx", "xls", "xlsx", "odt", "odp", "ods", "rtf", "ipynb", "py", "js", "jsx", "ts", "tsx", "java", "cs", "css", "html", "htm", "yml", "yaml", "sql", "png", "jpg", "jpeg", "webp", "heic", "heif"]);
 export function isBrightspaceProjectSource(path: string): boolean { const ext = path.split(".").pop()?.toLowerCase() ?? ""; return sourceExtensions.has(ext) || GUARDED_TEXT_EXTENSIONS.has(ext); }
 
-export type ProjectFileDisposition = "retain" | "candidate-build-artifact" | "course-fixture" | "unexamined-binary" | "needs-review";
+export type ProjectFileDisposition = "retain" | "candidate-build-artifact" | "course-fixture" | "unexamined-binary" | "unexamined-data" | "needs-review";
 export interface ProjectInventoryFile { readonly path: string; readonly declaredBytes: number; readonly disposition: ProjectFileDisposition }
 export type ProjectInventory = { readonly ok: true; readonly files: readonly ProjectInventoryFile[] } | { readonly ok: false; readonly reason: string };
-export function isExcludedProjectFile(file: ProjectInventoryFile): boolean { return file.disposition === "candidate-build-artifact" || file.disposition === "course-fixture" || file.disposition === "unexamined-binary"; }
+export function isExcludedProjectFile(file: ProjectInventoryFile): boolean { return file.disposition === "candidate-build-artifact" || file.disposition === "course-fixture" || file.disposition === "unexamined-binary" || file.disposition === "unexamined-data"; }
 
 async function readProject(source: Blob, outer: LargeZipMember): Promise<{ ok: true; blob: Blob } | { ok: false; reason: string }> {
   if (!outer.nestedArchive || outer.declaredBytes > MAX_PROJECT_ARCHIVE_BYTES) return { ok: false, reason: "nested archive exceeds the project inspection limit" };
@@ -66,13 +66,14 @@ async function inspectProjectBlob(blob: Blob): Promise<ProjectInventory> {
       const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
       if (hash === "8a4203bb40c1f023676f79060da104ff316509faf2db226db3915ee5a096e90d") disposition = "course-fixture";
     }
+    if (extension === "csv" && member.declaredBytes > 1_000_000 && disposition === "retain") disposition = "unexamined-data";
     files.push({ path: member.path, declaredBytes: member.declaredBytes, disposition });
   }
   return { ok: true, files };
 }
 
 /** Rebuild one reviewed project while retaining every source file. Exclusions must match the entire displayed non-source inventory. */
-export async function buildReviewedBrightspaceProject(source: Blob, outer: LargeZipMember, excludedPaths: readonly string[]): Promise<{ ok: true; archive: Blob; retainedPaths: readonly string[]; excludedPaths: readonly string[] } | { ok: false; reason: string }> {
+export async function buildReviewedBrightspaceProject(source: Blob, outer: LargeZipMember, excludedPaths: readonly string[]): Promise<{ ok: true; archive: Blob; retainedPaths: readonly string[]; excludedPaths: readonly string[]; unexaminedDataPaths: readonly string[] } | { ok: false; reason: string }> {
   const project = await readProject(source, outer); if (!project.ok) return project;
   const inventory = await inspectProjectBlob(project.blob); if (!inventory.ok) return inventory;
   if (inventory.files.some((file) => file.disposition === "needs-review")) return { ok: false, reason: "project contains unclassified files that cannot be safely excluded" };
@@ -91,5 +92,5 @@ export async function buildReviewedBrightspaceProject(source: Blob, outer: Large
     if (!result.ok) return result;
     zip.file(file.path, await new Blob(parts).arrayBuffer());
   }
-  return { ok: true, archive: new Blob([new Uint8Array(await zip.generateAsync({ type: "uint8array", compression: "STORE" })).buffer]), retainedPaths: retained.map((file) => file.path), excludedPaths: expected.map((file) => file.path) };
+  return { ok: true, archive: new Blob([new Uint8Array(await zip.generateAsync({ type: "uint8array", compression: "STORE" })).buffer]), retainedPaths: retained.map((file) => file.path), excludedPaths: expected.map((file) => file.path), unexaminedDataPaths: expected.filter((file) => file.disposition === "unexamined-data").map((file) => file.path) };
 }

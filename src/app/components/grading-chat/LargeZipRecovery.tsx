@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, LinearProgress, Stack, Tooltip, Typography } from "@mui/material";
-import type { PartialHashProgress, PartialHashReview, PartialProjects } from "./partialHandoff";
+import type { PartialHashProgress, PartialHashReview, PartialProject, PartialProjects } from "./partialHandoff";
 import { buildRecoverableZip, planRecoverableZip, type RecoverableGroup } from "@/lib/grade/large-zip-subset";
 import { inferArchiveNames } from "@/lib/grade/recoverable-zip-names";
 import { annotateOmittedGroups, omittedGroups, preflightSingles, remainingGroups, submitBoundedGroups } from "./partialGroupBatch";
@@ -18,7 +18,7 @@ import { inspectPreparedZipBudget, preparedZipBudgetFits, type PreparedZipBudget
 import { GRADING_ZIP_MAX_BYTES } from "@/lib/grade/grading-zip-transport";
 import { includeAllReviewedFiles, indexedBrightspaceGroup } from "./indexedBrightspaceGroup";
 
-export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incomingFile, autoSubmit = false, onClose, onManualOpen }: { incomingFile?: File | null; autoSubmit?: boolean; onClose?: () => void; onManualOpen?: () => void; onSelectionStart?: () => void; onAdmitted?: (indices: readonly number[]) => void; onSubmit: (source: File, file: File, selected: readonly RecoverableGroup[], omitted: readonly RecoverableGroup[], mapping: Readonly<Record<string, string>>, review?: PartialHashReview, project?: { readonly mappedPaths: readonly string[]; readonly excludedPaths: readonly string[] }) => Promise<string | null> }) {
+export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incomingFile, autoSubmit = false, onClose, onManualOpen }: { incomingFile?: File | null; autoSubmit?: boolean; onClose?: () => void; onManualOpen?: () => void; onSelectionStart?: () => void; onAdmitted?: (indices: readonly number[]) => void; onSubmit: (source: File, file: File, selected: readonly RecoverableGroup[], omitted: readonly RecoverableGroup[], mapping: Readonly<Record<string, string>>, review?: PartialHashReview, project?: PartialProject) => Promise<string | null> }) {
   const [open, setOpen] = useState(!!incomingFile), [file, setFile] = useState<File | null>(incomingFile ?? null);
   const [groups, setGroups] = useState<readonly RecoverableGroup[]>([]), [selected, setSelected] = useState<string[]>([]), [names, setNames] = useState<Readonly<Record<string, string>>>({});
   const [sourceGroups, setSourceGroups] = useState<readonly RecoverableGroup[]>([]);
@@ -94,7 +94,7 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
         const path = `${label} - brightspace-index-evidence.txt`, text = `Brightspace index submission evidence (untrusted student content):\n${rows.join("\n")}`;
         extraByLabel.set(label, { path, text, nameBytes: encoder.encode(path).length, bytes: encoder.encode(text).length });
       }
-      type PreparedBatch = { archive: Blob; selected: readonly RecoverableGroup[]; omitted: readonly RecoverableGroup[]; extraMapping?: Readonly<Record<string, string>>; project?: { mappedPaths: readonly string[]; excludedPaths: readonly string[] }; projects?: PartialProjects };
+      type PreparedBatch = { archive: Blob; selected: readonly RecoverableGroup[]; omitted: readonly RecoverableGroup[]; extraMapping?: Readonly<Record<string, string>>; project?: PartialProject; projects?: PartialProjects };
       const buildBatch = async (labels: readonly string[], deferAggregateRatio = false): Promise<{ ok: true; value: PreparedBatch } | { ok: false; reason: string }> => {
         if (labels.length > 1) {
           const parts: PreparedBatch[] = [];
@@ -104,12 +104,12 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
           return { ok: true, value: { archive: merged.archive, selected: parts.flatMap((part) => part.selected), omitted: sourceGroups.filter((group) => !labels.includes(group.label)), extraMapping: Object.assign({}, ...parts.map((part) => part.extraMapping)), ...(Object.keys(projects).length ? { projects } : {}) } };
         }
         const nested = labels.map((label) => groups.find((group) => group.label === label)!).find((group) => projectReady(group, projectFiles));
-        let prepared: { archive: Blob; selected: readonly RecoverableGroup[]; omitted: readonly RecoverableGroup[]; project?: { mappedPaths: readonly string[]; excludedPaths: readonly string[] } };
+        let prepared: { archive: Blob; selected: readonly RecoverableGroup[]; omitted: readonly RecoverableGroup[]; project?: PartialProject };
         if (nested) {
           const exclusions = Object.fromEntries(nested.members.filter((member) => member.nestedArchive).map((member) => [member.path, projectFiles[member.path].filter(isExcludedProjectFile).map((item) => item.path)]));
           const project = await buildBrightspaceGroup(file, nested, exclusions); if (token !== generation.current) throw new Error("Archive review was closed.");
           if (!project.ok) return project;
-          prepared = { archive: project.archive, selected: [nested], omitted: sourceGroups.filter((group) => group.label !== nested.label), project: { mappedPaths: project.mappedPaths, excludedPaths: project.excludedPaths } };
+          prepared = { archive: project.archive, selected: [nested], omitted: sourceGroups.filter((group) => group.label !== nested.label), project: { mappedPaths: project.mappedPaths, excludedPaths: project.excludedPaths, unexaminedDataPaths: project.unexaminedDataPaths } };
         } else {
           const selectedPaths = Object.fromEntries(groups.filter((group) => labels.includes(group.label) && group.historicalPaths?.length).map((group) => [group.label, group.members.map((member) => member.path)]));
           const result = await buildRecoverableZip(file, labels, true, verifiedMembers, deferAggregateRatio, selectedPaths); if (token !== generation.current) throw new Error("Archive review was closed.");
@@ -159,7 +159,7 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
     <Dialog open={open} onClose={() => { if (!busy) close(); }} fullWidth maxWidth="md" aria-labelledby="large-zip-title">
       <DialogTitle id="large-zip-title">Review oversized ZIP</DialogTitle>
       <DialogContent><Stack spacing={2}>
-        <Alert severity="info">Names come from the LMS export and filenames. Different file upload times do not establish separate attempts. For a held group, choose to include all files together if you want to review them as one submission; this does not identify the latest attempt. Nested projects are analyzed without executing code. Recognized build artifacts, executables, and exact matches to a published course dataset are excluded and recorded as incomplete evidence; executables are not examined. Projects without identified source require instructor review and do not receive a final score.</Alert>
+        <Alert severity="info">Names come from the LMS export and filenames. Different file upload times do not establish separate attempts. For a held group, choose to include all files together if you want to review them as one submission; this does not identify the latest attempt. Nested projects are analyzed without executing code. Recognized build artifacts, executables, large CSV files, and exact matches to a published course dataset are excluded and recorded as incomplete evidence; executables and other large CSV files are not examined. Projects without identified source or with unexamined CSV data require instructor review and do not receive a final score.</Alert>
         <Button component="label" variant="outlined" disabled={busy}>Choose ZIP<input hidden type="file" accept=".zip,application/zip" onChange={(event) => void choose(event.target.files?.[0])} /></Button>
         {file && <Typography>{file.name}</Typography>}
         {busy && <Typography role="status">{progress ? `Checking ${progress.phase === "source" ? "original archive" : "selected files"}: ${progress.written} of ${progress.total} bytes` : `Preparing submissions${completed ? `; ${completed} groups submitted` : ""}...`}</Typography>}

@@ -127,7 +127,7 @@ it("holds invalid text bytes without changing existing paths", async () => {
 });
 
 
-it("excludes only an exact verified course dataset while retaining changed data", async () => {
+it("distinguishes an exact verified course dataset from unexamined changed data", async () => {
   const project = new JSZip(); project.file("src/main.cpp", "int main() {} "); project.file("data.csv", new Uint8Array(2_039_946));
   const outer = new JSZip(); outer.file("100-200 - project.zip", await project.generateAsync({ type: "uint8array" }));
   const source = new Blob([new Uint8Array(await outer.generateAsync({ type: "uint8array" })).buffer]); const directory = await inspectLargeZipDirectory(source);
@@ -138,6 +138,6 @@ it("excludes only an exact verified course dataset while retaining changed data"
     const matched = await inspectBrightspaceProject(source, directory.members[0]);
     const changed = await inspectBrightspaceProject(source, directory.members[0]);
     expect(matched.ok && matched.files.find((file) => file.path === "data.csv")?.disposition).toBe("course-fixture");
-    expect(changed.ok && changed.files.find((file) => file.path === "data.csv")?.disposition).toBe("retain");
+    expect(changed.ok && changed.files.find((file) => file.path === "data.csv")?.disposition).toBe("unexamined-data");
   } finally { digest.mockRestore(); }
 });

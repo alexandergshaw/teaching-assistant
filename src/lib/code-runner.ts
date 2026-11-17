@@ -601,7 +601,10 @@ export async function runSubmittedCode(
   requestedEntryPoint?: string,
   beforeDispatch?: BeforeSandboxDispatch,
 ): Promise<CodeRunResult | null> {
-  const selection = selectCodeRunFiles(files, requestedEntryPoint);
+  const mayUseVercel = !beforeDispatch && process.env.CODE_RUNNER_VERCEL_ENABLED === "true" && process.env.VERCEL === "1" && !process.env.PISTON_API_URL?.trim() && !process.env.PISTON_API_KEY?.trim();
+  const initialSelection = selectCodeRunFiles(files, requestedEntryPoint);
+  const useVercel = mayUseVercel && ["python", "javascript", "c", "c++"].includes(initialSelection.language);
+  const selection = useVercel ? selectCodeRunFiles(files, requestedEntryPoint, 3_000_000) : initialSelection;
   if (selection.requestedEntryPointError) {
     return {
       language: "",
@@ -616,6 +619,9 @@ export async function runSubmittedCode(
   if (selection.runFiles.length === 0) {
     return null;
   }
+  if (selection.skipped.some((file) => file.reason === "data-too-large")) {
+    return finalizeCodeRunResult({ language: selection.language, files: selection.runFiles.map((file) => file.name), ran: false, exitCode: null, stdout: "", stderr: "", error: "Execution was not attempted because a submitted data file exceeds the runner's input limit." }, selection.entryPoint, selection.skipped);
+  }
 
   // One wall-clock budget for every network call this run makes (the
   // runtimes lookup, Piston's /execute, and - only on a 401/403/429 - both of
@@ -625,6 +631,18 @@ export async function runSubmittedCode(
   // 60s Vercel Hobby ceiling with room for the grading call itself"
   // reasoning documented on CODE_RUN_TIMEOUT_MS in code-run-selection.ts.
   const signal = AbortSignal.timeout(CODE_RUN_TIMEOUT_MS);
+
+  // Coordinated repository runs use their own durable dispatch fence and
+  // retain the existing provider path. Never retry a VM after a possible run.
+  if (useVercel) {
+    try {
+      const { runVercelCode } = await import("./code-runner-vercel");
+      return finalizeCodeRunResult(await runVercelCode(selection.language, selection.runFiles, signal), selection.entryPoint, selection.skipped);
+    } catch (error) {
+      const timedOut = isTimeoutError(error) || signal.aborted;
+      return finalizeCodeRunResult({ language: selection.language, files: selection.runFiles.map((file) => file.name), ran: false, exitCode: null, stdout: "", stderr: "", error: timedOut ? "Isolated code execution timed out; no execution result was established." : "Isolated code execution is unavailable; no execution result was established.", timedOut }, selection.entryPoint, selection.skipped);
+    }
+  }
 
   const raw = await executeRunFiles(selection.language, selection.runFiles, signal, beforeDispatch);
   return finalizeCodeRunResult(raw, selection.entryPoint, selection.skipped);

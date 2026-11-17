@@ -1,0 +1,39 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+const mocks = vi.hoisted(() => ({ create: vi.fn(), writeFiles: vi.fn(), runCommand: vi.fn(), stop: vi.fn() }));
+vi.mock("@vercel/sandbox", () => ({ Sandbox: { create: mocks.create } }));
+import { runVercelCode } from "./code-runner-vercel";
+import { selectCodeRunFiles } from "./code-run-selection";
+
+describe("isolated code execution", () => {
+  it("reports an oversized data file instead of silently dropping it", () => {
+    const result = selectCodeRunFiles([{ name: "main.cpp", extension: "cpp", previewContent: "int main() {}" }, { name: "data.csv", extension: "csv", previewContent: "x".repeat(200_001) }]);
+    expect(result.skipped).toContainEqual({ name: "data.csv", reason: "data-too-large" });
+  });
+  it("retains multi-megabyte data in the isolated runner's explicit budget", () => {
+    const text = "x".repeat(2_039_946);
+    const result = selectCodeRunFiles([{ name: "main.cpp", extension: "cpp", previewContent: "int main() {}" }, { name: "data.csv", extension: "csv", previewContent: text }], undefined, 3_000_000);
+    expect(result.runFiles).toContainEqual({ name: "data.csv", content: text }); expect(result.skipped).toHaveLength(0);
+  });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.stop.mockResolvedValue(undefined); mocks.writeFiles.mockResolvedValue(undefined);
+    mocks.create.mockResolvedValue({ writeFiles: mocks.writeFiles, runCommand: mocks.runCommand, stop: mocks.stop });
+    mocks.runCommand.mockImplementation(async ({ cmd, stdout }: { cmd: string; stdout: { write: (value: string) => void } }) => { if (cmd === "./__grade_program") stdout.write("synthetic output"); return { exitCode: 0 }; });
+  });
+  it("starts with egress denied, links all source files and stops the VM", async () => {
+    const files = [{ name: "main.cpp", content: "int main(){}" }, { name: "helper.cpp", content: "int helper(){return 0;}" }, { name: "data.csv", content: "x,y" }];
+    const result = await runVercelCode("c++", files, new AbortController().signal);
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ networkPolicy: "deny-all", persistent: false, resources: { vcpus: 1 } }));
+    expect(mocks.runCommand.mock.calls[0][0]).toMatchObject({ cmd: "g++", args: ["./main.cpp", "./helper.cpp", "-o", "__grade_program"] });
+    expect(result).toMatchObject({ ran: true, exitCode: 0, stdout: "synthetic output" }); expect(mocks.stop).toHaveBeenCalled();
+  });
+  it("rejects unsafe names before creating a VM", async () => {
+    await expect(runVercelCode("python", [{ name: "../main.py", content: "print(1)" }], new AbortController().signal)).rejects.toThrow(/filename/i);
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+  it("does not run after compilation fails and preserves the compiler output", async () => {
+    mocks.runCommand.mockImplementation(async ({ stderr }: { stderr: { write: (value: string) => void } }) => { stderr.write("synthetic compiler error"); return { exitCode: 1 }; });
+    const result = await runVercelCode("c++", [{ name: "main.cpp", content: "invalid" }], new AbortController().signal);
+    expect(result).toMatchObject({ ran: false, exitCode: null, compileOutput: "synthetic compiler error" }); expect(mocks.runCommand).toHaveBeenCalledTimes(1);
+  });
+});

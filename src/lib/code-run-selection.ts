@@ -99,7 +99,7 @@ export interface CodeRunCandidate {
 export interface CodeRunSkip {
   /** The candidate's original `name` (full path, if it had one). */
   name: string;
-  reason: "truncated" | "collision";
+  reason: "truncated" | "collision" | "data-too-large";
   /** reason === "collision" only: the basename two candidates both wanted. */
   basename?: string;
   /** reason === "collision" only: the original name of the candidate that
@@ -111,6 +111,7 @@ export interface CodeRunSkip {
  * the grading prompt (buildCodeExecutionNote in grade/utils.ts does not use
  * this; it only ever sees files that made it into the run). */
 export function describeCodeRunSkip(skip: CodeRunSkip): string {
+  if (skip.reason === "data-too-large") return `${skip.name}: not run - the submitted data file exceeds the runner's input limit.`;
   if (skip.reason === "truncated") {
     return `${skip.name}: not run - only a truncated slice of this file was available, and running a cut-off file would blame the student for our truncation, not their code.`;
   }
@@ -408,7 +409,8 @@ export interface CodeRunSelection {
  */
 export function selectCodeRunFiles(
   candidates: readonly CodeRunCandidate[],
-  requestedEntryPoint?: string
+  requestedEntryPoint?: string,
+  maxDataFileChars = MAX_DATA_FILE_CHARS
 ): CodeRunSelection {
   const { files: mapped, skipped } = mapSubmittedFilesForExecution(candidates);
 
@@ -429,8 +431,10 @@ export function selectCodeRunFiles(
       continue;
     }
     const ext = extensionOfBasename(file.name);
-    if (DATA_EXTENSIONS.has(ext) && file.content.length <= MAX_DATA_FILE_CHARS) {
+    if (DATA_EXTENSIONS.has(ext) && file.content.length <= maxDataFileChars) {
       dataFiles.push({ name: file.name, content: file.content });
+    } else if (DATA_EXTENSIONS.has(ext)) {
+      skipped.push({ name: file.name, reason: "data-too-large" });
     }
     // Anything else (unrecognized language, oversized data file) is dropped
     // silently - matches runSubmittedCode's pre-existing behavior.

@@ -21,6 +21,7 @@ import {
 } from "@/lib/workflows/grading-review-rows";
 import { resolveInstitution } from "@/lib/institution-resolution";
 import { repoGradingStopAt } from "@/lib/workflows/registry/steps.grading-repos.grade-repo";
+import { workflowCodeRunStatus } from "@/lib/code-run-display";
 
 export const gradingRunSteps: StepDefinition[] = [
   {
@@ -652,11 +653,7 @@ export const gradingRunSteps: StepDefinition[] = [
             }
             if (gradeResult.codeExecution) {
               const ce = gradeResult.codeExecution;
-              const status = ce.error
-                ? `could not run (${ce.error})`
-                : ce.ran
-                  ? "ran cleanly (exit 0)"
-                  : `failed (exit ${ce.exitCode ?? "unknown"})`;
+              const status = workflowCodeRunStatus(ce);
               const output = (ce.stdout || ce.stderr || ce.compileOutput || "").trim();
               sections.push(
                 `Code run during grading: ${status}${output ? `\n${output.slice(0, 2000)}` : ""}`

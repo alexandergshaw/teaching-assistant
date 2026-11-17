@@ -813,8 +813,8 @@ function stripSingleLineComments(content: string): string {
     .join("\n");
 }
 
-/** True when `language` is one of the silent-EOF languages (c/c++) and at
- * least one of `files`' source appears to read from stdin. Used only to
+/** True when source appears to read stdin, including reads that can exit
+ * successfully on empty input. This is a heuristic and may over-detect. Used to
  * caveat a grading prompt's presentation of a successful (`ran: true`) run's
  * output - never to flip whether that run's `ran` boolean is true, since the
  * process genuinely did exit 0 and this module has no reliable way to know
@@ -822,12 +822,14 @@ function stripSingleLineComments(content: string): string {
  * false positive free, though - see STDIN_READ_PATTERNS' comment above for
  * the real cost (the caveat text this drives can move the grade the model
  * assigns, even though `ran` itself never changes). See the section comment
- * above this function's neighbors for why no stronger post-hoc signal
- * exists for c/c++. */
+ * above this function's neighbors for why no stronger post-hoc signal exists. */
 export function sourceLooksLikeItReadsStdin(
   language: string,
   files: readonly CodeRunSelectionFile[]
 ): boolean {
+  if (language === "python") return files.some((f) => /\.py$/i.test(f.name) && /\bsys\s*\.\s*stdin\b|\binput\s*\(|\bfrom\s+sys\s+import\s+[^\n]*\bstdin\b/.test(f.content.replace(/^\s*#.*$/gm, "")));
+  if (language === "javascript" || language === "typescript") return files.some((f) => (language === "javascript" ? /\.(?:js|mjs|cjs)$/i : /\.ts$/i).test(f.name) && /\bprocess\s*\.\s*stdin\b|\breadFileSync\s*\(\s*0\s*[,)]|\bimport\s*\{[^}]*\bstdin\b[^}]*\}\s*from\s*['"](?:node:)?process['"]/.test(f.content.replace(/^\s*\/\/.*$/gm, "")));
+  if (language === "java") return files.some((f) => /\.java$/i.test(f.name) && /\bSystem\s*\.\s*in\b/.test(f.content.replace(/^\s*\/\/.*$/gm, "")));
   if (language !== "c" && language !== "c++") return false;
   return files.some((f) => {
     if (CIN_READ_PATTERN.test(stripSingleLineComments(f.content))) return true;

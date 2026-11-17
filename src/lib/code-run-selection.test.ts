@@ -628,9 +628,28 @@ describe("sourceLooksLikeItReadsStdin", () => {
     expect(sourceLooksLikeItReadsStdin("c++", files)).toBe(false);
   });
 
-  it("never flags languages outside c/c++, even if the source reads stdin (Python fails loudly instead)", () => {
+  it("flags Python input reads because caught EOF or stream reads can exit successfully", () => {
     const files = [{ name: "main.py", content: "x = input()" }];
-    expect(sourceLooksLikeItReadsStdin("python", files)).toBe(false);
+    expect(sourceLooksLikeItReadsStdin("python", files)).toBe(true);
+    expect(sourceLooksLikeItReadsStdin("python", [{ name: "main.py", content: "import sys\ndata = sys.stdin.read()" }])).toBe(true);
+    expect(sourceLooksLikeItReadsStdin("python", [{ name: "main.py", content: "from sys import stdin\ndata = stdin.read()" }])).toBe(true);
+    expect(sourceLooksLikeItReadsStdin("python", [{ name: "main.py", content: "# input()\nprint('hello')" }])).toBe(false);
+  });
+
+  it("flags Node stdin streams and file-descriptor reads", () => {
+    expect(sourceLooksLikeItReadsStdin("javascript", [{ name: "main.js", content: "process.stdin.on('data', handle)" }])).toBe(true);
+    expect(sourceLooksLikeItReadsStdin("javascript", [{ name: "main.js", content: "require('fs').readFileSync(0, 'utf8')" }])).toBe(true);
+    expect(sourceLooksLikeItReadsStdin("javascript", [{ name: "main.js", content: "console.log('hello')" }])).toBe(false);
+    expect(sourceLooksLikeItReadsStdin("javascript", [{ name: "main.js", content: "console.log('hello')" }, { name: "data.csv", content: "process.stdin" }])).toBe(false);
+    expect(sourceLooksLikeItReadsStdin("typescript", [{ name: "main.ts", content: "process.stdin.on('data', handle)" }])).toBe(true);
+    expect(sourceLooksLikeItReadsStdin("javascript", [{ name: "main.js", content: "import { stdin as source } from 'node:process'; source.resume();" }])).toBe(true);
+    expect(sourceLooksLikeItReadsStdin("javascript", [{ name: "main.js", content: "// process.stdin.on('data', handle)\nconsole.log('hello')" }])).toBe(false);
+  });
+
+  it("flags Java programs that check standard input before reading", () => {
+    expect(sourceLooksLikeItReadsStdin("java", [{ name: "Main.java", content: "Scanner s = new Scanner(System.in); if (s.hasNext()) System.out.println(s.next());" }])).toBe(true);
+    expect(sourceLooksLikeItReadsStdin("java", [{ name: "Main.java", content: 'System.out.println("hello");' }])).toBe(false);
+    expect(sourceLooksLikeItReadsStdin("java", [{ name: "Main.java", content: '// System.in\nSystem.out.println("hello");' }])).toBe(false);
   });
 
   it("does not flag a cin >> that is entirely commented out with //", () => {

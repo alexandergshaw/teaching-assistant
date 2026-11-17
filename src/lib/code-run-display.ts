@@ -8,3 +8,11 @@ export function codeRunDisplay(run: CodeRunResult | null | undefined): { label: 
   if (run.ran && run.stdinReadSuspected) return { label: "Code: exited cleanly; input-driven behavior not verified", detail: "yes; input-driven behavior was not verified because no input was supplied" };
   return run.ran ? { label: "Code: ran cleanly", detail: "yes" } : { label: "Code: errors", detail: "no" };
 }
+
+/** Describe workflow output without treating an empty-input exit as tested behavior. */
+export function workflowCodeRunStatus(run: CodeRunResult): string {
+  if (run.error) return `could not run (${run.error})`;
+  if (run.neededStdin) return "input unavailable; behavior not verified";
+  if (run.ran && run.stdinReadSuspected) return "exited cleanly; input-driven behavior not verified";
+  return run.ran ? "ran cleanly (exit 0)" : `failed (exit ${run.exitCode ?? "unknown"})`;
+}

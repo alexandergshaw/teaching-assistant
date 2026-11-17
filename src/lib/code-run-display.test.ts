@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { codeRunDisplay } from "./code-run-display";
+import { codeRunDisplay, workflowCodeRunStatus } from "./code-run-display";
 
 const clean = { language: "c++", files: ["main.cpp"], ran: true, exitCode: 0, stdout: "Menu\nGood bye.", stderr: "" };
 describe("code execution display", () => {
@@ -12,5 +12,11 @@ describe("code execution display", () => {
     expect(codeRunDisplay({ ...clean, error: "unavailable" })?.label).toBe("Code: runner error");
     expect(codeRunDisplay({ ...clean, ran: false, neededStdin: true })?.label).toContain("no input available");
     expect(codeRunDisplay(null)).toBeNull();
+  });
+  it("preserves the empty-input caveat in workflow output", () => {
+    expect(workflowCodeRunStatus({ ...clean, stdinReadSuspected: true })).toContain("input-driven behavior not verified");
+    expect(workflowCodeRunStatus({ ...clean, ran: false, neededStdin: true })).toContain("input unavailable");
+    expect(workflowCodeRunStatus(clean)).toBe("ran cleanly (exit 0)");
+    expect(workflowCodeRunStatus({ ...clean, ran: false, exitCode: 2 })).toBe("failed (exit 2)");
   });
 });

@@ -24,13 +24,19 @@ export function notebookNeedsVisualReview(text: string): boolean {
     if (!notebook || typeof notebook !== "object" || !Array.isArray((notebook as { cells?: unknown }).cells)) return true;
     return (notebook as { cells: unknown[] }).cells.some((cell) => {
       if (!cell || typeof cell !== "object") return true;
-      const outputs = (cell as { outputs?: unknown }).outputs;
+      const record = cell as { outputs?: unknown; attachments?: unknown; source?: unknown; cell_type?: unknown };
+      if (record.attachments && (typeof record.attachments !== "object" || Object.keys(record.attachments).length)) return true;
+      const source = Array.isArray(record.source) ? record.source.join("") : typeof record.source === "string" ? record.source : "";
+      if (record.cell_type !== "code" && /!\[|<\s*\/?[a-z]/i.test(source)) return true;
+      const outputs = record.outputs;
       if (outputs === undefined) return false;
       if (!Array.isArray(outputs)) return true;
       return outputs.some((output) => {
         if (!output || typeof output !== "object") return true;
-        const data = (output as { data?: unknown }).data;
-        return !!data && (typeof data !== "object" || Object.keys(data).some((key) => /^(?:image\/|text\/html$|application\/vnd\.)/i.test(key)));
+        const record = output as { data?: unknown; output_type?: unknown };
+        const data = record.data;
+        if ((record.output_type === "display_data" || record.output_type === "execute_result") && (data === undefined || data === null)) return true;
+        return data !== undefined && (data === null || typeof data !== "object" || Array.isArray(data) || Object.keys(data).some((key) => key !== "text/plain"));
       });
     });
   } catch { return true; }

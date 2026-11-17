@@ -497,3 +497,49 @@ it("holds static project evidence with discussion axes before any model call", a
   expect(run.results[0].feedback).toContain("cannot be graded as separate discussion sections");
   expect(mockCallLlm).not.toHaveBeenCalled();
 });
+
+describe("notebook image dispatch", () => {
+  it("holds direct notebooks with visual or incomplete content while the feature is off", async () => {
+    vi.stubEnv("GRADE_NOTEBOOK_VISUALS", "");
+    try {
+      for (const file of [
+        { name: "work.ipynb", extension: "ipynb", previewContent: JSON.stringify({ cells: [{ outputs: [{ data: { "image/png": "x" } }] }] }), previewTruncated: false },
+        { name: "work.ipynb", extension: "ipynb", previewContent: "{}", previewTruncated: true },
+      ]) {
+        const result = await gradeEntries([entry({ submittedFiles: [file] })], "Grade it.", "Correctness (10 points).", "gemini", null, { autoRunCode: false });
+        expect(result.results[0]).toMatchObject({ totalScore: "", strengths: "Thank you for submitting your work.", ungraded: { kind: "grading-failed" } });
+        expect(mockCallLlm).not.toHaveBeenCalled();
+      }
+      mockCallLlm.mockResolvedValueOnce({ ok: true, text: OK_RESPONSE_TEXT });
+      const textOnly = { name: "work.ipynb", extension: "ipynb", previewContent: JSON.stringify({ cells: [{ outputs: [{ data: { "text/plain": "42" } }] }] }), previewTruncated: false };
+      await gradeEntries([entry({ submittedFiles: [textOnly] })], "Grade it.", "Correctness (10 points).", "gemini", null, { autoRunCode: false });
+      expect(mockCallLlm).toHaveBeenCalledOnce();
+    } finally { vi.unstubAllEnvs(); }
+  });
+  it("never assigns a score when multimodal provider rejects notebook evidence", async () => {
+    vi.stubEnv("GRADE_NOTEBOOK_VISUALS", "1");
+    try {
+      const image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+      const submittedFiles = [{ name: "work.ipynb", extension: "ipynb", previewContent: JSON.stringify({ cells: [{ cell_type: "code", outputs: [{ output_type: "display_data", data: { "image/png": image } }] }] }), previewTruncated: false }];
+      mockCallLlm.mockResolvedValueOnce({ ok: false, status: 400, body: "image unsupported" } as never);
+      const result = await gradeEntries([entry({ submittedFiles })], "Grade it.", "Correctness (10 points).", "gemini", null, { autoRunCode: false });
+      expect(mockCallLlm).toHaveBeenCalledOnce();
+      expect(result.results[0]).toMatchObject({ totalScore: "", ungraded: { kind: "grading-failed" } });
+    } finally { vi.unstubAllEnvs(); }
+  });
+  it("sends extracted image data to the model and holds unsupported notebook output", async () => {
+    vi.stubEnv("GRADE_NOTEBOOK_VISUALS", "1");
+    try {
+      const image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+      const notebook = (data: object) => JSON.stringify({ cells: [{ cell_type: "code", outputs: [{ output_type: "display_data", data }] }] });
+      const studentFile = { name: "work.ipynb", extension: "IPYNB", previewContent: notebook({ "image/png": image }), previewTruncated: false };
+      mockCallLlm.mockResolvedValueOnce({ ok: true, text: OK_RESPONSE_TEXT });
+      await gradeEntries([entry({ submittedFiles: [studentFile] })], "Grade it.", "Correctness (10 points).", "gemini", null, { autoRunCode: false });
+      expect(mockCallLlm.mock.calls[0][0].contents[0].parts).toContainEqual({ inlineData: { mimeType: "image/png", data: image } });
+      mockCallLlm.mockClear();
+      const held = await gradeEntries([entry({ submittedFiles: [{ ...studentFile, previewContent: notebook({ "text/html": "<img>" }) }] })], "Grade it.", "Correctness (10 points).", "gemini", null, { autoRunCode: false });
+      expect(held.results[0]).toMatchObject({ totalScore: "", ungraded: { kind: "grading-failed" } });
+      expect(mockCallLlm).not.toHaveBeenCalled();
+    } finally { vi.unstubAllEnvs(); }
+  });
+});

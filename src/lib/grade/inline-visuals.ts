@@ -1,3 +1,4 @@
+import { prepareNotebookVisuals } from "./notebook-visuals";
 import { DOCUMENT_EXTENSIONS } from "../office-extract";
 import { OFFICE_IMAGE_SOURCE_MIME_TYPES, graderNeedsFileBytes } from "./constants";
 import { prepareDocumentVisuals } from "./document-visuals";
@@ -12,6 +13,17 @@ export async function collectInlineVisualEvidence(submittedFiles: SubmittedFileI
   let remainingParts = DOCUMENT_PICTURE_LIMIT;
   let remainingBytes = DOCUMENT_VISUAL_BYTE_LIMIT;
   for (const f of submittedFiles) {
+    if (f.extension.toLowerCase() === "ipynb" && process.env.GRADE_NOTEBOOK_VISUALS === "1") {
+      let coverage = await prepareNotebookVisuals(f.previewContent, f.previewTruncated);
+      if (coverage.parts.length > remainingParts || new TextEncoder().encode(JSON.stringify(coverage)).byteLength > remainingBytes) {
+        coverage = { status: "failed", reason: "inspection-failed", found: 0, omitted: 0, parts: [] };
+      }
+      remainingParts -= coverage.parts.length;
+      remainingBytes = Math.max(0, remainingBytes - new TextEncoder().encode(JSON.stringify(coverage)).byteLength);
+      out.documents.push({ file: f, coverage });
+      out.parts.push(...coverage.parts.map(p => ({ ...p, name: f.name + " (" + p.name + ")" })));
+      continue;
+    }
     const kind = f.extension === "docx" || f.extension === "pptx" ? f.extension : f.mimeType ? OFFICE_IMAGE_SOURCE_MIME_TYPES[f.mimeType] : undefined;
     if (f.documentVisuals || kind || (DOCUMENT_EXTENSIONS.has(f.extension) && f.extension !== "pdf")) {
       let coverage = kind && f.rawBase64 !== undefined

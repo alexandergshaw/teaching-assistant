@@ -1,3 +1,7 @@
+import sharp from "sharp";
+import { randomBytes } from "node:crypto";
+import { collectInlineVisualEvidence } from "./inline-visuals";
+import { repoFilesToSubmittedFiles } from "./repo-file-submissions";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // fetchGradableRepoContent talks to GitHub only through these four functions -
@@ -40,6 +44,42 @@ beforeEach(() => {
 });
 
 describe("fetchGradableRepoContent - URL forms (AC2.2)", () => {
+  it("retains and attaches the exact image from a large notebook without filling the prompt with base64", async () => {
+    vi.stubEnv("GRADE_NOTEBOOK_VISUALS", "1");
+    try {
+      const bytes = await sharp(randomBytes(400 * 400 * 3), { raw: { width: 400, height: 400, channels: 3 } }).png().toBuffer();
+      const image = bytes.toString("base64");
+      const notebook = JSON.stringify({ cells: [{ cell_type: "code", source: ["plot()"], outputs: [{ output_type: "display_data", data: { "image/png": image } }] }] });
+      expect(Buffer.byteLength(notebook)).toBeGreaterThan(300_000);
+      mockGetRepo.mockResolvedValueOnce(fakeRepo());
+      mockListCommits.mockResolvedValueOnce([{ sha: "sha1", message: "", author: "", date: "", htmlUrl: "" }]);
+      mockGetRepoTree.mockResolvedValueOnce({ entries: [{ path: "work.ipynb", type: "blob", size: Buffer.byteLength(notebook), sha: "x" }], truncated: false });
+      mockGetFileText.mockResolvedValueOnce(notebook);
+      const result = await fetchGradableRepoContent("https://github.com/octo/cat");
+      if ("error" in result) throw new Error(result.error);
+      expect(result.inventory?.files[0].content).toBe("read");
+      expect(result.content).not.toContain(image);
+      expect(result.content).toContain("Image output attached separately");
+      const visual = await collectInlineVisualEvidence(repoFilesToSubmittedFiles(result.files));
+      expect(visual.parts[0].base64).toBe(image);
+    } finally { vi.unstubAllEnvs(); }
+  });
+  it("transports a complete large notebook with a bounded read and removes image payloads from model text", async () => {
+    vi.stubEnv("GRADE_NOTEBOOK_VISUALS", "1");
+    try {
+      const largeSource = "x".repeat(350_000);
+      const notebook = JSON.stringify({ cells: [{ cell_type: "markdown", source: largeSource }] });
+      mockGetRepo.mockResolvedValueOnce(fakeRepo("main"));
+      mockListCommits.mockResolvedValueOnce([{ sha: "sha1", message: "", author: "", date: "", htmlUrl: "" }]);
+      mockGetRepoTree.mockResolvedValueOnce({ entries: [{ path: "work.ipynb", type: "blob", size: Buffer.byteLength(notebook), sha: "x" }], truncated: false });
+      mockGetFileText.mockResolvedValueOnce(notebook);
+      const result = await fetchGradableRepoContent("https://github.com/octo/cat");
+      if ("error" in result) throw new Error(result.error);
+      expect(mockGetFileText).toHaveBeenCalledWith("octo", "cat", "work.ipynb", "sha1", expect.objectContaining({ controller: expect.any(AbortController) }), 2_000_000);
+      expect(result.files[0].text).toBe(notebook);
+      expect(result.inventory?.files[0].content).toBe("read");
+    } finally { vi.unstubAllEnvs(); }
+  });
   it("fetches Jupyter notebooks as submitted source instead of marking them unsupported", async () => {
     mockGetRepo.mockResolvedValueOnce(fakeRepo("main"));
     mockListCommits.mockResolvedValueOnce([{ sha: "sha1", message: "", author: "", date: "", htmlUrl: "" }]);

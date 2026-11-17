@@ -1,7 +1,7 @@
 import { MAX_STATIC_PROJECT_CONTENT_CHARS } from "@/lib/grade/static-project-limits";
 import { prioritizeModelContent } from "./large-data-model-content";
 import { reportsLengthCriterionDeduction, reportsLengthPenalty } from "./reported-length-penalty";
-import { hasUnreviewedNotebook, reportsUnavailableEvidence, runtimeDependencyUnavailable } from "./unavailable-evidence";
+import { hasUnreviewedNotebook, notebookNeedsVisualReview, reportsUnavailableEvidence, runtimeDependencyUnavailable } from "./unavailable-evidence";
 import { addLengthExemption, extractLengthOnlyExemption, withoutSupportedInstructionLength, withoutSupportedRubricLength } from "./length-only-exemption";
 import { canvasOmissionIdentityRefusal, canvasVideoRefusal } from "../canvas/omitted-video";
 import type { SubmissionFileInventory } from "./submission-file-inventory";
@@ -523,8 +523,10 @@ async function gradeStudentEntries(
       break;
     }
     const { student, content, mergedFileCount, submittedFiles, userId, codeRun: precomputedCodeRun, gradedRepo, gradedRef, repositoryInventories } = limitedEntries[i];
-    if (hasUnreviewedNotebook(repositoryInventories)) {
-      results.push(buildEvidenceHeldRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}Repository evidence could not be fully inspected. No score was assigned; review the submission before grading.` }));
+    const missingNotebookPayload = process.env.GRADE_NOTEBOOK_VISUALS === "1" && repositoryInventories?.some(inventory => inventory.files.some(file => /\.ipynb$/i.test(file.path) && submittedFiles.filter(item => item.name === file.path && item.extension.toLowerCase() === "ipynb" && !item.previewTruncated).length !== 1));
+    const unavailableDirectNotebook = process.env.GRADE_NOTEBOOK_VISUALS !== "1" && submittedFiles.some(file => file.extension.toLowerCase() === "ipynb" && (file.previewTruncated || notebookNeedsVisualReview(file.previewContent)));
+    if (hasUnreviewedNotebook(repositoryInventories) || missingNotebookPayload || unavailableDirectNotebook) {
+      results.push(buildEvidenceHeldRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}Submission evidence could not be fully inspected. No score was assigned; review the submission before grading.` }));
       continue;
     }
     const axes = limitedEntries[i].discussionAxes;
@@ -561,8 +563,12 @@ async function gradeStudentEntries(
       results.push(buildUngradedRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: canvasVideo }));
       continue;
     }
+    if (process.env.GRADE_NOTEBOOK_VISUALS === "1" && submissionTruncated && submittedFiles.some(file => file.extension.toLowerCase() === "ipynb")) {
+      results.push(buildEvidenceHeldRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}The notebook and its surrounding submission exceed the grading input budget. No score was assigned.` }));
+      continue;
+    }
     const visuals = await collectInlineVisualEvidence(submittedFiles);
-    const affected = visuals.documents.filter(d => (d.file.extension === "docx" || d.file.extension === "pptx") && (d.coverage.status === "incomplete" || d.coverage.status === "failed"));
+    const affected = visuals.documents.filter(d => (d.file.extension === "docx" || d.file.extension === "pptx" || d.file.extension.toLowerCase() === "ipynb") && (d.coverage.status === "incomplete" || d.coverage.status === "failed"));
     if (visuals.documents.length) callSink?.recordVisuals?.({
       picturesPrepared: visuals.documents.reduce((n, d) => n + d.coverage.parts.length, 0),
       picturesSent: affected.length ? 0 : visuals.documents.reduce((n, d) => n + d.coverage.parts.length, 0),
@@ -571,7 +577,7 @@ async function gradeStudentEntries(
     });
     if (affected.length) {
       const unsupportedShapes = affected.some((item) => item.coverage.reason === "unsupported-shape");
-      results.push(buildUngradedRow(limitedEntries[i], {
+      results.push((affected.some(item => item.file.extension.toLowerCase() === "ipynb") ? buildEvidenceHeldRow : buildUngradedRow)(limitedEntries[i], {
         kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId,
         message: unsupportedShapes
           ? `${GRADING_FAILURE_PREFIX}Embedded Word vector shapes could not be fully inspected in ${affected.map(d => d.file.name).join(", ")}. Export the document to PDF and try again.`

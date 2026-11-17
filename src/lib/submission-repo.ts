@@ -165,7 +165,7 @@ function isSourcePath(path: string): boolean {
 export function selectSubmissionRepoFiles(
   tree: SubmissionRepoTreeEntry[],
   subpath?: string,
-  opts: { maxFiles?: number; maxFileBytes?: number } = {}
+  opts: { maxFiles?: number; maxFileBytes?: number; maxNotebookBytes?: number } = {}
 ): { selected: SubmissionRepoTreeEntry[]; truncated: boolean } {
   const maxFiles = opts.maxFiles ?? MAX_SUBMISSION_REPO_FILES;
   const maxFileBytes = opts.maxFileBytes ?? MAX_SUBMISSION_FILE_BYTES;
@@ -189,7 +189,7 @@ export function selectSubmissionRepoFiles(
   let truncated = false;
   const withinSize: SubmissionRepoTreeEntry[] = [];
   for (const entry of eligible) {
-    if (typeof entry.size === "number" && entry.size > maxFileBytes) {
+    if (typeof entry.size === "number" && entry.size > (/\.ipynb$/i.test(entry.path) ? opts.maxNotebookBytes ?? maxFileBytes : maxFileBytes)) {
       truncated = true; // an oversized file was skipped entirely, pre-fetch
       continue;
     }

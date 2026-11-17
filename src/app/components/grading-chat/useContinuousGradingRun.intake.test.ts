@@ -174,6 +174,36 @@ function everything(): string {
 const FILE_INPUT = () => ({ kind: "file", file: new File(["x"], "ZZ_CANARY_FILE.txt") }) as const;
 
 describe("intake diagnostics - prepare_submission", () => {
+  it("does not grade multiple students from a storage ZIP selected for one student", async () => {
+    await beginReady(useTestDriver());
+    ingestZipMock.mockImplementation(async (_p: string, _prov: string, onEntry: (e: StudentSubmissionEntry) => void) => {
+      onEntry(entryFor("A")); onEntry(entryFor("B"));
+      return { kind: "complete", entryCount: 2, ledger: { studentsFound: 2, studentsEmitted: 2, skipped: [], failedSupportedFiles: [], classification: { kind: "class", studentCount: 2, markerStudentCount: 0, signal: "folders" } } } satisfies IngestOutcome;
+    });
+    const outcome = await useTestDriver().submit({ kind: "storaged-zip", storagePath: ZIP_PATH, name: "class.zip", singleStudent: true, label: "A" });
+    expect(outcome).toMatchObject({ kind: "refused", reason: expect.stringContaining("one complete student") });
+    await flushMicrotasks(); expect(dispatchItemMock).not.toHaveBeenCalled();
+  });
+  it.each(["skipped", "unreadable"])("holds a single-student storage ZIP with %s evidence", async (kind) => {
+    await beginReady(useTestDriver());
+    ingestZipMock.mockImplementation(async (_p: string, _prov: string, onEntry: (e: StudentSubmissionEntry) => void) => {
+      onEntry(entryFor("A"));
+      return { kind: "complete", entryCount: 1, ledger: { studentsFound: 1, studentsEmitted: 1, skipped: kind === "skipped" ? [{ student: "B", reason: "too large" }] : [], failedSupportedFiles: kind === "unreadable" ? ["bad.docx"] : [] } } satisfies IngestOutcome;
+    });
+    const outcome = await useTestDriver().submit({ kind: "storaged-zip", storagePath: ZIP_PATH, name: "one.zip", singleStudent: true, label: "A" });
+    expect(outcome).toMatchObject({ kind: "refused", reason: expect.stringContaining("one complete student") });
+    await flushMicrotasks(); expect(dispatchItemMock).not.toHaveBeenCalled();
+  });
+  it("keeps the typed name for one complete storage ZIP", async () => {
+    await beginReady(useTestDriver());
+    ingestZipMock.mockImplementation(async (_p: string, _prov: string, onEntry: (e: StudentSubmissionEntry) => void) => {
+      onEntry(entryFor("Inferred"));
+      return { kind: "complete", entryCount: 1, ledger: { studentsFound: 1, studentsEmitted: 1, skipped: [], failedSupportedFiles: [] } } satisfies IngestOutcome;
+    });
+    const outcome = await useTestDriver().submit({ kind: "storaged-zip", storagePath: ZIP_PATH, name: "one.zip", singleStudent: true, label: "Typed Name" });
+    expect(outcome).toMatchObject({ kind: "accepted", entryCount: 1 });
+    await flushMicrotasks(); expect(dispatchItemMock).toHaveBeenCalledWith(expect.objectContaining({ entry: expect.objectContaining({ student: "Typed Name" }) }), expect.anything());
+  });
   it("a non-video zip ingest refusal records a prepare failure with a fixed class (AC-14a)", async () => {
     await beginReady(useTestDriver());
     ingestZipMock.mockResolvedValue({ kind: "refused", reason: "Refused: ZZ_CANARY_STUDENT collides with ZZ_CANARY_STUDENT" } satisfies IngestOutcome);

@@ -38,7 +38,7 @@ export type ChatSubmissionInput =
   // to private Storage under `${userId}/grading-uploads/<uuid>.zip`. Carries
   // only the path; BW2's streaming ingest reads, parses and deletes it. The
   // driver does not consume this member until BW2.
-  | { readonly kind: "storaged-zip"; readonly storagePath: string; readonly name: string; readonly reviewedZipMapping?: Readonly<Record<string, string>>; readonly evidenceOmissions?: readonly string[]; readonly perStudentEvidence?: PerStudentEvidence; readonly expectedOwnerSession?: ExpectedOwnerSession; readonly staticOnly?: true; readonly captureSourceIndices?: true }
+  | { readonly kind: "storaged-zip"; readonly storagePath: string; readonly name: string; readonly singleStudent?: true; readonly label?: string; readonly reviewedZipMapping?: Readonly<Record<string, string>>; readonly evidenceOmissions?: readonly string[]; readonly perStudentEvidence?: PerStudentEvidence; readonly expectedOwnerSession?: ExpectedOwnerSession; readonly staticOnly?: true; readonly captureSourceIndices?: true }
   // VIDEO-GRADING W4: a loose video already uploaded to private Storage under
   // `${userId}/grading-uploads/<uuid>.<ext>`. Carries only the path (a video can
   // never ride the request body); the driver's prepareVideo turns it into an

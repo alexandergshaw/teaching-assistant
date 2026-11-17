@@ -557,6 +557,9 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         return { kind: "refused", reason: `No student submissions were found in ${input.name}.` };
       }
       entries = collected;
+      if (input.singleStudent && (entries.length !== 1 || ingestSkipped.length > 0 || completedLedger.failedSupportedFiles.length > 0)) {
+        return { kind: "refused", reason: "This archive could not be confirmed as one complete student submission. Nothing was graded." };
+      }
     } else if (input.kind === "storaged-video") {
       // A reset while the video is being prepared must not spend a grading call
       // on a ghost run.
@@ -769,7 +772,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     // Canvas assignment resolves to many, and one label must never collapse
     // distinct students. Blank/absent leaves the derived student untouched.
     const submitLabel =
-      (input.kind === "file" || input.kind === "url" || input.kind === "storaged-video" || input.kind === "storaged-file") &&
+      (input.kind === "file" || input.kind === "url" || input.kind === "storaged-video" || input.kind === "storaged-file" || (input.kind === "storaged-zip" && input.singleStudent)) &&
       entries.length === 1 && ingestSkipped.length === 0
         ? (input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS) ?? "")
         : "";

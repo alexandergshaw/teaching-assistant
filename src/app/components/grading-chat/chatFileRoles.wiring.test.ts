@@ -431,6 +431,6 @@ it("binds nested omissions to the correct student in a mixed batch", async () =>
     const projects = { "100-200": { mappedPaths: ["100-200 - project.zip/main.cpp"], excludedPaths: ["100-200 - project.zip/build.obj"] } };
     expect(await run(new File(["source"], "source.zip"), new File(["subset"], "subset.zip"), groups, [], { "100-200": "Ada", "101-201": "Lin" }, { current: () => true, onProgress: vi.fn(), projects })).toBeNull();
     expect(submitted).toHaveBeenCalledWith([expect.any(File)], undefined, { "100-200 - project.zip/main.cpp": "Ada", "101-201 - essay.txt": "Lin" }, undefined, undefined, true, undefined, [{ student: "Ada", omissions: ["100-200 - project.zip/build.obj"], staticOnly: true }, { student: "Lin", omissions: [], staticOnly: false }], undefined);
-    expect([...records.values()].map((value) => JSON.parse(value).omitted)).toEqual([[{ student: "100-200", files: ["100-200 - project.zip/build.obj"], reason: "build artifact or verified course dataset excluded from grading" }]]);
+    expect([...records.values()].map((value) => JSON.parse(value).omitted)).toEqual([[{ student: "100-200", files: ["100-200 - project.zip/build.obj"], reason: "build artifact, unexamined executable, unexamined CSV data, or verified course dataset excluded from grading" }]]);
   } finally { vi.unstubAllGlobals(); }
 });

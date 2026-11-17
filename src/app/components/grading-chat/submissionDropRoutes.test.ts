@@ -4,6 +4,14 @@ import { groupMultipleFiles, markSessionChanged, suggestFileGroups, submitAssign
 const file = (name: string) => new File(["submission"], name);
 
 describe("file drop routing", () => {
+  it("sends a single ZIP over the request budget through the storage-aware path", async () => {
+    const zip = new File([new Uint8Array(4 * 1024 * 1024)], "student.zip");
+    const submitFiles = vi.fn().mockResolvedValue([{ kind: "accepted", entryCount: 1 }]);
+    const submitComposite = vi.fn();
+    await expect(submitOneFileGroup("Alex", [zip], submitFiles, submitComposite)).resolves.toMatchObject({ kind: "accepted" });
+    expect(submitFiles).toHaveBeenCalledWith([zip], "Alex");
+    expect(submitComposite).not.toHaveBeenCalled();
+  });
   it.each(["submission.pdf", "submission.docx", "recording.mp4"])("uses the existing single-file transport and inference for %s", async (name) => {
     const upload = file(name);
     const submitFiles = vi.fn().mockResolvedValue([{ kind: "accepted", entryCount: 1 }]);

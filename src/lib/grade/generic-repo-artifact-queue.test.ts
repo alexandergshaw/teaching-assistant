@@ -52,6 +52,17 @@ it("does not start an artifact when its VM cannot fit in the remaining budget",a
   expect(mocks.run).not.toHaveBeenCalled();
   expect(result.artifacts).toMatchObject([{path:"lab/a.exe",status:"unexamined"}]);
 });
+it("retains a PE above the execution limit as unexamined without starting a VM",async()=>{
+  mocks.run.mockClear();const bytes=new Uint8Array(3_000_001);bytes.set([0x4d,0x5a]);
+  const result=await executeGenericPinnedInventory({folder:'lab',files:[{path:'lab/big.exe',bytes}],repoCommit:'a'.repeat(40),signal:new AbortController().signal,beforeDispatch:async()=>{}});
+  expect(mocks.run).not.toHaveBeenCalled();expect(result.artifacts).toMatchObject([{path:'lab/big.exe',kind:'pe',status:'unexamined'}]);
+});
+it("retains a supported PE as unexamined if its complete inventory exceeds the sandbox bound",async()=>{
+  mocks.run.mockClear();const bytes=new Uint8Array(2_900_000);bytes.set([0x4d,0x5a]);
+  const companion=new Uint8Array(1_100_001);companion.fill(97);
+  const result=await executeGenericPinnedInventory({folder:'lab',files:[{path:'lab/app.exe',bytes},{path:'lab/data.csv',bytes:companion}],repoCommit:'a'.repeat(40),signal:new AbortController().signal,beforeDispatch:async()=>{}});
+  expect(mocks.run).not.toHaveBeenCalled();expect(result.artifacts).toMatchObject([{path:'lab/app.exe',kind:'pe',status:'unexamined'}]);
+});
 it("checks and records artifact dispatch against its admitted claim and run",async()=>{
   const bytes=new Uint8Array([0x4d,0x5a,0,0]),files=[{path:"lab/a.exe",bytes}],manifest=files.map(f=>({path:f.path,sha256:createHash("sha256").update(f.bytes).digest("hex")}));
   const claim={generation:12,token:"token"} as never,run={runId:"run",lease:"lease"};

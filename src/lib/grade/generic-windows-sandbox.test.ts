@@ -1,7 +1,8 @@
 import { beforeEach, expect, it, vi } from "vitest";
 const api=vi.hoisted(()=>({create:vi.fn(),update:vi.fn(),mkDir:vi.fn(),writeFiles:vi.fn(),runCommand:vi.fn(),stop:vi.fn(),currentSession:vi.fn()}));
 vi.mock("@vercel/sandbox",()=>({Sandbox:{create:api.create}}));
-import { runGenericWindowsArtifact } from "./generic-windows-sandbox";
+import { isSupportedWindowsPe, runGenericWindowsArtifact } from "./generic-windows-sandbox";
+import { MAX_WINDOWS_EXECUTABLE_BYTES } from "./generic-execution-limits";
 const bytes=new Uint8Array(100);bytes.set([0x4d,0x5a]);bytes[60]=64;bytes.set([0x50,0x45,0,0,0x64,0x86],64);bytes.set([0x0b,0x02],88);
 const input={path:"lab/student.exe",bytes,folder:"lab",files:[{path:"lab/student.exe",bytes}],repoCommit:"a".repeat(40),signal:new AbortController().signal,beforeDispatch:vi.fn().mockResolvedValue(undefined)};
 beforeEach(()=>{vi.clearAllMocks();api.create.mockResolvedValue(api);api.currentSession.mockReturnValue({sessionId:"session-1"});api.update.mockResolvedValue(undefined);api.mkDir.mockResolvedValue(undefined);api.writeFiles.mockResolvedValue(undefined);api.stop.mockResolvedValue(undefined);api.runCommand.mockResolvedValue({exitCode:0,stdout:async()=>"wine-10",stderr:async()=>""});});
@@ -32,6 +33,25 @@ it("does not score a failed run when loader diagnostics were truncated",async()=
   await expect(runGenericWindowsArtifact(input)).resolves.toMatchObject({kind:'pe',status:'unexamined',reason:'diagnostics-truncated'});
 });
 it("holds unsupported architecture before creating a VM",async()=>{const x=bytes.slice();x[68]=0x4c;x[69]=0x01;await expect(runGenericWindowsArtifact({...input,bytes:x})).rejects.toThrow("Unsupported Windows architecture");expect(api.create).not.toHaveBeenCalled();});
+it("admits a larger PE without changing the full inventory cap or pre-upload isolation",async()=>{
+  const large=new Uint8Array(941_568);large.set(bytes);
+  const result=await runGenericWindowsArtifact({...input,bytes:large,files:[{path:input.path,bytes:large}]});
+  expect(result).toMatchObject({kind:'pe',status:'observed'});
+  expect(api.update.mock.invocationCallOrder[0]).toBeLessThan(api.writeFiles.mock.invocationCallOrder[0]);
+  expect(api.writeFiles.mock.calls[0][0][0].content).toHaveLength(large.length);
+});
+it("leaves an oversized PE unexamined before starting a sandbox",async()=>{
+  const large=new Uint8Array(MAX_WINDOWS_EXECUTABLE_BYTES+1);large.set(bytes);
+  expect(isSupportedWindowsPe(large)).toBe(true);
+  await expect(runGenericWindowsArtifact({...input,bytes:large,files:[{path:input.path,bytes:large}]})).rejects.toThrow('Invalid Windows artifact');
+  expect(api.create).not.toHaveBeenCalled();
+});
+it("rejects companion files exceeding the aggregate manifest budget before starting a sandbox",async()=>{
+  const large=new Uint8Array(2_900_000);large.set(bytes);
+  const companion={path:'lab/data.csv',bytes:new Uint8Array(1_100_001)};
+  await expect(runGenericWindowsArtifact({...input,bytes:large,files:[{path:input.path,bytes:large},companion]})).rejects.toThrow('Windows inventory does not match artifact');
+  expect(api.create).not.toHaveBeenCalled();
+});
 it("does not send student bytes if isolation fails",async()=>{api.update.mockRejectedValue(new Error("denied"));await expect(runGenericWindowsArtifact(input)).rejects.toThrow("denied");expect(api.writeFiles).not.toHaveBeenCalled();expect(api.stop).toHaveBeenCalledOnce();});
 it("records the created session before setup and stops if recording fails",async()=>{
   const record=vi.fn().mockRejectedValue(new Error("ledger unavailable"));

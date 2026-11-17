@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { Sandbox } from "@vercel/sandbox";
 import { isSafeGenericExecutionComponent } from "./generic-execution-path";
 import { createGenericOutputCapture } from "./generic-output-capture";
-import { MAX_GENERIC_EXECUTION_FILES } from "./generic-execution-limits";
+import { MAX_GENERIC_EXECUTION_FILES, MAX_WINDOWS_EXECUTABLE_BYTES, MAX_WINDOWS_INVENTORY_BYTES } from "./generic-execution-limits";
 const IMAGE="vercel/sandbox/universal@sha256:9b2669397f26336812ec6835c2f67db6a546074cbabb05db93bf5e669f71ec5d";
 
 export function isSupportedWindowsPe(b: Uint8Array): boolean {
@@ -16,7 +16,7 @@ export function isSupportedWindowsPe(b: Uint8Array): boolean {
  * native Windows compatibility, source equivalence or test coverage. */
 export async function runGenericWindowsArtifact(input:{path:string;bytes:Uint8Array;folder:string;files:readonly {path:string;bytes:Uint8Array}[];repoCommit:string;signal:AbortSignal;beforeDispatch:(signal:AbortSignal)=>Promise<void>;onSandboxCreated?:(sessionId:string)=>Promise<void>}) {
   const b=input.bytes;
-  if(!/^[a-f0-9]{40}$/.test(input.repoCommit) || !input.path || input.path.length>600 || input.path.split('/').some(p=>!isSafeGenericExecutionComponent(p)) || b.length<88 || b.length>400_000 || b[0]!==0x4d || b[1]!==0x5a)throw new Error("Invalid Windows artifact");
+  if(!/^[a-f0-9]{40}$/.test(input.repoCommit) || !input.path || input.path.length>600 || input.path.split('/').some(p=>!isSafeGenericExecutionComponent(p)) || b.length<88 || b.length>MAX_WINDOWS_EXECUTABLE_BYTES || b[0]!==0x4d || b[1]!==0x5a)throw new Error("Invalid Windows artifact");
   const offset=new DataView(b.buffer,b.byteOffset,b.byteLength).getUint32(60,true);
   if(offset<64 || offset+26>b.length || b[offset]!==0x50 || b[offset+1]!==0x45 || b[offset+2]!==0 || b[offset+3]!==0)throw new Error("Invalid PE header");
   const machine=new DataView(b.buffer,b.byteOffset,b.byteLength).getUint16(offset+4,true), magic=new DataView(b.buffer,b.byteOffset,b.byteLength).getUint16(offset+24,true);
@@ -29,7 +29,7 @@ export async function runGenericWindowsArtifact(input:{path:string;bytes:Uint8Ar
       || parts[0].toLowerCase()==='wineprobe' || seen.has(relative.toLowerCase()))throw new Error("Unsafe Windows input path");
     seen.add(relative.toLowerCase());total+=file.bytes.length;return {path:relative,content:Buffer.from(file.bytes)};
   });
-  if(!files.length || files.length>MAX_GENERIC_EXECUTION_FILES || total>4_000_000 || input.files.filter(file=>file.path===input.path && Buffer.from(file.bytes).equals(Buffer.from(b))).length!==1)throw new Error("Windows inventory does not match artifact");
+  if(!files.length || files.length>MAX_GENERIC_EXECUTION_FILES || total>MAX_WINDOWS_INVENTORY_BYTES || input.files.filter(file=>file.path===input.path && Buffer.from(file.bytes).equals(Buffer.from(b))).length!==1)throw new Error("Windows inventory does not match artifact");
   const entry=input.path.slice(prefix.length);
   const slash=entry.lastIndexOf('/');
   const entryDirectory=slash<0?'':entry.slice(0,slash);

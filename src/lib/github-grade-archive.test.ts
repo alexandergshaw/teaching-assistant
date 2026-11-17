@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import JSZip from "jszip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { indexGradeArchive, verifyGradeArchiveBytes, verifyGradeArchiveFiles } from "./github-grade-archive-zip";
-import { confirmedGradeSourceCooldown, makePinnedArchiveReader } from "./github-grade-archive";
+import { confirmedGradeSourceCooldown, makePinnedArchiveBytesReader, makePinnedArchiveReader } from "./github-grade-archive";
 import { GithubGradeSourceRateLimitError } from "./github-http-error";
 
 const sha = "a".repeat(40);
@@ -83,6 +83,17 @@ describe("pinned grading archive integrity", () => {
 
 describe("pinned grading archive transport", () => {
   const files = [blob("a.py", "a"), blob("b.py", "b"), blob("c.py", "c")];
+
+  it("reads a larger executable only through the hash-verified binary reader",async()=>{
+    vi.stubEnv('GITHUB_TOKEN','binary-test-token');
+    const contents=Buffer.alloc(941_568);contents[0]=0x4d;contents[1]=0x5a;
+    const file=blob('lab/app.exe',contents);
+    const fetcher=vi.fn(async()=>new Response(contents));vi.stubGlobal('fetch',fetcher);
+    const read=makePinnedArchiveBytesReader({accountId:'binary-test',owner:'school',repo:'student',sha});
+    expect((await read([file],signal())).get(file.path)).toEqual(contents);expect(fetcher).toHaveBeenCalledOnce();
+    fetcher.mockResolvedValueOnce(new Response(Buffer.alloc(contents.length)));
+    await expect(read([file],signal())).rejects.toThrow();
+  });
 
   it("reports confirmed credential cooldown without a request, and clears it at expiry", async () => {
     vi.useFakeTimers();

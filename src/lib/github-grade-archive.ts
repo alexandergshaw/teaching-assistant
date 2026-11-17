@@ -2,6 +2,7 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import { SCOPED_BUDGET } from "./github.digest";
+import { MAX_WINDOWS_EXECUTABLE_BYTES } from "./grade/generic-execution-limits";
 import { GithubGradeSourceRateLimitError } from "./github-http-error";
 import { classifyGithubFailure } from "./github-rate-limit";
 import { validateGithubOwnerRepo } from "./github-ref-name";
@@ -239,7 +240,7 @@ export function makePinnedArchiveBytesReader(scope: { accountId: string; owner: 
   return async (files: readonly RepoTreeEntry[], callerSignal?: AbortSignal): Promise<ReadonlyMap<string, Buffer>> => {
     const { accountId, owner, repo, sha } = scope;
     if (!accountId || !validateGithubOwnerRepo(owner, repo) || !isGithubCommitSha(sha)) return unavailable();
-    if (files.length > SCOPED_BUDGET.maxFiles || files.some((file) => !isGradeBlob(file) || file.size >= SCOPED_BUDGET.maxBlobBytes)
+    if (files.length > SCOPED_BUDGET.maxFiles || files.some((file) => !isGradeBlob(file) || (/\.exe$/i.test(file.path) ? file.size > MAX_WINDOWS_EXECUTABLE_BYTES : file.size >= SCOPED_BUDGET.maxBlobBytes))
       || files.reduce((total, file) => total + file.size, 0) > MAX_FALLBACK_BYTES) return unavailable();
     const timeout = AbortSignal.timeout(SOURCE_READ_TIMEOUT_MS);
     const signal = callerSignal ? AbortSignal.any([callerSignal, timeout]) : timeout;

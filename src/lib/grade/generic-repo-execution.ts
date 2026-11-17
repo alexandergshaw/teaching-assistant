@@ -3,6 +3,7 @@ import { genericArtifactInventory } from "./generic-artifact-inventory";
 import { planGenericRepoExecution } from "./generic-repo-execution-plan";
 import { runGenericRepoSandbox } from "./generic-repo-sandbox";
 import { isSupportedWindowsPe, runGenericWindowsArtifact } from "./generic-windows-sandbox";
+import { MAX_WINDOWS_EXECUTABLE_BYTES, MAX_WINDOWS_INVENTORY_BYTES } from "./generic-execution-limits";
 import { ArtifactRuntimeUnavailableError, isSupportedNativeArtifact, resolveJavaClass, runGenericNativeArtifact } from "./generic-native-artifact";
 import type { RepoGradeClaim } from "@/lib/repo-grades-dashboard/state";
 import { artifactManifestDigest, findArtifactResume } from "@/lib/repo-grades-dashboard/artifact-dispatch";
@@ -18,10 +19,11 @@ export async function executeGenericPinnedInventory(input:{folder:string;files:r
   const manifest=input.files.map(f=>({path:f.path,sha256:createHash('sha256').update(f.bytes).digest('hex')}));
   const originalArtifacts=genericArtifactInventory(input.files);
   assertGenericEvidenceCapacity({manifest,plan,artifacts:originalArtifacts});
+  const windowsInventoryFits=input.files.reduce((total,file)=>total+file.bytes.length,0)<=MAX_WINDOWS_INVENTORY_BYTES;
   const supported=input.files.flatMap<{file:{path:string;bytes:Uint8Array};kind:'pe'|'elf'|'java-class'|'python-bytecode'|'wasm'}>(file=>{
     const artifact=originalArtifacts.find(a=>a.path===file.path);
     if(!artifact) return [];
-    if(artifact.kind==='pe') return isSupportedWindowsPe(file.bytes) ? [{file,kind:'pe' as const}] : [];
+    if(artifact.kind==='pe') return windowsInventoryFits && file.bytes.length <= MAX_WINDOWS_EXECUTABLE_BYTES && isSupportedWindowsPe(file.bytes) ? [{file,kind:'pe' as const}] : [];
     if(artifact.kind==='elf'||artifact.kind==='java-class'||artifact.kind==='python-bytecode'||artifact.kind==='wasm') return isSupportedNativeArtifact(artifact.kind,file.bytes)
       && (artifact.kind!=='java-class' || !!resolveJavaClass(file.bytes,file.path.slice(input.folder ? input.folder.length+1 : 0))) ? [{file,kind:artifact.kind as 'elf'|'java-class'|'python-bytecode'|'wasm'}] : [];
     return [];

@@ -43,6 +43,7 @@ export async function submitOneFileGroup(
     return { kind: "refused", reason: "Grading multiple files together does not yet support video. Keep these files and submit the video separately." };
   }
   if (!checkFileWireBudget(files.reduce((total, file) => total + file.size, 0), "This group").ok) {
+    if (files.length > 1 && files.filter((file) => /\.zip$/i.test(file.name)).length === 1) return (await submitFiles(files, name || undefined))[0] ?? { kind: "unknown", reason: "The upload status could not be confirmed." };
     return { kind: "refused", reason: "These files are too large to grade together. Keep them and choose a smaller group; a class ZIP can be uploaded under Multiple students." };
   }
   return submitComposite(name, files.map((file) => ({ kind: "file", file })));

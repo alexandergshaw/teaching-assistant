@@ -1,12 +1,12 @@
 /** Serialize archive review so a later upload cannot replace an in-flight one. */
 export function createArchiveReviewQueue() {
-  type Review = { file: File; autoSubmit: boolean };
+  type Review = { file: File; autoSubmit: boolean; knownIdentity?: { group: string; student: string } };
   let active: Review | null = null;
   let occupied = false;
   let waiting: Review[] = [];
   return {
-    enqueue(file: File, autoSubmit = false): Review | null {
-      const review = { file, autoSubmit };
+    enqueue(file: File, autoSubmit = false, knownIdentity?: { group: string; student: string }): Review | null {
+      const review: Review = { file, autoSubmit, ...(knownIdentity ? { knownIdentity } : {}) };
       if (occupied) { waiting.push(review); return null; }
       occupied = true;
       active = review;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, LinearProgress, Stack, Tooltip, Typography } from "@mui/material";
 import type { PartialHashProgress, PartialHashReview, PartialProject, PartialProjects } from "./partialHandoff";
 import { buildRecoverableZip, planRecoverableZip, type RecoverableGroup } from "@/lib/grade/large-zip-subset";
@@ -17,8 +17,9 @@ import { mergePreparedZips } from "@/lib/grade/merge-prepared-zips";
 import { inspectPreparedZipBudget, preparedZipBudgetFits, type PreparedZipBudget } from "@/lib/grade/prepared-zip-budget";
 import { GRADING_ZIP_MAX_BYTES } from "@/lib/grade/grading-zip-transport";
 import { includeAllReviewedFiles, indexedBrightspaceGroup } from "./indexedBrightspaceGroup";
+import { automaticRecoveryIsCurrent, invalidateRecoveryGeneration, type AutomaticRecovery } from "./recovery-generation";
 
-export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incomingFile, autoSubmit = false, onClose, onManualOpen }: { incomingFile?: File | null; autoSubmit?: boolean; onClose?: () => void; onManualOpen?: () => void; onSelectionStart?: () => void; onAdmitted?: (indices: readonly number[]) => void; onSubmit: (source: File, file: File, selected: readonly RecoverableGroup[], omitted: readonly RecoverableGroup[], mapping: Readonly<Record<string, string>>, review?: PartialHashReview, project?: PartialProject) => Promise<string | null> }) {
+export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incomingFile, knownIdentity, autoSubmit = false, onClose, onManualOpen }: { incomingFile?: File | null; knownIdentity?: { group: string; student: string }; autoSubmit?: boolean; onClose?: () => void; onManualOpen?: () => void; onSelectionStart?: () => void; onAdmitted?: (indices: readonly number[]) => void; onSubmit: (source: File, file: File, selected: readonly RecoverableGroup[], omitted: readonly RecoverableGroup[], mapping: Readonly<Record<string, string>>, review?: PartialHashReview, project?: PartialProject) => Promise<string | null> }) {
   const [open, setOpen] = useState(!!incomingFile), [file, setFile] = useState<File | null>(incomingFile ?? null);
   const [groups, setGroups] = useState<readonly RecoverableGroup[]>([]), [selected, setSelected] = useState<string[]>([]), [names, setNames] = useState<Readonly<Record<string, string>>>({});
   const [sourceGroups, setSourceGroups] = useState<readonly RecoverableGroup[]>([]);
@@ -27,10 +28,11 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
   const [indexEvidence, setIndexEvidence] = useState<{ bytes: Uint8Array; evidence: BrightspaceIndexEvidence } | null>(null);
   const [indexAccounted, setIndexAccounted] = useState(false);
   const [busy, setBusy] = useState(!!incomingFile), [error, setError] = useState(""), [progress, setProgress] = useState<PartialHashProgress | null>(null), [completed, setCompleted] = useState(0), [uncertain, setUncertain] = useState(false);
-  const generation = useRef(0), hashing = useRef(false), submitting = useRef(false), automatic = useRef<{ file: File; labels: readonly string[] } | null>(null);
+  const generation = useRef(0), hashing = useRef(false), submitting = useRef(false), automatic = useRef<AutomaticRecovery | null>(null);
   useEffect(() => () => { generation.current++; }, []);
   const close = () => { generation.current++; automatic.current = null; setOpen(false); setFile(null); setGroups([]); setSourceGroups([]); setSelected([]); setAdmittedLabels([]); setNames({}); setProjectFiles({}); setIndexEvidence(null); setIndexAccounted(false); setBusy(false); setError(""); setProgress(null); setCompleted(0); onClose?.(); };
-  const choose = async (next: File | undefined) => {
+  const identityGroup = knownIdentity?.group, identityStudent = knownIdentity?.student;
+  const choose = useCallback(async (next: File | undefined) => {
     const token = ++generation.current; automatic.current = null; setFile(next ?? null); setGroups([]); setSourceGroups([]); setSelected([]); setAdmittedLabels([]); setNames({}); setProjectFiles({}); setIndexEvidence(null); setIndexAccounted(false); setError(""); setCompleted(0); setUncertain(false);
     if (!next) { setBusy(false); return; }
     setBusy(true);
@@ -43,7 +45,8 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
         if (!index.ok) { setError(index.reason); return; }
         indexData = { bytes: index.sourceBytes, evidence: index.evidence };
       }
-      const inferred = await inferArchiveNames(next, result.groups); if (token !== generation.current) return;
+      const inferred = { ...await inferArchiveNames(next, result.groups) }; if (token !== generation.current) return;
+      if (next === incomingFile && identityGroup && identityStudent && result.groups.length === 1 && result.groups[0].label === identityGroup && !result.groups[0].reason?.includes("index")) inferred[identityGroup] = identityStudent;
       const numericGroups = result.groups.filter((group) => /^\d+-\d+$/.test(group.label));
       const indexComplete = !!indexData && numericGroups.length > 0 && indexData.evidence.unassigned.every(isBrightspaceFormattingOnly) && numericGroups.every((group) => !!indexData!.evidence.groups[group.label]?.length);
       const visibleGroups = (indexComplete ? result.groups.filter((group) => group.reason !== "unassigned index") : result.groups).map((group) => indexedBrightspaceGroup(group, indexComplete, indexComplete ? indexData?.evidence.attemptRows?.[group.label] : undefined));
@@ -57,12 +60,12 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
       const admitted = eligible.filter((group) => counts.get(inferred[group.label].normalize("NFKC").toLocaleLowerCase()) === 1);
       const completeNested = (group: RecoverableGroup) => projectReady(group, projects) && group.members.filter((member) => member.nestedArchive).every((member) => projects[member.path].every((item) => item.disposition === "retain"));
       const automaticGroups = admitted.filter((group) => !group.reason || (group.reason === "nested archive" && completeNested(group)));
-      automatic.current = automaticArchiveAdmission(autoSubmit && next === incomingFile, visibleGroups, automaticGroups, completeNested) ? { file: next, labels: automaticGroups.map((group) => group.label) } : null;
+      automatic.current = automaticArchiveAdmission(autoSubmit && next === incomingFile, visibleGroups, automaticGroups, completeNested) ? { file: next, labels: automaticGroups.map((group) => group.label), generation: token, identityGroup, identityStudent } : null;
       setProjectFiles(projects); setNames(inferred); setGroups(visibleGroups); setSourceGroups(result.groups); setIndexEvidence(indexData); setIndexAccounted(indexComplete); setSelected((automatic.current ? automaticGroups : admitted).map((group) => group.label));
     } catch { if (token === generation.current) setError("Archive review failed. Try choosing the file again."); }
     finally { if (token === generation.current) setBusy(false); }
-  };
-  useEffect(() => { let current = true; if (incomingFile) void Promise.resolve().then(() => { if (current) return choose(incomingFile); }); return () => { current = false; }; }, [incomingFile]);
+  }, [incomingFile, identityGroup, identityStudent, autoSubmit]);
+  useEffect(() => { let current = true; if (incomingFile) void Promise.resolve().then(() => { if (current) return choose(incomingFile); }); return () => { current = false; automatic.current = null; invalidateRecoveryGeneration(generation); }; }, [incomingFile, choose]);
 
   const nameCounts = new Map<string, number>(); for (const group of groups) { const name = names[group.label]; if (name && (!group.reason || projectReady(group, projectFiles))) { const key = name.normalize("NFKC").toLocaleLowerCase(); nameCounts.set(key, (nameCounts.get(key) ?? 0) + 1); } }
   const blocked = (group: RecoverableGroup): RecoverableGroup["reason"] => (group.reason && !projectReady(group, projectFiles) ? (group.reason === "nested archive" ? "nested project has unsupported files or no usable source" : group.reason) : undefined) ?? (!names[group.label] ? "student identity could not be resolved" : nameCounts.get(names[group.label].normalize("NFKC").toLocaleLowerCase()) !== 1 ? "student identity is ambiguous" : undefined) ?? (indexEvidence && /^\d+-\d+$/.test(group.label) && !indexAccounted ? "index evidence could not be assigned completely" : undefined);
@@ -150,7 +153,7 @@ export function LargeZipRecovery({ onSubmit, onSelectionStart, onAdmitted, incom
     finally { submitting.current = false; if (token === generation.current) { hashing.current = false; setProgress(null); setBusy(false); } }
   };
   useEffect(() => {
-    if (!file || automatic.current?.file !== file || busy || !groups.length || selected.length !== automatic.current.labels.length || automatic.current.labels.some((label) => !selected.includes(label))) return;
+    if (!automaticRecoveryIsCurrent(automatic.current, generation.current, file, incomingFile, identityGroup, identityStudent) || !autoSubmit || busy || !groups.length || selected.length !== automatic.current.labels.length || automatic.current.labels.some((label) => !selected.includes(label))) return;
     automatic.current = null;
     void grade(true);
   });

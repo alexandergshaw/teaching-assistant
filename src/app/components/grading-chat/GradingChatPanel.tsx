@@ -28,6 +28,7 @@ import GeneratedRubricCard from "../grading-results/GeneratedRubricCard";
 import SubmissionClassificationBadge from "../grading/SubmissionClassificationBadge";
 import { ChatComposer } from "./ChatComposer";
 import { oversizedReviewCandidate } from "./oversizedReviewCandidate";
+import { createSingleProjectEnvelope } from "./single-project-envelope";
 import { createArchiveReviewQueue } from "./archiveReviewQueue";
 import { createSingleZipBrowserAuthority } from "@/lib/grade/single-zip-browser-authority";
 import type { PerStudentEvidence } from "./partialEvidence";
@@ -283,7 +284,7 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
 
   const [instructions, setInstructions] = useState("");
   const [rubric, setRubric] = useState("");
-  const [prioritySourceIndices, setPrioritySourceIndices] = useState<ReadonlySet<number>>(new Set()), [submitError, setSubmitError] = useState<string | null>(null), [reviewFile, setReviewFile] = useState<{ file: File; id: number; autoSubmit: boolean } | null>(null);
+  const [prioritySourceIndices, setPrioritySourceIndices] = useState<ReadonlySet<number>>(new Set()), [submitError, setSubmitError] = useState<string | null>(null), [reviewFile, setReviewFile] = useState<{ file: File; id: number; autoSubmit: boolean; knownIdentity?: { group: string; student: string } } | null>(null);
   const [setupNote, setSetupNote] = useState<string | null>(null);
   const [harshness, setHarshness] = useState<GradeHarshness>("balanced");
   const [feedbackLengthText, setFeedbackLengthText] = useState("");
@@ -630,6 +631,16 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
   };
   const handleSubmitFiles = (files: File[], label?: string, reviewedZipMapping?: Readonly<Record<string, string>>, evidenceOmissions?: readonly string[], staticOnly?: true, explicitReviewed = false, mode?: "single" | "multiple", perStudentEvidence?: PerStudentEvidence, expectedOwnerSession?: ExpectedOwnerSession): Promise<DirectFileOutcome[]> => {
     const blocked = directIntake.current.isPending() || preparing || driver.headerState === "resolving";
+    if (!blocked && mode === "single" && files.length > 1 && files.filter((file) => /\.zip$/i.test(file.name)).length === 1) {
+      const epoch = dropSessionEpoch.current;
+      return createSingleProjectEnvelope(files, label).then((result) => {
+        if (epoch !== dropSessionEpoch.current) return files.map(() => ({ kind: "refused" as const, reason: "The session changed before review." }));
+        if (!result.ok) return files.map(() => ({ kind: "refused" as const, reason: result.reason }));
+        const next = archiveReviewQueue.current.enqueue(result.archive, false, { group: result.group, student: result.student });
+        setWaitingArchiveNames(archiveReviewQueue.current.waitingNames()); if (next) setReviewFile({ ...next, id: ++reviewSequence.current });
+        return files.map(() => ({ kind: "staged" as const }));
+      }).catch(() => files.map(() => ({ kind: "refused" as const, reason: "The project could not be prepared for review." })));
+    }
     if (!blocked && mode === "single" && files.some((file) => oversizedReviewCandidate([file]))) return Promise.resolve(files.map(() => ({ kind: "refused" as const, reason: "This single-student archive exceeds the current grading limit. Nothing was submitted." })));
     if (!blocked && files.length > 1 && files.some((file) => oversizedReviewCandidate([file]))) {
       if (files.some((file) => !/\.zip$/i.test(file.name))) return Promise.resolve(files.map(() => ({ kind: "refused" as const, reason: "Select oversized ZIPs separately from other files so each submission stays together." })));
@@ -937,7 +948,7 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
       <div className={chatStyles.stickyComposer}>
         <PartialHandoffNotice omissions={partialOmissions} records={partialRecords} observer={authObserver} />
         {waitingArchiveNames.length > 0 && <Alert severity="info" role="status">Waiting for review: {waitingArchiveNames.join(", ")}. These archives have not yet been submitted.</Alert>}
-        <LargeZipRecovery key={`${visibleDropEpoch}:${reviewFile?.id ?? "idle"}`} autoSubmit={reviewFile?.autoSubmit} onManualOpen={() => archiveReviewQueue.current.reserve()} onSelectionStart={() => setPrioritySourceIndices(new Set())} onAdmitted={(indices) => setPrioritySourceIndices((previous) => new Set([...previous, ...indices]))} onSubmit={handlePartialHandoff} incomingFile={reviewFile?.file} onClose={() => { const next = archiveReviewQueue.current.complete(); setWaitingArchiveNames(archiveReviewQueue.current.waitingNames()); setReviewFile(next ? { ...next, id: ++reviewSequence.current } : null); }} />
+        <LargeZipRecovery key={`${visibleDropEpoch}:${reviewFile?.id ?? "idle"}`} autoSubmit={reviewFile?.autoSubmit} knownIdentity={reviewFile?.knownIdentity} onManualOpen={() => archiveReviewQueue.current.reserve()} onSelectionStart={() => setPrioritySourceIndices(new Set())} onAdmitted={(indices) => setPrioritySourceIndices((previous) => new Set([...previous, ...indices]))} onSubmit={handlePartialHandoff} incomingFile={reviewFile?.file} onClose={() => { const next = archiveReviewQueue.current.complete(); setWaitingArchiveNames(archiveReviewQueue.current.waitingNames()); setReviewFile(next ? { ...next, id: ++reviewSequence.current } : null); }} />
         <ChatComposer
           sharedLatch={sharedIntakeLatch}
           disabled={busy || preparing}

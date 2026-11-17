@@ -35,6 +35,16 @@ it("retains an artifact as unexamined when its runtime is conclusively unavailab
   const result=await executeGenericPinnedInventory({folder:"lab",files:[{path:"lab/app",bytes}],repoCommit:"a".repeat(40),signal:new AbortController().signal,beforeDispatch:async()=>{}});
   expect(result.artifacts).toMatchObject([{path:"lab/app",kind:"elf",status:"unexamined"}]);
 });
+it("retains a missing-dependency PE as unexamined without aborting independent source evidence",async()=>{
+  mocks.sourceCheckpoint.mockReset();mocks.checkpoint.mockReset();mocks.run.mockClear();
+  const files=[{path:"lab/main.py",bytes:new TextEncoder().encode("if __name__ == '__main__': print(1)")},{path:"lab/a.exe",bytes:new Uint8Array([0x4d,0x5a,0,0])}];
+  const digest=createHash('sha256').update(files[1].bytes).digest('hex');
+  mocks.sourceCheckpoint.mockResolvedValueOnce({language:'python',entryPoint:'lab/main.py',selection:'heuristic',status:'observed'});
+  mocks.checkpoint.mockImplementationOnce(async input=>input.execute(async()=>{}));
+  mocks.run.mockImplementationOnce(async input=>{await input.onSandboxCreated('session');return {path:input.path,repoCommit:input.repoCommit,sha256:digest,inputManifest:input.files.map((f:{path:string;bytes:Uint8Array})=>({path:f.path,sha256:createHash('sha256').update(f.bytes).digest('hex')})),kind:'pe',status:'unexamined'};});
+  const result=await executeGenericPinnedInventory({folder:'lab',files,repoCommit:'a'.repeat(40),signal:new AbortController().signal,beforeDispatch:async()=>{},artifactExecutionContext:{claim:{generation:12} as never,run:{runId:'run',lease:'lease'},recovery:false}});
+  expect(result.runs).toHaveLength(1);expect(result.artifacts).toMatchObject([{path:'lab/a.exe',kind:'pe',status:'unexamined'}]);expect(mocks.run).toHaveBeenCalledOnce();
+});
 it("does not start an artifact when its VM cannot fit in the remaining budget",async()=>{
   mocks.run.mockClear();
   const bytes=new Uint8Array([0x4d,0x5a,0,0]);

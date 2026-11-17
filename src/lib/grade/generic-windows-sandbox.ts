@@ -54,8 +54,14 @@ export async function runGenericWindowsArtifact(input:{path:string;bytes:Uint8Ar
     await sandbox.writeFiles(files,{signal:input.signal});
     const stdout=createGenericOutputCapture(),stderr=createGenericOutputCapture();
     await input.beforeDispatch(input.signal);input.signal.throwIfAborted();
-    const command=await sandbox.runCommand({cmd:'wine',args:[`./${entryName}`],...(entryDirectory && {cwd:`/vercel/${entryDirectory}`}),env:{WINEDEBUG:'-all',WINEPREFIX:'/vercel/wineprobe'},timeoutMs:40_000,signal:input.signal,stdout:stdout.stream,stderr:stderr.stream});
+    const command=await sandbox.runCommand({cmd:'wine',args:[`./${entryName}`],...(entryDirectory && {cwd:`/vercel/${entryDirectory}`}),env:{WINEDEBUG:'-all,err+module',WINEPREFIX:'/vercel/wineprobe'},timeoutMs:40_000,signal:input.signal,stdout:stdout.stream,stderr:stderr.stream});
     const out=stdout.result(),err=stderr.result();
+    // A loader failure is an environment limitation, not observed student
+    // behavior. Save an unexamined receipt so the dispatch is not repeated:
+    // the loader message does not prove whether any code has already run.
+    if (command.exitCode !== 0 && (err.truncated || /err:module:import_dll.*(?:not found|could not be loaded)/i.test(err.text) || /err:module:LdrInitializeThunk.*(?:Importing dlls|status c0000135)/i.test(err.text))) {
+      return {path:input.path,repoCommit:input.repoCommit,sha256:createHash('sha256').update(b).digest('hex'),inputManifest:input.files.map(file=>({path:file.path,sha256:createHash('sha256').update(file.bytes).digest('hex')})),kind:'pe' as const,status:'unexamined' as const,reason:err.truncated ? 'diagnostics-truncated' as const : 'runtime-dependency-unavailable' as const,image:IMAGE,runtimeVersion};
+    }
     return {path:input.path,repoCommit:input.repoCommit,sha256:createHash('sha256').update(b).digest('hex'),inputManifest:input.files.map(file=>({path:file.path,sha256:createHash('sha256').update(file.bytes).digest('hex')})),kind:'pe' as const,status:'observed' as const,architecture:'x86_64' as const,image:IMAGE,runtime:'wine' as const,runtimeVersion,networkPolicy:'deny-all' as const,execution:{command:`cwd=/vercel${entryDirectory?`/${entryDirectory}`:''}; wine ./${entryName}`,exitCode:command.exitCode,signal:command.exitCode>=128?'unknown termination':null,timedOut:false,stdout:out.text,stderr:err.text,stdoutTruncated:out.truncated,stderrTruncated:err.truncated},sourceEquivalence:'unverified' as const,coverage:'unverified' as const};
   } finally {input.signal.removeEventListener('abort',stop);await sandbox.stop().catch(()=>{});}
 }

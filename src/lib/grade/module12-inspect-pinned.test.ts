@@ -26,3 +26,10 @@ it("binds a Wine observation to every pinned companion file", async () => {
   expect(result).toMatchObject({path:pe.path,executionStatus:"observed",sourceEquivalence:"unverified"});
   expect(runGenericWindowsArtifact).toHaveBeenCalledWith(expect.objectContaining({files:[source,pe]}));
 });
+it("keeps the source assessment available when a Windows binary has missing dependencies", async () => {
+  const bytes=new Uint8Array(100);bytes.set([0x4d,0x5a]);bytes[60]=64;bytes.set([0x50,0x45,0,0,0x64,0x86],64);bytes.set([0x0b,0x02],88);
+  const pe={path:'assignments/module_12/test_utils.exe',bytes};const digest=createHash('sha256').update(bytes).digest('hex');
+  vi.mocked(runGenericWindowsArtifact).mockResolvedValueOnce({path:pe.path,repoCommit:input.repoCommit,sha256:digest,inputManifest:[{path:pe.path,sha256:digest}],kind:'pe',status:'unexamined',reason:'runtime-dependency-unavailable',image:'image',runtimeVersion:'wine-10'});
+  const [result]=await inspectModule12PinnedArtifacts({...input,files:[pe]});
+  expect(result).toMatchObject({path:pe.path,executionStatus:'runtime-unavailable',execution:null});
+});

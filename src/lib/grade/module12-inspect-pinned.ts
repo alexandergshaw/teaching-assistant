@@ -22,11 +22,11 @@ export async function inspectModule12PinnedArtifacts(input: {
         if(JSON.stringify(windows.inputManifest)!==JSON.stringify(manifest))throw new Error("Windows input inventory mismatch");
         const info = { command: "validated x86_64 PE header", exitCode: 0, termination: null, stdout: "x86_64 PE", stderr: "", stdoutTruncated: false, stderrTruncated: false };
         const version = { ...info, command: "wine --version", stdout: windows.runtimeVersion };
-        const execution = { command: windows.execution.command, exitCode: windows.execution.exitCode,
+        const execution = windows.status === "observed" ? { command: windows.execution.command, exitCode: windows.execution.exitCode,
           termination: windows.execution.signal ? "unknown" as const : null, stdout: windows.execution.stdout, stderr: windows.execution.stderr,
-          stdoutTruncated: windows.execution.stdoutTruncated, stderrTruncated: windows.execution.stderrTruncated };
+          stdoutTruncated: windows.execution.stdoutTruncated, stderrTruncated: windows.execution.stderrTruncated } : null;
         receipt = { path: windows.path, repoCommit: windows.repoCommit, sha256: windows.sha256, kind: "pe", image: windows.image,
-          networkPolicy: "deny-all", toolVersion: version, runtimeVersion: version, metadata: info, executionStatus: "observed", execution,
+          networkPolicy: "deny-all", toolVersion: version, runtimeVersion: version, metadata: info, executionStatus: windows.status === "observed" ? "observed" : "runtime-unavailable", execution,
           sourceEquivalence: "unverified", testCoverage: "unverified" };
       } else {
         receipt = await inspectModule12Binary({ ...file, repoCommit: input.repoCommit, signal, beforeDispatch: input.beforeDispatch });

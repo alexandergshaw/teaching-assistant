@@ -1,6 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { ArtifactBudgetDeferredError, ArtifactDispatchUncertainError, runCheckpointedArtifact } from "./artifact-checkpoint";
 import { beginArtifactDispatch, finishArtifactDispatch, recordArtifactSandbox } from "./artifact-dispatch";
+import { validGeneralExecutionEvidence } from "@/lib/grade/general-execution-evidence";
 
 vi.mock("./artifact-dispatch", async (load) => ({ ...await load<typeof import("./artifact-dispatch")>(),
   beginArtifactDispatch: vi.fn(), recordArtifactSandbox: vi.fn(), finishArtifactDispatch: vi.fn() }));
@@ -29,6 +30,16 @@ it("records sandbox identity before retaining its verified result",async()=>{
   const execute=vi.fn(async(record:(id:string)=>Promise<void>)=>{await record("sbx_1");return receipt;});
   await expect(runCheckpointedArtifact({...base,execute})).resolves.toEqual(receipt);
   expect(vi.mocked(recordArtifactSandbox).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(finishArtifactDispatch).mock.invocationCallOrder[0]);
+});
+it("persists and reuses an unexamined PE receipt without rerunning it",async()=>{
+  const unavailable={path,sha256:sha,kind:'pe',status:'unexamined',reason:'runtime-dependency-unavailable'} as const;
+  const valid=(value:unknown):value is typeof unavailable => validGeneralExecutionEvidence({repoCommit:identity.sourceSha,inputManifest:base.manifest,runs:[],held:[],coverage:{status:'unverified'},artifacts:[value]});
+  vi.mocked(beginArtifactDispatch).mockResolvedValueOnce({status:'started'}).mockResolvedValueOnce({status:'completed',receipt:unavailable});
+  const execute=vi.fn(async(record:(id:string)=>Promise<void>)=>{await record('sbx_1');return unavailable;});
+  await expect(runCheckpointedArtifact({...base,validateReceipt:valid,execute})).resolves.toEqual(unavailable);
+  expect(finishArtifactDispatch).toHaveBeenCalledWith(expect.anything(),unavailable);
+  await expect(runCheckpointedArtifact({...base,validateReceipt:valid,execute})).resolves.toEqual(unavailable);
+  expect(execute).toHaveBeenCalledOnce();
 });
 it("leaves the dispatch uncertain when provider identity cannot be retained",async()=>{
   vi.mocked(beginArtifactDispatch).mockResolvedValue({status:"started"});vi.mocked(recordArtifactSandbox).mockResolvedValue(false);

@@ -1,4 +1,5 @@
 import { MAX_STATIC_PROJECT_CONTENT_CHARS } from "@/lib/grade/static-project-limits";
+import { prioritizeModelContent } from "./large-data-model-content";
 import { reportsLengthCriterionDeduction, reportsLengthPenalty } from "./reported-length-penalty";
 import { addLengthExemption, extractLengthOnlyExemption, withoutSupportedInstructionLength, withoutSupportedRubricLength } from "./length-only-exemption";
 import { canvasOmissionIdentityRefusal, canvasVideoRefusal } from "../canvas/omitted-video";
@@ -525,8 +526,9 @@ async function gradeStudentEntries(
       results.push(buildUngradedRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}This static project exceeds the current single-pass grading input budget. No grade was produced. Multi-part project grading is not yet available; review it manually.` }));
       continue;
     }
+    const modelContent = limitedEntries[i].staticOnly === true || axes ? { content, datasetOmitted: false } : prioritizeModelContent(content, submittedFiles, maxCharsPerSubmission);
     const { text: truncatedContent, truncated: contentTruncated } = truncateSubmission(
-      content,
+      modelContent.content,
       limitedEntries[i].staticOnly === true && !axes && content.length <= MAX_STATIC_PROJECT_CONTENT_CHARS ? content.length : Math.max(0, maxCharsPerSubmission - (repositoryInventories?.length ? buildSubmittedFileNamesBlock(submittedFiles, repositoryInventories).length : 0))
     );
     // Each axis slice is truncated independently (3.3); the single-axis path
@@ -538,7 +540,7 @@ async function gradeStudentEntries(
         : null;
     const submissionTruncated = initialTrunc
       ? initialTrunc.truncated || (replyTrunc?.truncated ?? false)
-      : contentTruncated;
+      : contentTruncated || modelContent.datasetOmitted;
 
     const canvasVideo = options.source === "canvas" ? canvasVideoRefusal([{ student, files: submittedFiles.map((file) => ({ name: file.name, mimeType: file.mimeType ?? "" })) }]) : null;
     if (canvasVideo) {

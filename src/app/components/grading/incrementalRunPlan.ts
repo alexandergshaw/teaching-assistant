@@ -127,6 +127,7 @@ export function graderReadsFileBytes(mimeType: string | undefined): boolean {
  * rawBase64 and skips a truncated candidate that has none.
  */
 function fileNeedsRawBytes(file: SubmittedFileInfo): boolean {
+  if (file.staticTextMarker !== undefined) return true;
   if (file.documentVisuals && (file.extension === "docx" || file.extension === "pptx")) return false;
   return graderReadsFileBytes(file.mimeType) || file.previewTruncated;
 }
@@ -135,8 +136,8 @@ function fileNeedsRawBytes(file: SubmittedFileInfo): boolean {
 export function stripUnneededRawBase64(entry: StudentSubmissionEntry): StudentSubmissionEntry {
   let content = entry.content, sequence = 0;
   const decoded = new Map<number, string>();
-  if (entry.staticOnly) entry.submittedFiles.forEach((file, index) => {
-    if (!isStaticProjectText(file.extension) || !file.rawBase64 || file.rawBase64.length > 4_000_000) return;
+  entry.submittedFiles.forEach((file, index) => {
+    if (!(entry.staticOnly ? isStaticProjectText(file.extension) : ["csv", "tsv"].includes(file.extension.toLowerCase())) || !file.rawBase64 || file.rawBase64.length > 4_000_000) return;
     try {
       const binary = atob(file.rawBase64), bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
       const result = decodeStaticProjectText(bytes);
@@ -172,7 +173,7 @@ export function stripUnneededRawBase64(entry: StudentSubmissionEntry): StudentSu
 }
 
 export function estimateNeededWireBytes(entry: StudentSubmissionEntry): number {
-  if (entry.staticOnly || entry.submittedFiles.some((file) => file.documentVisuals)) return new TextEncoder().encode(JSON.stringify(stripUnneededRawBase64(entry))).byteLength;
+  if (entry.staticOnly || entry.submittedFiles.some((file) => file.documentVisuals || (["csv", "tsv"].includes(file.extension.toLowerCase()) && file.rawBase64))) return new TextEncoder().encode(JSON.stringify(stripUnneededRawBase64(entry))).byteLength;
   let total = entry.content.length + (entry.repositoryInventories ? new TextEncoder().encode(JSON.stringify(entry.repositoryInventories)).byteLength : 0);
   if (entry.discussionAxes) total += new TextEncoder().encode(JSON.stringify(entry.discussionAxes)).byteLength;
   for (const file of entry.submittedFiles) if (file.rawBase64 && fileNeedsRawBytes(file)) total += file.rawBase64.length;

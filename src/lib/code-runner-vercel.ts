@@ -6,6 +6,7 @@ import { isStdinEofFailure, sourceLooksLikeItReadsStdin, type CodeRunSelectionFi
 import type { CodeRunResult } from "./code-runner";
 
 export function supportsVercelCodeRun(language: string): boolean { return ["python", "javascript", "c", "c++"].includes(language); }
+const SCRIPT_IMAGE = "vercel/sandbox/universal@sha256:9b2669397f26336812ec6835c2f67db6a546074cbabb05db93bf5e669f71ec5d";
 
 /** The VM starts without egress, before any submission bytes are uploaded.
  * Commands and arguments are constructed here, never by the submission. */
@@ -20,7 +21,7 @@ export async function runVercelCode(language: string, files: readonly CodeRunSel
   if (bytes > 4_000_000) throw new Error("Sandbox input exceeds the supported size.");
   const source = files.filter((file) => language === "c" ? /\.c$/i.test(file.name) : /\.(?:cpp|cc|cxx)$/i.test(file.name));
   if ((language === "c" || language === "c++") && !source.length) throw new Error("No compilable source file was found.");
-  const image = process.env.CODE_RUNNER_SANDBOX_IMAGE?.trim() ?? "";
+  const image = language === "c" || language === "c++" ? process.env.CODE_RUNNER_SANDBOX_IMAGE?.trim() ?? "" : SCRIPT_IMAGE;
   if (!/^[a-z0-9][a-z0-9._:/-]{0,255}@sha256:[a-f0-9]{64}$/.test(image)) throw new Error("A digest-pinned prebuilt sandbox image is required.");
   signal.throwIfAborted();
   const sandbox = await Sandbox.create({ image, persistent: false, resources: { vcpus: 1 }, timeout: 30_000, networkPolicy: "deny-all", signal });

@@ -37,8 +37,14 @@ describe("isolated code execution", () => {
   });
   it("requires a digest-pinned image before creating a VM", async () => {
     vi.stubEnv("CODE_RUNNER_SANDBOX_IMAGE", "registry.example/runner:latest");
-    await expect(runVercelCode("python", [{ name: "main.py", content: "print(1)" }], new AbortController().signal)).rejects.toThrow(/digest-pinned/i);
+    await expect(runVercelCode("c++", [{ name: "main.cpp", content: "int main() {}" }], new AbortController().signal)).rejects.toThrow(/digest-pinned/i);
     expect(mocks.create).not.toHaveBeenCalled();
+  });
+  it("uses the managed script image for JavaScript and Python", async () => {
+    for (const [language, name] of [["javascript", "main.js"], ["python", "main.py"]]) {
+      await runVercelCode(language, [{ name, content: "1" }], new AbortController().signal);
+      expect(mocks.create).toHaveBeenLastCalledWith(expect.objectContaining({ image: "vercel/sandbox/universal@sha256:9b2669397f26336812ec6835c2f67db6a546074cbabb05db93bf5e669f71ec5d" }));
+    }
   });
   it("holds source bytes back if the configured image lacks its toolchain", async () => {
     mocks.runCommand.mockResolvedValue({ exitCode: 1 });

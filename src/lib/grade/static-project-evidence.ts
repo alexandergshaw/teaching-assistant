@@ -6,11 +6,15 @@ import { GUARDED_TEXT_EXTENSIONS } from "@/lib/guarded-text-formats";
 
 /** Restore every static text file from its bounded original bytes, or refuse the entire entry. */
 export function restoreStaticTextEvidence(entry: StudentSubmissionEntry): StudentSubmissionEntry | null {
-  if (!entry.staticOnly) return entry.submittedFiles.some((file) => file.staticTextMarker !== undefined) ? null : entry;
+  if (!entry.staticOnly && !entry.submittedFiles.some((file) => file.staticTextMarker !== undefined)) {
+    // An orphaned transport placeholder must not be treated as student work.
+    if (entry.submittedFiles.some((file) => ["csv", "tsv"].includes(file.extension.toLowerCase()) && file.rawBase64) && /\[\[STATIC_TEXT_\d{1,5}\]\]/.test(entry.content)) return null;
+    return entry;
+  }
   const replacements: Array<{ marker: string; text: string }> = [], markers = new Set<string>();
   const assumedEncodingFiles: string[] = [];
   for (const file of entry.submittedFiles) {
-    const isText = isStaticProjectText(file.extension);
+    const isText = entry.staticOnly ? isStaticProjectText(file.extension) : file.staticTextMarker !== undefined && ["csv", "tsv"].includes(file.extension.toLowerCase());
     if (!isText) { if (file.staticTextMarker !== undefined) return null; continue; }
     const marker = file.staticTextMarker, raw = file.rawBase64;
     if (typeof marker !== "string" || !/^\[\[STATIC_TEXT_\d{1,5}\]\]$/.test(marker) || markers.has(marker) || typeof raw !== "string" || !raw || raw.length > 4_000_000 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(raw)) return null;

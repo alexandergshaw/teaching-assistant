@@ -5,6 +5,19 @@ import { unsupportedArchiveReason } from "./unsupported-archive";
 import { linkedArchiveIssue } from "./link-evidence";
 
 describe("ZIP intake omission safety", () => {
+  it("keeps a named Brightspace project together without treating class folders as one student", async () => {
+    const project = new JSZip().file("LinkedList/CSVparser.cpp", "int parse();").file("LinkedList/CSVparser.hpp", "int parse();").file("LinkedList/LinkedList.cpp", "int main() {}" );
+    const bytes = await project.generateAsync({ type: "arraybuffer" });
+    const choice = { archiveName: "123-456 - Example-Ada Jane-Nov 12, 2026 629 AM.zip", student: "Ada Jane Example" };
+    const result = await ingestZipEntries(bytes, { singleProject: choice });
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0].student).toBe("Ada Jane Example");
+    expect(result.entries[0].submittedFiles).toHaveLength(3);
+    await expect(ingestZipEntries(bytes, { singleProject: { ...choice, student: "Other Person" } })).rejects.toThrow();
+    const classZip = new JSZip().file("Ada/work.cpp", "int main() {}").file("Bob/work.cpp", "int main() {}");
+    const classResult = await ingestZipEntries(await classZip.generateAsync({ type: "arraybuffer" }), { singleProject: choice });
+    expect(classResult.entries.length).toBeGreaterThan(1);
+  });
   it("reports unsupported members without treating common Mac metadata as submissions", async () => {
     const zip = new JSZip();
     zip.file("Ada/essay.txt", "A submission");

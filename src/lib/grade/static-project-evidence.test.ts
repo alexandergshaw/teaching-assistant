@@ -1,9 +1,36 @@
 import { describe, expect, it } from "vitest";
 import { stripUnneededRawBase64 } from "@/app/components/grading/incrementalRunPlan";
 import { restoreStaticTextEvidence } from "./static-project-evidence";
+import { oversizedEntry } from "./oversized-intake";
 const csv = "name,value\nSynthetic,$&\n", rawBase64 = Buffer.from(csv).toString("base64");
 const file = { name: "data.csv", extension: "csv", mimeType: "text/csv", previewContent: csv, previewTruncated: false, rawBase64 };
 const entry = { student: "Synthetic", content: `header\n${csv}\nfooter`, mergedFileCount: 1, submittedFiles: [file], staticOnly: true as const };
+it("transports a large CSV once for ordinary grading and restores its exact contents and execution bytes", () => {
+  const text = "name,value\n" + "row,12345\n".repeat(200_000);
+  const raw = Buffer.from(text).toString("base64");
+  const input = { student: "Synthetic", content: `source\n${text}`, mergedFileCount: 2, submittedFiles: [{ name: "main.cpp", extension: "cpp", previewContent: "source", previewTruncated: false }, { name: "data.csv", extension: "csv", mimeType: "text/csv", previewContent: text.slice(0, 100), previewTruncated: true, rawBase64: raw }] };
+  const compact = stripUnneededRawBase64(input);
+  expect(oversizedEntry(input)).toBe(false);
+  expect(compact.submittedFiles[1].rawBase64).toBe(raw);
+  const restored = restoreStaticTextEvidence(compact);
+  expect(restored?.content).toBe(input.content);
+  expect(restored?.submittedFiles[1].rawBase64).toBe(raw);
+});
+it("rejects non-CSV markers in ordinary grading", () => {
+  const input = { ...entry, staticOnly: undefined, submittedFiles: [{ ...file, extension: "cpp", staticTextMarker: "[[STATIC_TEXT_0]]" }] };
+  expect(restoreStaticTextEvidence(input)).toBeNull();
+});
+it("preserves compacted CSV bytes when the client strips the entry again", () => {
+  for (const text of ["a,b\n1,2\n", "a,b\n" + "x,1\n".repeat(500_000)]) {
+    const raw = Buffer.from(text).toString("base64");
+    const input = { student: "Synthetic", content: `header\n${text}`, mergedFileCount: 1, submittedFiles: [{ name: "data.csv", extension: "csv", mimeType: "text/csv", previewContent: text.slice(0, 50), previewTruncated: text.length > 50, rawBase64: raw }] };
+    const twice = stripUnneededRawBase64(stripUnneededRawBase64(input));
+    expect(twice.submittedFiles[0].rawBase64).toBe(raw);
+    expect(restoreStaticTextEvidence(twice)?.content).toBe(input.content);
+    expect(restoreStaticTextEvidence({ ...twice, content: "bad marker" })).toBeNull();
+    expect(restoreStaticTextEvidence({ ...twice, submittedFiles: twice.submittedFiles.map(({ staticTextMarker: _marker, ...file }) => { void _marker; return file; }) })).toBeNull();
+  }
+});
 describe("static CSV evidence", () => {
   it("restores the complete original text and preserves the original file bytes", () => {
     const compact = stripUnneededRawBase64(entry); expect(compact.content).not.toContain(csv); expect(compact.submittedFiles[0].rawBase64).toBe(rawBase64);

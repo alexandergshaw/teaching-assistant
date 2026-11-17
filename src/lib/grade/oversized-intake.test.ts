@@ -42,11 +42,11 @@ describe("oversized intake partition", () => {
   });
 });
 
-it("strips only a verified redundant CSV in static review while retaining source bytes", () => {
+it("compacts only a verified redundant CSV while retaining source bytes", () => {
   const text = "id,value\n" + "x".repeat(2_040_000), rawBase64 = Buffer.from(text).toString("base64");
   const file = { name: "data.csv", extension: "csv", mimeType: "text/csv", previewContent: "id,value", previewTruncated: true, rawBase64 };
   const original = { student: "Synthetic", content: `source\n${text}\nend`, mergedFileCount: 1, submittedFiles: [file] };
-  expect(oversizedEntry(original)).toBe(true);
+  expect(oversizedEntry(original)).toBe(false);
   const reviewed = { ...original, staticOnly: true as const };
   expect(oversizedEntry(reviewed)).toBe(false);
   expect(file.rawBase64).toBe(rawBase64);

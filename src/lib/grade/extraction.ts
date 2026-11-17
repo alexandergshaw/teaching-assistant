@@ -51,6 +51,8 @@ import { chargeVideoCount, stageVideoMember, type StageVideoFn, type VideoStagin
 import { emptyVideoOutcomes, withAcceptedVideo, withFailedVideo, type VideoFailureClass, type VideoOutcomes } from "./video-failure";
 import { toPreviewContent, groupSubmissionsByStudent, assignUnclaimedLabel, parseSubmissionFileName } from "./utils";
 import { isReviewedBrightspacePaths, reviewedZipLookup } from "./reviewed-zip-mapping";
+import { singleBrightspaceProjectLookup } from "./single-brightspace-project";
+import { deferLinkSubmissions } from "./deferred-link-submissions";
 import { decideCollisionRefusal, describeCollisionRefusal } from "./collisionRefusal";
 import { classifySubmissionZip } from "./classify-submission-zip";
 import { looksLikeGithubUrl } from "../submission-repo";
@@ -351,6 +353,8 @@ export async function ingestZipEntries(
     readonly requireSupportedFiles?: boolean;
     /** Explicitly reviewed file-to-student mapping for a partial archive. */
     readonly reviewedMapping?: Readonly<Record<string, string>>;
+    /** A Brightspace-named single project explicitly selected as one student. */
+    readonly singleProject?: { archiveName: string; student: string };
   }
 ): Promise<{
   entries: StudentSubmissionEntry[];
@@ -372,8 +376,9 @@ export async function ingestZipEntries(
   // characterisation 28 pinned tests depend on). Strictly before the
   // filename inference below too, so a colliding zip never pays a model
   // call (design section 4.3 step 2 before step 3; instrument notes M4).
-  const reviewedLookup = options?.reviewedMapping ? reviewedZipLookup(submissions, options.reviewedMapping, zipParents) : undefined;
-  const reviewedBrightspace = !!reviewedLookup && isReviewedBrightspacePaths(Object.keys(submissions));
+  const projectLookup = options?.singleProject ? singleBrightspaceProjectLookup(Object.keys(submissions), zipParents, options.singleProject) : undefined;
+  const reviewedLookup = options?.reviewedMapping ? reviewedZipLookup(submissions, options.reviewedMapping, zipParents) : projectLookup;
+  const reviewedBrightspace = !!projectLookup || (!!reviewedLookup && isReviewedBrightspacePaths(Object.keys(submissions)));
   const collisionMessage = reviewedBrightspace ? null : describeCollisionRefusal(decideCollisionRefusal(submissions, zipParents, options?.knownStudents), zipParents);
   if (collisionMessage) {
     throw new Error(collisionMessage);
@@ -388,7 +393,7 @@ export async function ingestZipEntries(
   } else {
     ({ repos: inlineRepos, issues: inlineOtherIssues } = await resolveLinkSubmissions(submissions, rawData));
   }
-  let inferredLookup = options?.inferFileNamesWith && !options.reviewedMapping
+  let inferredLookup = options?.inferFileNamesWith && !reviewedLookup
     ? await inferFileNameConvention(Object.keys(submissions), options.inferFileNamesWith)
     : undefined;
   if (reviewedLookup) inferredLookup = reviewedLookup;
@@ -680,25 +685,6 @@ async function resolveLinkSubmissions(
     delete rawData[path];
   }
   return { repos, issues };
-}
-
-/**
- * BULK-ZIP BW3 (deferLinks): rewrite every Canvas link.html redirect page to a
- * bare "Submitted link: <url>" note WITHOUT fetching, and return path -> url so
- * the URL can be attached to its owning entry after grouping. rawData is left
- * as-is.
- */
-function deferLinkSubmissions(submissions: Record<string, string>): Map<string, string> {
-  const urlByPath = new Map<string, string>();
-  for (const path of Object.keys(submissions)) {
-    const extension = getFileExtension(path);
-    if (extension !== "html" && extension !== "htm") continue;
-    const url = extractCanvasSubmittedUrl(submissions[path]);
-    if (!url) continue;
-    urlByPath.set(path, url);
-    submissions[path] = `Submitted link: ${url}`;
-  }
-  return urlByPath;
 }
 
 const UNMATCHED_LINK_NOTE = "submitted link could not be matched to a single student";

@@ -250,7 +250,7 @@ describe("prepareChatSubmissionAction - file", () => {
     expect(mockIngestZipEntries).toHaveBeenCalledWith(expect.any(ArrayBuffer), expect.objectContaining({ requireSupportedFiles: true }));
   });
 
-  it("budget gate counts only bytes the grader reads: non-visual-heavy passes, visual-heavy is refused", async () => {
+  it("refuses an oversized action response and an oversized grading request", async () => {
     const heavy = (mimeType: string): StudentSubmissionEntry => ({
       ...canvasEntry,
       submittedFiles: [
@@ -259,7 +259,7 @@ describe("prepareChatSubmissionAction - file", () => {
     });
     const file = new File(["zip bytes"], "submissions.zip", { type: "application/zip" });
     mockIngestZipEntries.mockResolvedValue(ingested([heavy("application/zip")]));
-    expect((await prepareChatSubmissionAction(fileFormData(file))).kind).toBe("entries");
+    expect((await prepareChatSubmissionAction(fileFormData(file))).kind).toBe("refused");
     mockIngestZipEntries.mockResolvedValue(ingested([heavy("application/pdf")]));
     const refused = await prepareChatSubmissionAction(fileFormData(file));
     expect(refused).toEqual({ kind: "refused", reason: "No submissions were queued. Too large to grade: Ada Lovelace.", refusalClass: "entry-too-large" });
@@ -484,9 +484,9 @@ it("keeps full static CSV evidence through reviewed ZIP body intake", async () =
   mockIngestZipEntries.mockResolvedValue(ingested([entry]));
   const mapping = JSON.stringify({ "ada_1_2_work.txt": "Synthetic" });
   const ordinary = await prepareChatSubmissionAction(fileFormData(file, { reviewedZipMapping: mapping }));
-  expect(ordinary.kind).toBe("refused");
+  expect(ordinary.kind).toBe("entries");
   const reviewed = await prepareChatSubmissionAction(fileFormData(file, { reviewedZipMapping: mapping, staticOnly: "true" }));
   expect(reviewed.kind).toBe("entries");
-  if (reviewed.kind === "entries") { expect(reviewed.entries[0].staticOnly).toBe(true); expect(reviewed.entries[0].content).toBe(text); expect(reviewed.entries[0].submittedFiles[0].rawBase64).toBe(rawBase64); }
+  if (reviewed.kind === "entries") { expect(reviewed.entries[0].staticOnly).toBe(true); expect(reviewed.entries[0].submittedFiles[0].staticTextMarker).toBeDefined(); expect(reviewed.entries[0].submittedFiles[0].rawBase64).toBe(rawBase64); }
   const invalid = await prepareChatSubmissionAction(fileFormData(file, { staticOnly: "true" })); expect(invalid.kind).toBe("refused");
 });

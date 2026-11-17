@@ -17,7 +17,7 @@ import { verifySingleZipOwnerSession } from "@/lib/supabase/single-zip-owner-ses
 import { isExpectedOwnerSession } from "@/lib/grade/owner-session-binding";
 import { normalizeProvider } from "@/lib/llm";
 import type { LlmProvider } from "@/lib/llm";
-import { checkFileWireBudget } from "@/lib/upload-budget";
+import { checkFileWireBudget, UPLOAD_WIRE_BUDGET_BYTES } from "@/lib/upload-budget";
 import { repoFilesToSubmittedFiles } from "@/lib/grade/repo-file-submissions";
 import { getFileExtension } from "@/lib/office-extract";
 import { classifyGradingUpload, buildSingleFileEntry } from "@/lib/grade/single-file-entry";
@@ -47,6 +47,19 @@ import {
 } from "@/app/components/grading-chat/chatSubmissionIntake";
 import type { IntakeOutcome } from "@/app/components/grading-chat/chatSubmissionIntake";
 import { oversizedIntakeReason, partitionOversizedEntries } from "@/lib/grade/oversized-intake";
+import { stripUnneededRawBase64 } from "@/app/components/grading/incrementalRunPlan";
+
+/** Compact duplicated data for the action response, retaining all original downloads. */
+function compactIntakeEntry(entry: StudentSubmissionEntry): StudentSubmissionEntry {
+  const compact = stripUnneededRawBase64(entry);
+  return { ...compact, submittedFiles: compact.submittedFiles.map((file, index) => ({ ...file, ...(entry.submittedFiles[index].rawBase64 ? { rawBase64: entry.submittedFiles[index].rawBase64 } : {}) })) };
+}
+function compactIntakeOutcome(outcome: IntakeOutcome): IntakeOutcome {
+  if (outcome.kind !== "entries") return outcome;
+  const compact = { ...outcome, entries: outcome.entries.map(compactIntakeEntry) };
+  if (new TextEncoder().encode(JSON.stringify(compact)).byteLength > UPLOAD_WIRE_BUDGET_BYTES) return { kind: "refused", reason: "This submission's extracted files are too large to return together. No submission was queued.", refusalClass: "entry-too-large" };
+  return compact;
+}
 
 // SEC-GC-3 (docs/grading-chat-security.md F4 Gap 1): bound before a
 // generateRubric model call is ever spent, at the same figures route.ts
@@ -163,7 +176,7 @@ export async function prepareChatSubmissionAction(formData: FormData): Promise<I
   if ((rawOwnerSession !== null || includesIndexEvidence) && (!isExpectedOwnerSession(ownerSession) || !await verifySingleZipOwnerSession(ownerSession))) return { kind: "refused", reason: "The owner session changed. Nothing was queued.", refusalClass: "read-failed" };
   const staticOnly = formData.get("staticOnly") === "true";
   if (formData.get("staticOnly") !== null && (!staticOnly || !reviewedMapping)) return { kind: "refused", reason: "Invalid static review request. Nothing was queued.", refusalClass: "read-failed" };
-  return resolveOnePart(kind, {
+  const outcome = await resolveOnePart(kind, {
     provider: normalizeProvider(formData.get("provider") as string | null),
     content: (formData.get("content") as string | null) ?? "",
     label: (formData.get("label") as string | null) ?? undefined,
@@ -175,6 +188,7 @@ export async function prepareChatSubmissionAction(formData: FormData): Promise<I
     reviewedMapping,
     staticOnly,
   });
+  return compactIntakeOutcome(outcome);
 }
 
 /** The decoded payload one submission part resolves from - the union of the
@@ -194,6 +208,7 @@ interface PartData {
   readonly deferArchiveLinks?: boolean;
   readonly reviewedMapping?: Readonly<Record<string, string>>;
   readonly staticOnly?: boolean;
+  readonly singleProjectStudent?: string;
 }
 
 /** Module-private per-kind resolution shared by prepareChatSubmissionAction
@@ -256,7 +271,7 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
         // before any ticket exists - caught below, surfaced verbatim (AC-9).
         // ingestZipEntries is called directly (not extractStudentEntries) so
         // the zip's class-vs-single classification is not discarded.
-        const ingested = await ingestZipEntries(await file.arrayBuffer(), { inferFileNamesWith: provider, videoEnabled: true, requireSupportedFiles: true, deferLinks: data.deferArchiveLinks, reviewedMapping: data.reviewedMapping });
+        const ingested = await ingestZipEntries(await file.arrayBuffer(), { inferFileNamesWith: provider, videoEnabled: true, requireSupportedFiles: true, deferLinks: data.deferArchiveLinks, reviewedMapping: data.reviewedMapping, singleProject: data.singleProjectStudent === undefined ? undefined : { archiveName: file.name, student: data.singleProjectStudent } });
         if (ingested.entries.some((entry) => entry.submittedFiles.some((submitted) => (isVideoName(submitted.name) || isVideoName(`file.${submitted.extension}`) || isVideoFile(submitted)) && !submitted.videoRef))) return { kind: "refused", reason: "A video in this ZIP could not be prepared for grading. Upload the ZIP from the grading chat to process its video; nothing was queued.", refusalClass: "video-pending", videoFailure: "not supported here" };
         if (!data.deferArchiveLinks && ingested.entries.some((entry) => entry.linkFetch === "failed" || entry.linkFetch === "flagged")) return { kind: "refused", reason: "A linked submission could not be read completely. Check access or upload its contents directly.", refusalClass: "read-failed" };
         const unreadable = unreadableArchiveReason(ingested.failedSupportedFiles);
@@ -393,6 +408,7 @@ export async function prepareCompositeSubmissionAction(formData: FormData): Prom
       file: formData.get(`part.${i}.file`) as File | null,
       url: ((formData.get(`part.${i}.url`) as string | null) ?? "").trim(),
       labelled: true,
+      singleProjectStudent: student,
     });
     const got = extractSingleEntry(outcome, partLabel);
     if (!got.ok) return got.refusalClass ? { kind: "refused", reason: got.reason, refusalClass: got.refusalClass } : { kind: "refused", reason: got.reason };
@@ -402,7 +418,7 @@ export async function prepareCompositeSubmissionAction(formData: FormData): Prom
   const merged = mergeCompositeEntries(entries, student);
   const oversized = firstOversizedEntryReason([merged]);
   if (oversized) return { kind: "refused", reason: oversized, refusalClass: "entry-too-large" };
-  return { kind: "entries", entries: [merged], pointsPossible: null };
+  return compactIntakeOutcome({ kind: "entries", entries: [merged], pointsPossible: null });
 }
 
 /**

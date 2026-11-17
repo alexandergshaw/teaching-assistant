@@ -3,6 +3,42 @@ import JSZip from "jszip";
 import { inspectLargeZipDirectory } from "./recoverable-zip-directory";
 import { buildReviewedBrightspaceProject, inspectBrightspaceProject } from "./brightspace-project-inventory";
 
+it("retains verified Eclipse text and records narrowly scoped IDE cache artifacts", async () => {
+  const project = new JSZip(); project.file("src/main.cpp", "int main() {}"); project.file(".project", "<projectDescription />"); project.file(".settings/org.eclipse.core.resources.prefs", "encoding=UTF-8");
+  project.file(".vs/Example/CopilotIndices/17.0/SemanticSymbols.db", "cache"); project.file(".vs/slnx.sqlite", "cache"); project.file("x64/Debug/main.obj.dt.module.json.command", new Uint8Array([0xff, 0xfe]));
+  project.file("x64/Debug/main.tlog/unsuccessfulbuild", ""); project.file("x64/Debug/main.Build.CppClean.log", ""); project.file("x64/Debug/main.vcxproj.FileListAbsolute.txt", ""); project.file("data/semantic.db", "student data");
+  const outer = new JSZip(); outer.file("100-200 - project.zip", await project.generateAsync({ type: "uint8array" }));
+  const source = new Blob([new Uint8Array(await outer.generateAsync({ type: "uint8array" })).buffer]); const directory = await inspectLargeZipDirectory(source);
+  expect(directory.ok).toBe(true); if (!directory.ok) return;
+  const inventory = await inspectBrightspaceProject(source, directory.members[0]); expect(inventory.ok).toBe(true); if (!inventory.ok) return;
+  const disposition = (path: string) => inventory.files.find((item) => item.path === path)?.disposition;
+  expect(disposition(".project")).toBe("retain"); expect(disposition(".settings/org.eclipse.core.resources.prefs")).toBe("retain");
+  for (const path of [".vs/Example/CopilotIndices/17.0/SemanticSymbols.db", ".vs/slnx.sqlite", "x64/Debug/main.obj.dt.module.json.command", "x64/Debug/main.tlog/unsuccessfulbuild", "x64/Debug/main.Build.CppClean.log", "x64/Debug/main.vcxproj.FileListAbsolute.txt"]) expect(disposition(path)).toBe("candidate-build-artifact");
+  expect(disposition("data/semantic.db")).toBe("needs-review");
+});
+
+it("holds invalid Eclipse configuration instead of accepting it as text", async () => {
+  const project = new JSZip(); project.file("src/main.cpp", "int main() {}"); project.file(".project", new Uint8Array([0xff, 0xfe]));
+  const outer = new JSZip(); outer.file("100-200 - project.zip", await project.generateAsync({ type: "uint8array" }));
+  const source = new Blob([new Uint8Array(await outer.generateAsync({ type: "uint8array" })).buffer]); const directory = await inspectLargeZipDirectory(source);
+  expect(directory.ok).toBe(true); if (!directory.ok) return;
+  const inventory = await inspectBrightspaceProject(source, directory.members[0]); expect(inventory.ok).toBe(true); if (inventory.ok) expect(inventory.files.find((item) => item.path === ".project")?.disposition).toBe("needs-review");
+});
+
+it("holds an allegedly empty build marker whose CRC does not verify", async () => {
+  const project = new JSZip(); project.file("x64/Debug/main.vcxproj.FileListAbsolute.txt", "", { createFolders: false });
+  const bytes = Buffer.from(await project.generateAsync({ type: "uint8array", compression: "STORE" }));
+  const signature = (value: number) => { const needle = Buffer.alloc(4); needle.writeUInt32LE(value); return bytes.indexOf(needle); };
+  const local = signature(0x04034b50), central = signature(0x02014b50);
+  expect(local).toBeGreaterThanOrEqual(0); expect(central).toBeGreaterThanOrEqual(0);
+  bytes.writeUInt32LE(1, local + 14); bytes.writeUInt32LE(1, central + 16);
+  const outer = new JSZip(); outer.file("100-200 - project.zip", bytes);
+  const source = new Blob([new Uint8Array(await outer.generateAsync({ type: "uint8array" })).buffer]); const directory = await inspectLargeZipDirectory(source);
+  expect(directory.ok).toBe(true); if (!directory.ok) return;
+  const inventory = await inspectBrightspaceProject(source, directory.members[0]); expect(inventory.ok).toBe(true);
+  if (inventory.ok) expect(inventory.files[0].disposition).toBe("needs-review");
+});
+
 it("records Visual Studio databases and an executable as excluded evidence", async () => {
   const project = new JSZip(); project.file("project.vcxproj", "config"); project.file(".vs/project/v17/Browse.VC.db", "database"); project.file(".vs/project/v17/Solution.VC.db", "database"); project.file("x64/Debug/project.exe", "binary");
   const outer = new JSZip(); outer.file("100-200 - project.zip", await project.generateAsync({ type: "uint8array" }));

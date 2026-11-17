@@ -45,6 +45,8 @@ export const TEXT_EXTENSIONS = new Set([
   "recipe",
   "log",
   "command",
+  "project",
+  "prefs",
   "cs",
   "html",
   "htm",

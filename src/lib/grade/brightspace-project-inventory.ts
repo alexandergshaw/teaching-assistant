@@ -3,6 +3,7 @@ import { streamLargeZipMember } from "./stream-large-zip-member";
 import JSZip from "jszip";
 import { GUARDED_TEXT_EXTENSIONS } from "@/lib/guarded-text-formats";
 import { validateGuardedZipText } from "./validate-guarded-zip-text";
+import { verifyMember } from "./large-zip-subset";
 
 const MAX_PROJECT_ARCHIVE_BYTES = 80 * 1024 * 1024;
 const MAX_PROJECT_FILES = 1000;
@@ -45,6 +46,17 @@ async function inspectProjectBlob(blob: Blob): Promise<ProjectInventory> {
     // These extensions are admitted as text only after a full CRC check and
     // strict UTF-8 validation; retain the student's original filename.
     if (GUARDED_TEXT_EXTENSIONS.has(extension) && await validateGuardedZipText(blob, member)) disposition = "retain";
+    // These exact IDE-generated cache paths are retained in the original ZIP
+    // and recorded as excluded; arbitrary databases and commands stay held.
+    const emptyBuildMarker = member.declaredBytes === 0 && (/\.tlog\/unsuccessfulbuild$/i.test(member.path)
+      || /(?:^|\/)x64\/(?:Debug|Release)\/[^/]+\.Build\.CppClean\.log$/i.test(member.path)
+      || /(?:^|\/)x64\/(?:Debug|Release)\/[^/]+\.vcxproj\.FileListAbsolute\.txt$/i.test(member.path));
+    const verifiedEmptyBuildMarker = emptyBuildMarker && await verifyMember(blob, member);
+    if (emptyBuildMarker && !verifiedEmptyBuildMarker) disposition = "needs-review";
+    if (/(?:^|\/)\.vs\/[^/]+\/CopilotIndices\/[^/]+\/(?:CodeChunks|SemanticSymbols)\.db$/i.test(member.path)
+      || /(?:^|\/)\.vs\/slnx\.sqlite$/i.test(member.path)
+      || verifiedEmptyBuildMarker
+      || (disposition === "needs-review" && /(?:^|\/)x64\/(?:Debug|Release)\/[^/]+\.obj\.dt\.module\.json\.command$/i.test(member.path))) disposition = "candidate-build-artifact";
     // Only the exact published course dataset may be represented by provenance.
     if (extension === "csv" && member.declaredBytes === 2_039_946 && crypto.subtle) {
       const parts: Uint8Array[] = [];

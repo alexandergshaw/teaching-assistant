@@ -57,6 +57,12 @@ beforeEach(() => {
 });
 
 describe("gradeEntries - compiler auto-run preference", () => {
+  it("holds a missing sandbox data directory before the model can award a score", async () => {
+    const codeRun = { language: "python", files: ["generate_data.py"], ran: false, exitCode: 1, stdout: "", stderr: "OSError: Cannot save file into a non-existent directory: '/data'" };
+    const result = await gradeEntries([entry({ codeRun })], "Grade it.", "Correctness (120 points).", "gemini", 120, { autoRunCode: false });
+    expect(mockCallLlm).not.toHaveBeenCalled();
+    expect(result.results[0]).toMatchObject({ totalScore: "", codeExecution: codeRun, ungraded: { kind: "grading-failed" } });
+  });
   it("does not assign a score when a submitted notebook is unreadable", async () => {
     const run = await gradeEntries([entry({ repositoryInventories: [{ source: "owner/repo", scope: { kind: "repository", path: null }, enumerationComplete: true, files: [{ path: "optimization_engine.ipynb", content: "unsupported" }] }] })], "Grade it.", "Correctness (10 points).", "gemini");
     expect(run.results[0]).toMatchObject({ totalScore: "", ungraded: { kind: "grading-failed" } });

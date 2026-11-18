@@ -2,10 +2,12 @@ import type { CodeRunResult } from "../code-runner";
 import type { SubmissionFileInventory } from "./submission-file-inventory";
 import { hasSupportedNotebookHeader } from "./notebook-header";
 
-/** A missing runtime dependency in our sandbox does not establish a defect. */
+/** A missing runtime dependency or filesystem path in our sandbox does not establish a defect. */
 export function runtimeDependencyUnavailable(run: CodeRunResult | null): boolean {
   if (!run || run.ran || run.error) return false;
-  return /(?:ModuleNotFoundError|ImportError):[^\n]*(?:no module named|cannot import name)|(?:error while loading shared libraries|cannot open shared object file)|Cannot find module\s+['"]/i.test(`${run.stderr}\n${run.compileOutput ?? ""}`);
+  const output = `${run.stderr}\n${run.compileOutput ?? ""}`;
+  return /(?:ModuleNotFoundError|ImportError):[^\n]*(?:no module named|cannot import name)|(?:error while loading shared libraries|cannot open shared object file)|Cannot find module\s+['"]/i.test(output)
+    || (run.language.toLowerCase() === "python" && /(?:^|\n)\s*(?:FileNotFoundError|NotADirectoryError):|(?:^|\n)\s*OSError:\s*Cannot save file into a non-existent directory\b/i.test(output));
 }
 
 /** A listed notebook is not absent merely because its bytes could not be read. */

@@ -7,6 +7,11 @@ describe("unavailable grading evidence", () => {
     expect(runtimeDependencyUnavailable(run)).toBe(true);
     expect(runtimeDependencyUnavailable({ ...run, stderr: "NameError: name 'numpy' is not defined" })).toBe(false);
   });
+  it.each(["OSError: Cannot save file into a non-existent directory: '/data'", "FileNotFoundError: [Errno 2] No such file or directory: 'data/work.csv'", "NotADirectoryError: [Errno 20] Not a directory: 'data'"])("holds when sandbox filesystem evidence is ambiguous: %s", (stderr) => {
+    const run = { language: "python", files: ["main.py"], ran: false, exitCode: 1, stdout: "", stderr };
+    expect(runtimeDependencyUnavailable(run)).toBe(true);
+    expect(runtimeDependencyUnavailable({ ...run, ran: true })).toBe(false);
+  });
   it("holds a present notebook when content could not be reviewed", () => {
     const inventory = { source: "a/b", scope: { kind: "repository" as const, path: null }, enumerationComplete: true, files: [{ path: "work.ipynb", content: "unsupported" as const }] };
     expect(hasUnreviewedNotebook([inventory])).toBe(true);

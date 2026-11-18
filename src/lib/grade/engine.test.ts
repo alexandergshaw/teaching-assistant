@@ -32,6 +32,7 @@ import { runSubmittedCode } from "../code-runner";
 import { gradeEntries } from "./engine";
 import { RESUBMIT_NOTICE, type StudentSubmissionEntry } from "./types";
 import { SUBMISSION_FRAMING_HEADER } from "./prompts";
+import { instructorHoldReason } from "@/app/components/grading-results/instructorHoldReason";
 
 const mockCallLlm = vi.mocked(callLlm);
 const mockRunSubmittedCode = vi.mocked(runSubmittedCode);
@@ -62,6 +63,7 @@ describe("gradeEntries - compiler auto-run preference", () => {
     const codeRun = { language: "python", files: ["helper.py"], ran: true, exitCode: 0, stdout: "ok", stderr: "" };
     const result = await gradeEntries([entry({ submittedFiles: [file], codeRun })], "Your code must run without errors and produce reproducible results.", "Correctness (120 points)", "gemini", 120, { autoRunCode: false });
     expect(mockCallLlm).not.toHaveBeenCalled(); expect(result.results[0]).toMatchObject({ totalScore: "", ungraded: { kind: "grading-failed" } });
+    expect(instructorHoldReason(result.results[0].ungraded!.message)).toContain("Notebook execution could not be verified");
   });
   it("holds unsupported notebook reproducibility claims while retaining static grading", async () => {
     const file = { name: "work.ipynb", extension: "ipynb", previewContent: JSON.stringify({ nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "code", source: "print(1)", outputs: [] }] }), previewTruncated: false };

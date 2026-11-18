@@ -17,7 +17,7 @@
 // composer field after clearing it, so the next paste does not cost an extra
 // click back into the field (clicking Send moves focus to the button;
 // pressing Enter does not move focus at all).
-import { useEffect, useRef, useState, type CSSProperties, type ChangeEvent, type DragEvent, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ChangeEvent, type DragEvent, type KeyboardEvent, type MouseEvent, type RefObject } from "react";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import Button from "@mui/material/Button";
@@ -71,6 +71,7 @@ export interface ChatComposerProps {
   readonly getSessionEpoch?: () => number;
   readonly sessionEpoch?: number;
   readonly sharedLatch?: IntakeFence;
+  readonly panelDropRef?: RefObject<((files: File[]) => void) | null>;
   readonly onSubmitText: (content: string, label: string | undefined) => void;
   readonly onSubmitFiles: (files: File[], label?: string, mode?: "single" | "multiple") => Promise<DirectFileOutcome[]>;
   readonly onSubmitUrl: (url: string, label?: string) => Promise<SubmitOutcome>;
@@ -86,7 +87,7 @@ function describePart(part: CompositePartInput): string {
   return `URL: ${part.url}`;
 }
 
-export function ChatComposer({ disabled, sharedLatch, reviewFiles = false, getSessionEpoch, sessionEpoch, onSubmitFiles, onSubmitUrl, onSubmitComposite, onSubmitReviewed }: ChatComposerProps) {
+export function ChatComposer({ disabled, sharedLatch, reviewFiles = false, getSessionEpoch, sessionEpoch, panelDropRef, onSubmitFiles, onSubmitUrl, onSubmitComposite, onSubmitReviewed }: ChatComposerProps) {
   const [mode, setMode] = useState<InputMode>(() => loadInputMode());
   const [text, setText] = useState("");
   const [label, setLabel] = useState("");
@@ -299,7 +300,7 @@ export function ChatComposer({ disabled, sharedLatch, reviewFiles = false, getSe
 
   return (
     <div className={chatStyles.composer} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
-      <SubmissionDrop disabled={controlsDisabled} sharedLatch={intakeLatch} reviewFiles={reviewFiles} getSessionEpoch={getSessionEpoch} sessionEpoch={sessionEpoch} onMany={(files) => onSubmitFiles(files, undefined, "multiple")}
+      <SubmissionDrop disabled={controlsDisabled} sharedLatch={intakeLatch} reviewFiles={reviewFiles} getSessionEpoch={getSessionEpoch} sessionEpoch={sessionEpoch} panelDropRef={panelDropRef} onMany={(files) => onSubmitFiles(files, undefined, "multiple")}
         onOne={(name, files) => submitOneFileGroup(name, files, (items, label) => onSubmitFiles(items, label, "single"), onSubmitComposite)}
         onText={(name, content) => onSubmitComposite(name, [{ kind: "text", content }])} onReviewed={onSubmitReviewed} />
       {dropNotice && <span role="status">Drop files in the submission area above.</span>}

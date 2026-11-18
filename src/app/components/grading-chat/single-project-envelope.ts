@@ -21,10 +21,10 @@ export async function createSingleProjectEnvelope(files: readonly File[], typedS
     seen.add(key);
   }
   const total = files.reduce((sum, file) => sum + file.size, 0);
-  if (!Number.isSafeInteger(total) || total > 80 * 1024 * 1024) return { ok: false, reason: "These files exceed the project review staging limit." };
+  if (!Number.isSafeInteger(total) || total > 80 * 1024 * 1024) return { ok: false, reason: "This ZIP and its companion files exceed the 80 MiB project-review staging limit. Nothing was uploaded or graded." };
   const zip = new JSZip();
   for (const file of files) zip.file(file.name, await file.arrayBuffer(), { binary: true, createFolders: false });
   const bytes = await zip.generateAsync({ type: "uint8array", compression: "STORE" });
-  if (bytes.byteLength > GRADING_ZIP_MAX_BYTES) return { ok: false, reason: "These files exceed the project review staging limit." };
+  if (bytes.byteLength > GRADING_ZIP_MAX_BYTES) return { ok: false, reason: "The combined project exceeds the ZIP upload limit. Nothing was uploaded or graded." };
   return { ok: true, archive: new File([new Uint8Array(bytes).buffer], `submission-${first[1]}.zip`, { type: "application/zip" }), originalFiles: files.slice(), group: first[1], student: typedStudent.trim() || student };
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type DragEvent, type RefObject } from "react";
 import Alert from "@mui/material/Alert";
 import Accordion from "@mui/material/Accordion";
 import AccordionDetails from "@mui/material/AccordionDetails";
@@ -40,12 +40,13 @@ export function reconcileRowAfterReset(row: Row): Row {
   return { ...row, state: "uncertain", reason: "The session changed. Check the previous results before retrying." };
 }
 /** File intake stays visible while text, URL, and composite tools remain available. */
-export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, getSessionEpoch, sessionEpoch, onOne, onMany, onText, onReviewed }: {
+export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, getSessionEpoch, sessionEpoch, panelDropRef, onOne, onMany, onText, onReviewed }: {
   disabled: boolean;
   sharedLatch?: IntakeFence;
   reviewFiles?: boolean;
   getSessionEpoch?: () => number;
   sessionEpoch?: number;
+  panelDropRef?: RefObject<((files: File[]) => void) | null>;
   onOne: (student: string, files: File[]) => Promise<DirectFileOutcome>;
   onMany: (files: File[]) => Promise<DirectFileOutcome[]>;
   onText: (student: string, content: string) => Promise<SubmitOutcome>;
@@ -215,6 +216,17 @@ export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, get
     }
     void grade(added, mode, student);
   }
+
+  // The surrounding panel shares this exact intake path, including the
+  // selected student mode, name, tray state and shared submission fence.
+  const latestAddFiles = useRef(addFiles);
+  latestAddFiles.current = addFiles;
+  useEffect(() => {
+    if (!panelDropRef) return;
+    const relay = (files: File[]) => latestAddFiles.current(files);
+    panelDropRef.current = relay;
+    return () => { if (panelDropRef.current === relay) panelDropRef.current = null; };
+  }, [panelDropRef]);
 
   function pick(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);

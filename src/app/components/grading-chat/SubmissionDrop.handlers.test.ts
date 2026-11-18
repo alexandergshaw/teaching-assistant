@@ -29,9 +29,9 @@ function nodes(node: any): Node[] { if (Array.isArray(node)) return node.flatMap
 const text = (node: any): string => Array.isArray(node) ? node.map(text).join("") : typeof node === "string" ? node : !node || typeof node !== "object" ? "" : text(node.props?.children);
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 beforeEach(() => { slots.length = 0; cursor = 0; });
-function harness(onOne = vi.fn(async () => ({ kind: "accepted", entryCount: 1 })), onMany = vi.fn(async () => [] as any[]), onText: (student: string, content: string) => Promise<SubmitOutcome> = vi.fn(async (): Promise<SubmitOutcome> => ({ kind: "accepted", entryCount: 1 })), sharedLatch?: IntakeFence, reviewFiles = false, onReviewed?: (...args: any[]) => Promise<SubmitOutcome>) {
+function harness(onOne = vi.fn(async () => ({ kind: "accepted", entryCount: 1 })), onMany = vi.fn(async () => [] as any[]), onText: (student: string, content: string) => Promise<SubmitOutcome> = vi.fn(async (): Promise<SubmitOutcome> => ({ kind: "accepted", entryCount: 1 })), sharedLatch?: IntakeFence, reviewFiles = false, onReviewed?: (...args: any[]) => Promise<SubmitOutcome>, panelDropRef?: { current: ((files: File[]) => void) | null }) {
   let epoch = 0;
-  const render = () => { cursor = 0; return component({ disabled: false, sharedLatch, reviewFiles, onOne, onMany, onText, onReviewed, getSessionEpoch: () => epoch, sessionEpoch: epoch }); };
+  const render = () => { cursor = 0; return component({ disabled: false, sharedLatch, reviewFiles, onOne, onMany, onText, onReviewed, panelDropRef, getSessionEpoch: () => epoch, sessionEpoch: epoch }); };
   const find = (tree: Node, type: string) => nodes(tree).find((node) => node.type === type)!;
   const button = (tree: Node, label: string) => nodes(tree).find((node) => node.type === "Button" && text(node) === label)!;
   const confirmText = (tree: Node) => { for (const label of nodes(tree).filter((n) => n.type === "FormControlLabel" && String(n.props.label).startsWith("I checked the name and complete submission"))) label.props.control.props.onChange(null, true); return render(); };
@@ -41,6 +41,40 @@ function harness(onOne = vi.fn(async () => ({ kind: "accepted", entryCount: 1 })
 const work = (name: string) => new File(["work"], name);
 
 describe("SubmissionDrop actual handlers", () => {
+  it("routes a panel drop using the current single-student name", async () => {
+    const relay: { current: ((files: File[]) => void) | null } = { current: null };
+    const h = harness(undefined, undefined, undefined, undefined, false, undefined, relay);
+    let tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Student name (optional)")!.props.onChange({ target: { value: "Ada Example" } });
+    tree = h.render();
+    const zip = work("student.zip"); relay.current!([zip]); await flush();
+    expect(h.onOne).toHaveBeenCalledWith("Ada Example", [zip]);
+    expect(h.onMany).not.toHaveBeenCalled();
+  });
+  it("routes a panel ZIP drop using the current multiple-student mode and shared fence", async () => {
+    const relay: { current: ((files: File[]) => void) | null } = { current: null };
+    const latch = { busy: false, generation: 0 };
+    const h = harness(undefined, undefined, undefined, latch, false, undefined, relay);
+    let tree = h.render(); h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    const zip = work("class.zip"); latch.busy = true; relay.current!([zip]); await flush();
+    expect(h.onMany).not.toHaveBeenCalled();
+    latch.busy = false; relay.current!([zip]); await flush();
+    expect(h.onMany).toHaveBeenCalledWith([zip]); expect(h.onOne).not.toHaveBeenCalled();
+  });
+  it("holds a second panel drop while the first ZIP is actually pending", async () => {
+    const relay: { current: ((files: File[]) => void) | null } = { current: null };
+    let finish!: (value: any[]) => void;
+    const onMany = vi.fn(() => new Promise<any[]>((resolve) => { finish = resolve; }));
+    const h = harness(undefined, onMany, undefined, { busy: false, generation: 0 }, false, undefined, relay);
+    let tree = h.render(); h.find(tree, "RadioGroup").props.onChange(null, "many"); h.render();
+    relay.current!([work("first.zip")]); await flush();
+    relay.current!([work("second.zip")]);
+    tree = h.render(); expect(onMany).toHaveBeenCalledTimes(1);
+    expect(text(tree)).toContain("Wait for the current upload to finish");
+    expect(text(tree)).toContain("first.zip"); expect(text(tree)).not.toContain("second.zip");
+    finish([{ kind: "refused", reason: "Please retry the first ZIP." }]); await flush(); tree = h.render();
+    expect(text(tree)).toContain("first.zip"); expect(text(tree)).toContain("Please retry the first ZIP.");
+  });
   it("grades an explicitly reviewed generic paste in one action", async () => {
     const h = harness(); let tree = h.render(); h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
     const value = "Student: Ada Example\nAn essay with https://example.org and a quote.\nStudent: Riley Example\nconst answer = 42;";

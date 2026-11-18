@@ -27,7 +27,7 @@ import RubricProvenance from "../grading-results/RubricProvenance";
 import GeneratedRubricCard from "../grading-results/GeneratedRubricCard";
 import SubmissionClassificationBadge from "../grading/SubmissionClassificationBadge";
 import { ChatComposer } from "./ChatComposer";
-import { oversizedReviewCandidate } from "./oversizedReviewCandidate";
+import { oversizedReviewCandidate, singleStudentOversizedRefusal } from "./oversizedReviewCandidate";
 import { createSingleProjectEnvelope } from "./single-project-envelope";
 import { createArchiveReviewQueue } from "./archiveReviewQueue";
 import { createSingleZipBrowserAuthority } from "@/lib/grade/single-zip-browser-authority";
@@ -45,7 +45,7 @@ import { RecordingSplitConfirm } from "./RecordingSplitConfirm";
 import { useContinuousGradingRun, type ItemDiagnostic, type SubmitOutcome } from "./useContinuousGradingRun";
 import { buildLedgerView } from "./ingestLedger";
 import { LedgerNotice } from "./LedgerNotice";
-import { claimIntake, releaseIntake, resetIntake } from "./intakeFence";
+import { resetIntake } from "./intakeFence";
 import { describeRunStatus, type RunStatus } from "./runStatus";
 import SegmentedToggle from "../ui/SegmentedToggle";
 import { visuallyHidden } from "../ui/visuallyHidden";
@@ -292,6 +292,7 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
   const [applyLengthDeduction, setApplyLengthDeduction] = useState(false);
   const [lengthThresholdText, setLengthThresholdText] = useState(String(LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT));
   const directIntake = useRef(createDirectFileIntake()), reviewSequence = useRef(0), archiveReviewQueue = useRef(createArchiveReviewQueue());
+  const panelDropRef = useRef<((files: File[]) => void) | null>(null);
   const [waitingArchiveNames, setWaitingArchiveNames] = useState<string[]>([]);
   const [directPreparing, setDirectPreparing] = useState(false);
   const [preparing, setPreparing] = useState(false);
@@ -641,7 +642,8 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
         return files.map(() => ({ kind: "staged" as const }));
       }).catch(() => files.map(() => ({ kind: "refused" as const, reason: "The project could not be prepared for review." })));
     }
-    if (!blocked && mode === "single" && files.some((file) => oversizedReviewCandidate([file]))) return Promise.resolve(files.map(() => ({ kind: "refused" as const, reason: "This single-student archive exceeds the current grading limit. Nothing was submitted." })));
+    const singleLimit = !blocked && mode === "single" ? singleStudentOversizedRefusal(files) : null;
+    if (singleLimit) return Promise.resolve(files.map(() => ({ kind: "refused" as const, reason: singleLimit })));
     if (!blocked && files.length > 1 && files.some((file) => oversizedReviewCandidate([file]))) {
       if (files.some((file) => !/\.zip$/i.test(file.name))) return Promise.resolve(files.map(() => ({ kind: "refused" as const, reason: "Select oversized ZIPs separately from other files so each submission stays together." })));
       const epoch = dropSessionEpoch.current;
@@ -719,12 +721,12 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
   const handlePanelDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setIsDragging(false);
+    const entries = Array.from(event.dataTransfer.items ?? []).filter((item) => item.kind === "file");
+    if (entries.some((item) => item.webkitGetAsEntry?.()?.isDirectory || !item.getAsFile())) { setSubmitError("Folders cannot be dropped here. Choose files, or put the folder in a ZIP archive."); return; }
     const files = Array.from(event.dataTransfer.files);
-    if (files.length > 0) {
-      const token = claimIntake(sharedIntakeLatch);
-      if (token === null) { setSubmitError("Wait for the current submission to finish, then drop these files again."); return; }
-      void handleSubmitFiles(files).finally(() => { releaseIntake(sharedIntakeLatch, token); });
-    }
+    if (!files.length) return;
+    if (!panelDropRef.current) { setSubmitError("File intake is not ready. Drop these files again."); return; }
+    panelDropRef.current(files);
   };
 
   return (
@@ -951,6 +953,7 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
         <LargeZipRecovery key={`${visibleDropEpoch}:${reviewFile?.id ?? "idle"}`} autoSubmit={reviewFile?.autoSubmit} knownIdentity={reviewFile?.knownIdentity} onManualOpen={() => archiveReviewQueue.current.reserve()} onSelectionStart={() => setPrioritySourceIndices(new Set())} onAdmitted={(indices) => setPrioritySourceIndices((previous) => new Set([...previous, ...indices]))} onSubmit={handlePartialHandoff} incomingFile={reviewFile?.file} onClose={() => { const next = archiveReviewQueue.current.complete(); setWaitingArchiveNames(archiveReviewQueue.current.waitingNames()); setReviewFile(next ? { ...next, id: ++reviewSequence.current } : null); }} />
         <ChatComposer
           sharedLatch={sharedIntakeLatch}
+          panelDropRef={panelDropRef}
           disabled={busy || preparing}
           getSessionEpoch={() => dropSessionEpoch.current}
           sessionEpoch={visibleDropEpoch}

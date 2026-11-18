@@ -555,8 +555,7 @@ describe("submission labels: file and url modes carry the optional label", () =>
     const url = source.slice(source.indexOf("const handleSubmitUrl"), source.indexOf("const handleSubmitComposite"));
     expect(url).toContain('kind: "url", url, label');
     // The whole-view drop supplies no label.
-    expect(source).toContain("handleSubmitFiles(files).finally");
-    expect(source).toContain("claimIntake(sharedIntakeLatch)");
+    expect(source).toContain("panelDropRef.current(files)");
   });
 });
 
@@ -601,7 +600,7 @@ describe("GradingChatPanel - controls #4: loading indicators", () => {
       expect(source.slice(start, start + 200), name).toContain("withPreparing(");
     }
     expect(source).toMatch(/finally\s*\{\s*if\s*\(dropSessionEpoch\.current === epoch\)\s*setPreparing\(false\)/);
-    expect(source).toMatch(/<ChatComposer\s+sharedLatch=\{sharedIntakeLatch\}\s+disabled=\{busy\s*\|\|\s*preparing\}/);
+    expect(source).toMatch(/<ChatComposer\s+sharedLatch=\{sharedIntakeLatch\}\s+panelDropRef=\{panelDropRef\}\s+disabled=\{busy\s*\|\|\s*preparing\}/);
   });
 
   it("the grading indicator is driven by OUTSTANDING work (dispatched - completed), not driver.inFlight", () => {

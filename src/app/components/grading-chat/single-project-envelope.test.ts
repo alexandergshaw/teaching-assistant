@@ -30,6 +30,15 @@ it("keeps same-attempt duplicate-suffixed companion names intact", async () => {
   expect(await entries.file(second.name)!.async("string")).toBe("second");
 });
 
+it("reports the actual multi-part staging limit before reading the files", async () => {
+  const zip = new File(["zip"], "10-20 - Example-Ada-Nov 13, 2026 502 PM.zip");
+  const doc = new File(["doc"], "10-20 - Example-Ada-Nov 13, 2026 502 PM.docx");
+  Object.defineProperty(zip, "size", { value: 80 * 1024 * 1024 });
+  const result = await createSingleProjectEnvelope([zip, doc]);
+  expect(result).toEqual({ ok: false, reason: expect.stringContaining("80 MiB") });
+  if (!result.ok) expect(result.reason).toContain("Nothing was uploaded or graded");
+});
+
 it("is accepted by the existing archive planner and inventories unexamined binaries", async () => {
   const inner = new JSZip().file("project/main.cpp", "int main(){}").file("project/Debug/main.exe", "binary");
   const zip = new File([new Uint8Array(await inner.generateAsync({ type: "uint8array" })).buffer], "10-20 - Example-Ada-Nov 13, 2026 502 PM.zip");

@@ -3,6 +3,7 @@ import { MAX_STATIC_PROJECT_CONTENT_CHARS } from "@/lib/grade/static-project-lim
 import { prioritizeModelContent } from "./large-data-model-content";
 import { reportsLengthCriterionDeduction, reportsLengthPenalty } from "./reported-length-penalty";
 import { hasUnreviewedNotebook, notebookNeedsVisualReview, reportsUnavailableEvidence, runtimeDependencyUnavailable } from "./unavailable-evidence";
+import { missingNotebookCsv } from "./missing-notebook-data";
 import { addLengthExemption, extractLengthOnlyExemption, withoutSupportedInstructionLength, withoutSupportedRubricLength } from "./length-only-exemption";
 import { canvasOmissionIdentityRefusal, canvasVideoRefusal } from "../canvas/omitted-video";
 import type { SubmissionFileInventory } from "./submission-file-inventory";
@@ -528,6 +529,11 @@ async function gradeStudentEntries(
     const unavailableDirectNotebook = !notebookVisualsEnabled() && submittedFiles.some(file => file.extension.toLowerCase() === "ipynb" && (file.previewTruncated || notebookNeedsVisualReview(file.previewContent)));
     if (hasUnreviewedNotebook(repositoryInventories) || missingNotebookPayload || unavailableDirectNotebook) {
       results.push(buildEvidenceHeldRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}Submission evidence could not be fully inspected. No score was assigned; review the submission before grading.` }));
+      continue;
+    }
+    const missingData = missingNotebookCsv(submittedFiles, repositoryInventories);
+    if (missingData) {
+      results.push(buildEvidenceHeldRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}The notebook references ${missingData}, which was not found in the inspected repository snapshot. It may be generated or supplied separately; review the data before grading. No score was assigned.` }));
       continue;
     }
     const axes = limitedEntries[i].discussionAxes;

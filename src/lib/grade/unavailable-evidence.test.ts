@@ -26,19 +26,25 @@ describe("unavailable grading evidence", () => {
     expect(reportsUnavailableEvidence("The submitted algorithm does not compare both objectives.")).toBe(false);
   });
   it("does not treat visual notebook output as inspected text", () => {
-    expect(notebookNeedsVisualReview('{"cells":[{"cell_type":"code","source":[],"outputs":[{"output_type":"display_data","data":{"image/png":"..."}}]}]}')).toBe(true);
-    expect(notebookNeedsVisualReview('{"cells":[{"cell_type":"code","source":[],"outputs":[{"output_type":"execute_result","data":{"text/plain":"42"}}]}]}')).toBe(false);
+    expect(notebookNeedsVisualReview('{"nbformat":4,"nbformat_minor":5,"cells":[{"cell_type":"code","source":[],"outputs":[{"output_type":"display_data","data":{"image/png":"..."}}]}]}')).toBe(true);
+    expect(notebookNeedsVisualReview('{"nbformat":4,"nbformat_minor":5,"cells":[{"cell_type":"code","source":[],"outputs":[{"output_type":"execute_result","data":{"text/plain":"42"}}]}]}')).toBe(false);
     expect(notebookNeedsVisualReview("not json")).toBe(true);
   });
   it.each([
-    { cells: [{ cell_type: "unknown", source: "content" }] },
-    { cells: [{ cell_type: "code", outputs: [] }] },
-    { cells: [{ cell_type: "markdown" }] },
-    { cells: [{ cell_type: "code", source: "print(1)" }] },
-    { cells: [{ cell_type: "markdown", source: "hello", outputs: [] }] },
-    { cells: [{ cell_type: "markdown", source: ["hello", 7] }] },
-    { cells: [{ cell_type: "code", source: [], outputs: [{ data: { "text/plain": "42" } }] }] },
+    { nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "unknown", source: "content" }] },
+    { nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "code", outputs: [] }] },
+    { nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "markdown" }] },
+    { nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "code", source: "print(1)" }] },
+    { nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "markdown", source: "hello", outputs: [] }] },
+    { nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "markdown", source: ["hello", 7] }] },
+    { nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "code", source: [], outputs: [{ data: { "text/plain": "42" } }] }] },
   ])("holds structurally invalid notebook cells: %j", (notebook) => {
     expect(notebookNeedsVisualReview(JSON.stringify(notebook))).toBe(true);
+  });
+  it.each([{ cells: [] }, { nbformat: 4, cells: [] }, { nbformat: 5, nbformat_minor: 0, cells: [] }, { nbformat: 4, nbformat_minor: -1, cells: [] }, { nbformat: 4, nbformat_minor: "5", cells: [] }, { nbformat: 4, nbformat_minor: 1.5, cells: [] }])("holds unsupported notebook headers: %j", (notebook) => {
+    expect(notebookNeedsVisualReview(JSON.stringify(notebook))).toBe(true);
+  });
+  it("accepts a supported notebook header with no visual outputs", () => {
+    expect(notebookNeedsVisualReview(JSON.stringify({ nbformat: 4, nbformat_minor: 0, cells: [] }))).toBe(false);
   });
 });

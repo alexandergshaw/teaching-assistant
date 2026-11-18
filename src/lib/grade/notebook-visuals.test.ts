@@ -4,9 +4,12 @@ import { prepareNotebookVisuals } from "./notebook-visuals";
 import { collectInlineVisualEvidence } from "./inline-visuals";
 
 const image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
-const notebook = (data: object) => JSON.stringify({ cells: [{ cell_type: "code", source: [], outputs: [{ output_type: "display_data", data }] }] });
+const notebook = (data: object) => JSON.stringify({ nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "code", source: [], outputs: [{ output_type: "display_data", data }] }] });
 
 describe("notebook visual evidence", () => {
+  it.each([{ cells: [] }, { nbformat: 4, cells: [] }, { nbformat: 5, nbformat_minor: 0, cells: [] }, { nbformat: 4, nbformat_minor: -1, cells: [] }, { nbformat: 4, nbformat_minor: "5", cells: [] }, { nbformat: 4, nbformat_minor: 1.5, cells: [] }])("holds unsupported notebook headers: %j", async (value) => {
+    expect((await prepareNotebookVisuals(JSON.stringify(value), false)).status).toBe("failed");
+  });
   it.each(["1", "true"])("attaches exact image bytes when the feature flag is %s", async (flag) => {
     vi.stubEnv("GRADE_NOTEBOOK_VISUALS", flag);
     try {
@@ -25,8 +28,8 @@ describe("notebook visual evidence", () => {
     const invalid = Buffer.from([137,80,78,71,13,10,26,10,1,2,3,4]).toString("base64");
     expect((await prepareNotebookVisuals(notebook({ "image/png": invalid }), false)).status).toBe("failed");
     expect((await prepareNotebookVisuals(notebook({ "application/pdf": "data" }), false)).status).toBe("failed");
-    expect((await prepareNotebookVisuals(JSON.stringify({ cells: [{ cell_type: "markdown", source: "![plot](attachment:x.png)", attachments: { "x.png": {} } }] }), false)).status).toBe("failed");
-    expect((await prepareNotebookVisuals(JSON.stringify({ cells: [{ cell_type: "markdown", source: "![plot](https://example.com/x.png)" }] }), false)).status).toBe("failed");
+    expect((await prepareNotebookVisuals(JSON.stringify({ nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "markdown", source: "![plot](attachment:x.png)", attachments: { "x.png": {} } }] }), false)).status).toBe("failed");
+    expect((await prepareNotebookVisuals(JSON.stringify({ nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "markdown", source: "![plot](https://example.com/x.png)" }] }), false)).status).toBe("failed");
   });
   it("accepts inert HTML tables and fails closed on active or visually ambiguous HTML", async () => {
     expect((await prepareNotebookVisuals(notebook({ "text/html": "<table><tbody><tr><td>42</td></tr></tbody></table>", "text/plain": "42" }), false)).status).toBe("complete");
@@ -42,7 +45,7 @@ describe("notebook visual evidence", () => {
   });
   it("holds markdown reference images and embedded visual markup", async () => {
     for (const source of ["![plot][image]", "<svg></svg>", "<picture></picture>", "<video></video>"]) {
-      expect((await prepareNotebookVisuals(JSON.stringify({ cells: [{ cell_type: "markdown", source }] }), false)).status).toBe("failed");
+      expect((await prepareNotebookVisuals(JSON.stringify({ nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "markdown", source }] }), false)).status).toBe("failed");
       expect((await prepareNotebookVisuals(notebook({ "text/markdown": source }), false)).status).toBe("failed");
     }
   });
@@ -50,7 +53,7 @@ describe("notebook visual evidence", () => {
     const jpeg = await sharp({ create: { width: 64, height: 64, channels: 3, background: "red" } }).jpeg().toBuffer();
     const truncated = Buffer.concat([jpeg.subarray(0, jpeg.length - 22), Buffer.from([255, 217])]).toString("base64");
     expect((await prepareNotebookVisuals(notebook({ "image/jpeg": truncated }), false)).status).toBe("failed");
-    expect((await prepareNotebookVisuals(JSON.stringify({ cells: [{ cell_type: "code", source: [], outputs: [{ output_type: "display_data" }] }] }), false)).status).toBe("failed");
+    expect((await prepareNotebookVisuals(JSON.stringify({ nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "code", source: [], outputs: [{ output_type: "display_data" }] }] }), false)).status).toBe("failed");
   });
   it("holds non-code cells with outputs and invalid cell source values", async () => {
     for (const cell of [
@@ -59,16 +62,16 @@ describe("notebook visual evidence", () => {
       { cell_type: "markdown", source: "hello", outputs: [] },
       { cell_type: "code", source: ["print(1)", 7], outputs: [] },
     ]) {
-      expect((await prepareNotebookVisuals(JSON.stringify({ cells: [cell] }), false)).status).toBe("failed");
+      expect((await prepareNotebookVisuals(JSON.stringify({ nbformat: 4, nbformat_minor: 5, cells: [cell] }), false)).status).toBe("failed");
     }
   });
   it("holds compressed images that exceed the cumulative decoded budget", async () => {
     const large = (await sharp({ create: { width: 2048, height: 2048, channels: 4, background: "white" } }).png().toBuffer()).toString("base64");
-    const text = JSON.stringify({ cells: [{ cell_type: "code", source: [], outputs: Array.from({ length: 3 }, () => ({ output_type: "display_data", data: { "image/png": large } })) }] });
+    const text = JSON.stringify({ nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "code", source: [], outputs: Array.from({ length: 3 }, () => ({ output_type: "display_data", data: { "image/png": large } })) }] });
     expect((await prepareNotebookVisuals(text, false)).status).toBe("failed");
   });
   it("fails closed above the image count limit", async () => {
-    const text = JSON.stringify({ cells: [{ cell_type: "code", source: [], outputs: Array.from({ length: 17 }, () => ({ output_type: "display_data", data: { "image/png": image } })) }] });
+    const text = JSON.stringify({ nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "code", source: [], outputs: Array.from({ length: 17 }, () => ({ output_type: "display_data", data: { "image/png": image } })) }] });
     expect((await prepareNotebookVisuals(text, false)).status).toBe("failed");
   });
 });

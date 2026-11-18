@@ -1,5 +1,6 @@
 import { parseFragment } from "parse5";
 import sharp from "sharp";
+import { hasSupportedNotebookHeader } from "./notebook-header";
 import { DOCUMENT_PICTURE_BYTE_LIMIT, DOCUMENT_PICTURE_LIMIT, DOCUMENT_VISUAL_BYTE_LIMIT, type DocumentVisuals } from "./document-visual-schema";
 
 /** Accept only inert table/text markup and alignment-only CSS. */
@@ -45,7 +46,7 @@ export async function prepareNotebookVisuals(text: string, truncated: boolean): 
   let decodedBytes = 0;
   try {
     const notebook = JSON.parse(text);
-    if (!notebook || !Array.isArray(notebook.cells)) return failed();
+    if (!hasSupportedNotebookHeader(notebook)) return failed();
     for (const [cellIndex, cell] of notebook.cells.entries()) {
       if (!cell || typeof cell !== "object" || !["code", "markdown", "raw"].includes(cell.cell_type) || (cell.cell_type === "code" && !Array.isArray(cell.outputs)) || (cell.outputs !== undefined && !Array.isArray(cell.outputs))) return failed();
       if (cell.cell_type !== "code" && cell.outputs !== undefined) return failed();

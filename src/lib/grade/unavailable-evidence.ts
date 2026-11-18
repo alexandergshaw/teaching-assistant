@@ -1,5 +1,6 @@
 import type { CodeRunResult } from "../code-runner";
 import type { SubmissionFileInventory } from "./submission-file-inventory";
+import { hasSupportedNotebookHeader } from "./notebook-header";
 
 /** A missing runtime dependency in our sandbox does not establish a defect. */
 export function runtimeDependencyUnavailable(run: CodeRunResult | null): boolean {
@@ -21,7 +22,7 @@ export function reportsUnavailableEvidence(text: string): boolean {
 export function notebookNeedsVisualReview(text: string): boolean {
   try {
     const notebook: unknown = JSON.parse(text);
-    if (!notebook || typeof notebook !== "object" || !Array.isArray((notebook as { cells?: unknown }).cells)) return true;
+    if (!hasSupportedNotebookHeader(notebook)) return true;
     return (notebook as { cells: unknown[] }).cells.some((cell) => {
       if (!cell || typeof cell !== "object") return true;
       const record = cell as { outputs?: unknown; attachments?: unknown; source?: unknown; cell_type?: unknown };

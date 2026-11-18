@@ -49,7 +49,7 @@ describe("fetchGradableRepoContent - URL forms (AC2.2)", () => {
     try {
       const bytes = await sharp(randomBytes(400 * 400 * 3), { raw: { width: 400, height: 400, channels: 3 } }).png().toBuffer();
       const image = bytes.toString("base64");
-      const notebook = JSON.stringify({ cells: [{ cell_type: "code", source: ["plot()"], outputs: [{ output_type: "display_data", data: { "image/png": image } }] }] });
+      const notebook = JSON.stringify({ nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "code", source: ["plot()"], outputs: [{ output_type: "display_data", data: { "image/png": image } }] }] });
       expect(Buffer.byteLength(notebook)).toBeGreaterThan(300_000);
       mockGetRepo.mockResolvedValueOnce(fakeRepo());
       mockListCommits.mockResolvedValueOnce([{ sha: "sha1", message: "", author: "", date: "", htmlUrl: "" }]);
@@ -68,7 +68,7 @@ describe("fetchGradableRepoContent - URL forms (AC2.2)", () => {
     vi.stubEnv("GRADE_NOTEBOOK_VISUALS", "1");
     try {
       const largeSource = "x".repeat(350_000);
-      const notebook = JSON.stringify({ cells: [{ cell_type: "markdown", source: largeSource }] });
+      const notebook = JSON.stringify({ nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "markdown", source: largeSource }] });
       mockGetRepo.mockResolvedValueOnce(fakeRepo("main"));
       mockListCommits.mockResolvedValueOnce([{ sha: "sha1", message: "", author: "", date: "", htmlUrl: "" }]);
       mockGetRepoTree.mockResolvedValueOnce({ entries: [{ path: "work.ipynb", type: "blob", size: Buffer.byteLength(notebook), sha: "x" }], truncated: false });
@@ -84,7 +84,7 @@ describe("fetchGradableRepoContent - URL forms (AC2.2)", () => {
     mockGetRepo.mockResolvedValueOnce(fakeRepo("main"));
     mockListCommits.mockResolvedValueOnce([{ sha: "sha1", message: "", author: "", date: "", htmlUrl: "" }]);
     mockGetRepoTree.mockResolvedValueOnce({ entries: [{ path: "optimization_engine.ipynb", type: "blob", size: 120, sha: "x" }], truncated: false });
-    mockGetFileText.mockResolvedValueOnce('{"cells":[{"cell_type":"code","source":["print(42)"],"outputs":[]}],"nbformat":4}');
+    mockGetFileText.mockResolvedValueOnce('{"nbformat":4,"nbformat_minor":5,"cells":[{"cell_type":"code","source":["print(42)"],"outputs":[]}]}');
     const result = await fetchGradableRepoContent("https://github.com/octo/cat");
     if ("error" in result) throw new Error(result.error);
     expect(result.content).toContain("print(42)");

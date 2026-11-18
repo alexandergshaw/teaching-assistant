@@ -139,6 +139,16 @@ describe("buildSystemPrompt - stated filename requirements are an explicit viola
 // prose beyond the handful of load-bearing phrases already relied on
 // elsewhere in this file.
 
+describe("buildSystemPrompt - supported deductions", () => {
+  it("does not invent defects or require different outcomes for named analyses", () => {
+    const prompt = buildSystemPrompt("Calculate five named strategies.", "Evaluate each calculation and explanation.");
+    expect(prompt).not.toContain("Always find at least one deduction");
+    expect(prompt).toContain("never manufacture a deduction");
+    expect(prompt).toContain("Different criteria can legitimately select the same result");
+    expect(prompt).toContain("unless the instructions or rubric explicitly require them");
+  });
+});
+
 describe("buildSystemPrompt - example code in the instructions is not a reference solution", () => {
   it("states that example code, sample solutions, or worked examples in the instructions are not a reference solution", () => {
     const prompt = buildSystemPrompt("Instructions.", "Rubric.");

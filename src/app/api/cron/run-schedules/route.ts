@@ -174,6 +174,13 @@ export async function GET(req: NextRequest) {
     });
     if (!startHeartbeatOk) console.error("Failed to write the start-of-tick cron heartbeat.");
 
+    // Scrub expired notebook requests and output while retaining idempotency
+    // tombstones. Keep running even after notebook creation is switched off.
+    try {
+      const scrub = await supabase.rpc("scrub_expired_notebook_results").retry(false);
+      if (scrub.error && scrub.error.code !== "42883" && scrub.error.code !== "PGRST202") console.error("Notebook retention sweep failed.");
+    } catch { console.error("Notebook retention sweep failed."); }
+
     // SCHEDULED-PUBLISHING RELEASES RUN FIRST, UNDER THEIR OWN SUB-BUDGET
     // (F2, docs/scheduled-publishing-from-modules-acceptance-criteria.md).
     // Ahead of the workflow-schedule stale sweep and the workflow loop below,

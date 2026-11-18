@@ -59,6 +59,7 @@ export interface IncrementalRunPlan {
 
 /** The JSON body POSTed to one /api/grade-run-item call. */
 export interface GradeRunItemRequestBody {
+  readonly notebookAttempt?: string;
   readonly expectedOwnerSession?: { readonly accountId: string; readonly sessionId: string };
   readonly sourceIndex: number;
   readonly entry: StudentSubmissionEntry;

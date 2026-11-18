@@ -1,4 +1,4 @@
-import { readBoundedResponse, type GithubBoundedReadContext } from "./github-bounded-read";
+import { readBoundedResponse, readBoundedResponseBytes, type GithubBoundedReadContext } from "./github-bounded-read";
 // File operations: read, write, bulk delete/move via Git Data API.
 
 import { getRepo } from "./github.repos";
@@ -63,6 +63,12 @@ export async function getFileText(owner: string, repo: string, path: string, ref
     { headers: { Accept: "application/vnd.github.raw" }, ...(signal && { signal }) }, bounded, byteCap
   );
   return bounded ? readBoundedResponse(res, bounded, byteCap) : res.text();
+}
+
+/** Read exact file bytes with a shared network/deadline budget. */
+export async function getFileBytes(owner: string, repo: string, path: string, ref: string, context: GithubBoundedReadContext, byteCap: number): Promise<Uint8Array> {
+  const res = await ghFetch(`/repos/${owner}/${repo}/contents/${encodePath(path)}?ref=${encodeRefSegment(ref)}`, { headers: { Accept: "application/vnd.github.raw" } }, context, byteCap);
+  return readBoundedResponseBytes(res, context, byteCap);
 }
 
 /** Create or update a file (committed on `branch`, or the default branch). */

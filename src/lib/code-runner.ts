@@ -37,6 +37,9 @@ type BeforeSandboxDispatch = (signal: AbortSignal) => Promise<void>;
 
 /** The outcome of running one student's code. */
 export interface CodeRunResult {
+  /** Ordered cell completion observations, not output or reproducibility proof. */
+  notebookExecutionObserved?: boolean;
+  notebookOutputImages?: number;
   /** Piston language that was run (e.g. "python", "c++"). */
   language: string;
   /** Names of the files sent to the runner. */

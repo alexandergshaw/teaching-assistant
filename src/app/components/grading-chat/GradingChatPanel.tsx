@@ -31,6 +31,8 @@ import { oversizedReviewCandidate, singleStudentOversizedRefusal } from "./overs
 import { createSingleProjectEnvelope } from "./single-project-envelope";
 import { createArchiveReviewQueue } from "./archiveReviewQueue";
 import { createSingleZipBrowserAuthority } from "@/lib/grade/single-zip-browser-authority";
+import { prepareNotebookGrade } from "./prepareNotebookGrade";
+import { NotebookRecovery } from "./NotebookRecovery";
 import type { PerStudentEvidence } from "./partialEvidence";
 import type { ExpectedOwnerSession } from "@/lib/grade/owner-session-binding";
 import { boundZipStorage } from "@/lib/grade/bound-zip-storage";
@@ -291,6 +293,8 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
   const [applyNamingDeduction, setApplyNamingDeduction] = useState(true);
   const [applyLengthDeduction, setApplyLengthDeduction] = useState(false);
   const [lengthThresholdText, setLengthThresholdText] = useState(String(LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT));
+  const recoveryFieldsRef = useRef({ instructions, rubric, harshness, feedbackLengthText, applyNamingDeduction, applyLengthDeduction, lengthThresholdText });
+  recoveryFieldsRef.current = { instructions, rubric, harshness, feedbackLengthText, applyNamingDeduction, applyLengthDeduction, lengthThresholdText };
   const directIntake = useRef(createDirectFileIntake()), reviewSequence = useRef(0), archiveReviewQueue = useRef(createArchiveReviewQueue());
   const panelDropRef = useRef<((files: File[]) => void) | null>(null);
   const [waitingArchiveNames, setWaitingArchiveNames] = useState<string[]>([]);
@@ -301,8 +305,8 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
   const [intakeNote, setIntakeNote] = useState<string | null>(null);
   const sessionRefusalRef = useRef("Set instructions and a rubric before submitting.");
 
-  const driver = useContinuousGradingRun({ provider: "gemini", commentSplit: true });
   const { supabase, user, authObserver } = useSupabase();
+  const driver = useContinuousGradingRun({ provider: "gemini", commentSplit: true, prepareNotebook: (request, current) => prepareNotebookGrade(request, authObserver, current) });
   const { omissions: partialOmissions, setOmissions: setPartialOmissions, records: partialRecords, setRecords: setPartialRecords } = usePartialHandoffRecords(user?.id);
   const zipReview = useZipDuplicateReview(user?.id);
   const resetOnUnmount = useRef(driver.reset);
@@ -891,6 +895,19 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
       {setupNote && <p role="status" className={styles.ghMeta}>{setupNote}</p>}
 
       <ChatEditRecovery account={user?.id} />
+      <NotebookRecovery observer={authObserver} available={!sessionReady && !instructions && !rubric && !preparing && !busy} recover={async (body, current) => {
+        const initial = JSON.stringify(recoveryFieldsRef.current);
+        const untouched = () => current() && !recoveryFieldsRef.current.instructions && !recoveryFieldsRef.current.rubric && JSON.stringify(recoveryFieldsRef.current) === initial;
+        return driver.recoverNotebook(body, untouched, () => {
+          if (!untouched()) return false;
+          setInstructions(body.assignmentInstructions); setRubric(body.rubric);
+          setHarshness(body.harshness ?? "balanced"); setFeedbackLengthText(body.feedbackWordTarget === undefined ? "" : String(body.feedbackWordTarget));
+          setApplyNamingDeduction(body.applyNamingDeduction ?? true); setApplyLengthDeduction(body.applyLengthDeduction ?? false);
+          setLengthThresholdText(String(body.lengthDeductionThresholdWords ?? LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT));
+          setSetupNote("Notebook grading resumed with its saved assignment setup.");
+          return true;
+        });
+      }} />
 
       {hasRows && driver.run && (
         <div className={chatStyles.stream}>

@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+const notebookMocks = vi.hoisted(() => ({ discover: vi.fn(), list: vi.fn(), match: vi.fn(), start: vi.fn(), poll: vi.fn(), close: vi.fn() }));
+vi.mock("@/lib/grade/single-zip-browser-authority", () => ({ createSingleZipBrowserAuthority: () => ({ admit: async () => ({ signal: new AbortController().signal }), identity: () => ({ accountId: "11111111-1111-4111-8111-111111111111", sessionId: "22222222-2222-4222-8222-222222222222" }), close: notebookMocks.close }) }));
+vi.mock("@/app/components/grading-chat/notebookJobClient", () => ({ discoverNotebookJob: notebookMocks.discover, listNotebookJobs: notebookMocks.list, matchNotebookJob: notebookMocks.match, startNotebookJob: notebookMocks.start, pollNotebookJob: notebookMocks.poll }));
 
 // Same auth-mock shape as grading-incremental.test.ts. Both new actions must
 // call requireAppOwner() (F1/R7), not requireUser().
@@ -45,6 +48,7 @@ import { fetchGoogleDriveFile } from "@/lib/grade/google-drive-content";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { generateRubric } from "@/lib/grade/rubric";
 import { prepareChatSubmissionAction, prepareCompositeSubmissionAction, resolveChatRunHeaderAction } from "./grading-chat-intake";
+import { prepareNotebookGrade } from "@/app/components/grading-chat/prepareNotebookGrade";
 import type { StudentSubmissionEntry } from "@/lib/grade/types";
 import { ITEM_REQUEST_BYTE_BUDGET } from "@/app/components/grading/incrementalRunPlan";
 
@@ -388,6 +392,20 @@ function compositeFormData(student: string, parts: Array<Record<string, string |
 }
 
 describe("prepareCompositeSubmissionAction", () => {
+  it("hands a real single-link composite to notebook preparation with preserved provenance", async () => {
+    const url = "https://github.com/owner/repo", sha = "a".repeat(40);
+    mockDetectCanvasUrlKind.mockReturnValue(null);
+    mockFetchGradableRepoContent.mockResolvedValue({ repo: "owner/repo", ref: sha, content: "notebook source", fileCount: 1, truncated: false, files: [{ path: "work.ipynb", text: "notebook source", truncated: false }], inventory: { source: `owner/repo @ ${sha}`, scope: { kind: "repository", path: null }, enumerationComplete: true, files: [{ path: "work.ipynb", content: "read" }] } });
+    notebookMocks.discover.mockResolvedValue({ owner: "owner", repo: "repo", commit: sha, path: "work.ipynb", sourceUrl: url }); notebookMocks.list.mockResolvedValue([]); notebookMocks.match.mockResolvedValue(null); notebookMocks.start.mockResolvedValue({ status: "succeeded", attempt: "33333333-3333-4333-8333-333333333333" });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ enabled: true }))));
+    try {
+      const outcome = await prepareCompositeSubmissionAction(compositeFormData("Ada", [{ kind: "text", content: url }]));
+      if (outcome.kind !== "entries") throw new Error("Expected composite entry");
+      const request = { sourceIndex: 0, entry: outcome.entries[0], assignmentInstructions: "Grade", rubric: "10 points", provider: "gemini" as const, pointsPossible: 10 };
+      const result = await prepareNotebookGrade(request, {} as never, () => true);
+      expect(result.entry.submissionUrl).toBe(url); expect(result.notebookAttempt).toBe("33333333-3333-4333-8333-333333333333"); expect(notebookMocks.start).toHaveBeenCalledOnce();
+    } finally { vi.unstubAllGlobals(); }
+  });
   it.each([
     { url: "https://github.com/owner/repo", scope: { kind: "repository" as const, path: null } },
     { url: "https://github.com/owner/repo/tree/main/src", scope: { kind: "tree" as const, path: "src" } },

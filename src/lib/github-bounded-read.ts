@@ -11,13 +11,13 @@ export function checkGithubReadDeadline(context: GithubBoundedReadContext): void
   if (context.remainingBytes <= 0) throw new GithubReadLimitError("byte-cap");
   if (Date.now() >= context.deadline || context.controller.signal.aborted) throw new GithubReadLimitError("deadline");
 }
-export async function readBoundedResponse(response: Response, context: GithubBoundedReadContext, cap: number): Promise<string> {
+export async function readBoundedResponseBytes(response: Response, context: GithubBoundedReadContext, cap: number): Promise<Uint8Array> {
   checkGithubReadDeadline(context);
   const limit = Math.min(cap, context.remainingBytes);
   const length = response.headers.get("content-length");
   if (length && Number(length) > limit) { await response.body?.cancel(); throw new GithubReadLimitError("byte-cap"); }
   const reader = response.body?.getReader();
-  if (!reader) return "";
+  if (!reader) return new Uint8Array();
   const chunks: Uint8Array[] = []; let count = 0;
   const cancel = () => { void reader.cancel().catch(() => undefined); };
   context.controller.signal.addEventListener("abort", cancel, { once: true });
@@ -33,7 +33,11 @@ export async function readBoundedResponse(response: Response, context: GithubBou
     }
     const bytes = new Uint8Array(count); let offset = 0;
     for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-    try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
-    catch { throw new GithubReadLimitError("invalid-response"); }
+    return bytes;
   } finally { context.controller.signal.removeEventListener("abort", cancel); reader.releaseLock(); }
+}
+export async function readBoundedResponse(response: Response, context: GithubBoundedReadContext, cap: number): Promise<string> {
+  const bytes = await readBoundedResponseBytes(response, context, cap);
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+  catch { throw new GithubReadLimitError("invalid-response"); }
 }

@@ -18,7 +18,7 @@ export type { UseContinuousGradingRunParams } from "./continuousRunParams";
 import { useRef, useState } from "react";
 import { LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT } from "@/lib/grade/length-deduction-policy";
 import { lengthDeductionThresholdError } from "./chatLengthDeduction";
-import { createContinuousRepositoryAdapter, type ContinuousRepositoryAdapter, type RepositorySessionStudent } from "./continuousRepositoryAdapter";
+import { createContinuousRepositoryAdapter, type RepositorySessionStudent } from "./continuousRepositoryAdapter";
 import { continuousSessionView, type SubmitOutcome } from "./continuousSessionView";
 export type { SubmitOutcome } from "./continuousSessionView";
 import {
@@ -81,90 +81,8 @@ export type { ItemDiagnostic, ItemDiagnosticSink };
 
 const ITEM_DIAGNOSTIC_CAP = 200;
 
-export type HeaderState = "unset" | "resolving" | "ready" | "refused";
-
-export interface UseContinuousGradingRunResult {
-  readonly repositoryAdapter: ContinuousRepositoryAdapter;
-  readonly repositoryStudents: readonly RepositorySessionStudent[];
-  readonly beginSession: (params: {
-    readonly assignmentInstructions: string;
-    readonly rubric: string;
-    readonly isCurrent?: () => boolean;
-    /** Captured once at session start and frozen for the session; absent = balanced. */
-    readonly harshness?: GradeHarshness;
-    /** Captured once and frozen for the session; absent = no length directive. */
-    readonly feedbackWordTarget?: number;
-    /** Captured once and frozen for the session; absent = deduct (default on). */
-    readonly applyNamingDeduction?: boolean;
-    /** Captured once and frozen for the session; absent = no length deduction (default off). */
-    readonly applyLengthDeduction?: boolean;
-    readonly lengthDeductionThresholdWords?: number;
-  }) => Promise<{ kind: "ready" } | { kind: "refused"; reason: string }>;
-  readonly correctSetup: UseContinuousGradingRunResult["beginSession"];
-  readonly submit: (input: ChatSubmissionInput) => Promise<SubmitOutcome>;
-  readonly reset: () => void;
-  /** Re-dispatches the ORIGINAL request body of a failed row in place (same
-   * sourceIndex, no new row). A no-op on a graded or still-pending row. */
-  readonly retry: (sourceIndex: number) => void;
-  /** Re-dispatches the retained body of an already-arrived row (graded or
-   * failed) so it is re-graded and REPLACED in place. Keyed by the row's
-   * student label. A no-op for an unknown student or a row already in flight. */
-  readonly regrade: (student: string, useCurrentSetup?: boolean) => void;
-  readonly regradeCandidates: ReadonlyMap<string, GradeResult>;
-  readonly regradeFailures: ReadonlySet<string>;
-  readonly acceptRegrade: (student: string, candidate: GradeResult) => boolean;
-  readonly discardRegrade: (student: string) => void;
-  /** The one Canvas URL pinned for this session (F3=A); "" until a Canvas URL
-   * submission is accepted. */
-  readonly canvasUrl: string;
-  /** Loose videos submitted and not yet graded or failed (the pending-staged
-   * cap input, ops 5.3). */
-  readonly pendingVideoCount: () => number;
-  /** Stable for a session, changes only across reset(): "grading-chat-" + sessionId. */
-  readonly runKey: string;
-  readonly sessionId: number;
-  /** The resolved header's rubric fields, exposed at the top level. */
-  readonly effectiveRubric: string;
-  readonly rubricFingerprint: string;
-  readonly generatedRubric: string | undefined;
-  readonly headerState: HeaderState;
-  readonly results: readonly GradeResult[];
-  /** Unreconciled row criteria with session-local setup attribution. */
-  readonly getVersionedResults: () => readonly VersionedResultRow[];
-  readonly getVersionedResult: (result: GradeResult) => VersionedResultRow | undefined;
-  readonly run: GradingRun | null;
-  readonly dispatchedCount: number;
-  readonly completedCount: number;
-  readonly inFlight: number;
-  readonly sessionError: string | null;
-  /** Students (row keys) whose single-file name was neither in the file name nor
-   * inferable from content and who carry no typed label. A labelled row is never
-   * in it. Consumed only by the chat grading mount. */
-  readonly unresolvedStudents: ReadonlySet<string>;
-  /** BULK-ZIP BW4: the retained ingest ledger (skipped students, unreadable
-   * files, student counts) accumulated across every storaged-zip submit in this
-   * session; null until one completes, cleared by reset(). */
-  readonly ingestLedger: IngestLedger | null;
-  /** Read-only presentation signal: student labels of rows queued or in flight
-   * (first-time grades, retries and regrades alike). Derived from pendingRef. */
-  readonly pendingStudents: ReadonlySet<string>;
-  /** Read-only presentation signal: student labels being graded right now (the
-   * active concurrency slots), in dispatch order. */
-  readonly inFlightStudents: readonly string[];
-  /** RECORDING ONE-VS-MANY: the oldest multi-submission recording awaiting the
-   * instructor's confirm; null when none. Nothing is graded until it resolves. */
-  readonly pendingSplit: PendingSplit | null;
-  /** True while a prepared video is being classified (the "Analyzing" phase). */
-  readonly classifyingRecording: boolean;
-  /** Grades the held recording as one distinct row per detected segment. */
-  readonly confirmRecordingSplit: () => SubmitOutcome;
-  /** Grades the held recording as ONE submission (today's path). */
-  readonly rejectRecordingSplit: () => SubmitOutcome;
-  /** One entry per dispatch attempt (newest last), bounded; cleared by reset().
-   * Hook-local, not read from the session log, so it is not subject to the
-   * log's entry cap. */
-  readonly diagnostics: readonly ItemDiagnostic[];
-}
+import type { HeaderState, UseContinuousGradingRunResult } from "./continuousRunResult";
+export type { HeaderState, UseContinuousGradingRunResult } from "./continuousRunResult";
 
 export function useContinuousGradingRun(params: UseContinuousGradingRunParams): UseContinuousGradingRunResult {
   const { provider, maxEntries = DEFAULT_MAX_ENTRIES, commentSplit } = params;
@@ -186,6 +104,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const queueRef = useRef<GradeRunItemRequestBody[]>([]);
   const inFlightRef = useRef(0);
   const dispatchedCountRef = useRef(0);
+  const nextSourceIndexRef = useRef(0);
   const ordinalRef = useRef(0);
   const canvasUrlRef = useRef("");
   const sessionIdRef = useRef(0);
@@ -398,7 +317,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   ) => {
     const flaggedNow: string[] = [];
     admitted.forEach((rawEntry, index) => {
-      const sourceIndex = dispatchedCountRef.current;
+      const sourceIndex = nextSourceIndexRef.current++;
       dispatchedCountRef.current += 1;
       // Cross-event duplicate display names: the first claimant keeps its
       // name, later ones get " (2)", " (3)" so row identity stays unique.
@@ -420,8 +339,25 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       retainedBodiesRef.current.set(sourceIndex, body);
       rowSetupsRef.current.set(sourceIndex, registerSetup(opts.setup, opts.pointsPossible));
       pendingRef.current.add(sourceIndex);
-      queueRef.current.push(body);
       markQueued(sourceIndex, "first");
+      const epoch = sessionIdRef.current;
+      const current = () => epoch === sessionIdRef.current && retainedBodiesRef.current.get(sourceIndex) === body && pendingRef.current.has(sourceIndex);
+      if (params.prepareNotebook && body.entry.submissionUrl) {
+        void params.prepareNotebook(body, current).then((prepared) => {
+          if (!current()) return;
+          retainedBodiesRef.current.set(sourceIndex, prepared);
+          queueRef.current.push(prepared);
+          pump();
+        }).catch((error) => {
+          if (!current()) return;
+          const failure = classifyItemFailure(sourceIndex, body.entry, error);
+          recordArrival({ sourceIndex, result: { ...failure, strengths: "Thank you for submitting your work.", overallComment: "Thank you for submitting your work.", feedback: "Thank you for submitting your work." } });
+          pendingRef.current.delete(sourceIndex);
+          publishPending();
+          setCompletedCount(arrivedRef.current.length);
+          rebuildRun();
+        });
+      } else queueRef.current.push(body);
     });
     setDispatchedCount(dispatchedCountRef.current);
     publishPending();
@@ -777,7 +713,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         ? (input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS) ?? "")
         : "";
 
-    const firstAdmittedIndex = dispatchedCountRef.current; enqueueAdmitted(admitted, { pointsPossible, submitLabel, setup, ...((input.kind === "file" || input.kind === "storaged-zip") && input.expectedOwnerSession ? { expectedOwnerSession: input.expectedOwnerSession } : {}) });
+    const firstAdmittedIndex = nextSourceIndexRef.current; enqueueAdmitted(admitted, { pointsPossible, submitLabel, setup, ...((input.kind === "file" || input.kind === "storaged-zip") && input.expectedOwnerSession ? { expectedOwnerSession: input.expectedOwnerSession } : {}) });
 
     if (refusedCount > 0 || ingestSkipped.length > 0) {
       safeDiagnostic(() =>
@@ -827,16 +763,60 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const confirmRecordingSplit = () => settlePendingSplit(true);
   const rejectRecordingSplit = () => settlePendingSplit(false);
 
+  const recoverNotebook = async (body: GradeRunItemRequestBody, current: () => boolean, commit?: () => boolean): Promise<boolean> => {
+    const epoch = sessionIdRef.current;
+    if (!current() || headerRef.current || dispatchedCountRef.current || !Number.isSafeInteger(body.sourceIndex) || body.sourceIndex < 0 || body.sourceIndex > Number.MAX_SAFE_INTEGER - maxEntries || body.provider !== provider || !params.prepareNotebook) return false;
+    const active = () => current() && epoch === sessionIdRef.current && dispatchedCountRef.current === 0;
+    const setup = await beginSession({ assignmentInstructions: body.assignmentInstructions, rubric: body.rubric, harshness: body.harshness, feedbackWordTarget: body.feedbackWordTarget, applyNamingDeduction: body.applyNamingDeduction, applyLengthDeduction: body.applyLengthDeduction, lengthDeductionThresholdWords: body.lengthDeductionThresholdWords, isCurrent: active });
+    const restoredHeader = headerRef.current as ResolvedRunHeader | null;
+    if (setup.kind !== "ready" || !active() || restoredHeader?.effectiveRubric !== body.rubric || (commit && !commit())) {
+      if (setup.kind === "ready" && epoch === sessionIdRef.current && dispatchedCountRef.current === 0 && restoredHeader) reset();
+      return false;
+    }
+    const sourceIndex = body.sourceIndex;
+    nextSourceIndexRef.current = sourceIndex + 1;
+    dispatchedCountRef.current = 1;
+    takenLabelsRef.current.add(body.entry.student);
+    retainedBodiesRef.current.set(sourceIndex, body);
+    rowSetupsRef.current.set(sourceIndex, registerSetup(body, body.pointsPossible));
+    pendingRef.current.add(sourceIndex);
+    markQueued(sourceIndex, "retry");
+    setDispatchedCount(dispatchedCountRef.current);
+    publishPending();
+    const owns = () => epoch === sessionIdRef.current && retainedBodiesRef.current.get(sourceIndex) === body && pendingRef.current.has(sourceIndex);
+    void params.prepareNotebook(body, owns).then((prepared) => {
+      if (!owns()) return;
+      retainedBodiesRef.current.set(sourceIndex, prepared); queueRef.current.push(prepared); pump();
+    }).catch((error) => {
+      if (!owns()) return;
+      const failure = classifyItemFailure(sourceIndex, body.entry, error);
+      recordArrival({ sourceIndex, result: { ...failure, strengths: "Thank you for submitting your work.", overallComment: "Thank you for submitting your work.", feedback: "Thank you for submitting your work." } });
+      pendingRef.current.delete(sourceIndex); publishPending(); setCompletedCount(arrivedRef.current.length); rebuildRun();
+    });
+    return true;
+  };
+
   const retry = (sourceIndex: number) => {
     const body = retainedBodiesRef.current.get(sourceIndex);
     if (!body || pendingRef.current.has(sourceIndex)) return;
     const arrived = arrivedRef.current.find((a) => a.sourceIndex === sourceIndex);
     if (!arrived || !arrived.result.ungraded) return;
     pendingRef.current.add(sourceIndex);
-    queueRef.current.push(body);
     markQueued(sourceIndex, "retry");
     publishPending();
-    pump();
+    const epoch = sessionIdRef.current;
+    const current = () => epoch === sessionIdRef.current && retainedBodiesRef.current.get(sourceIndex) === body && pendingRef.current.has(sourceIndex);
+    if (params.prepareNotebook && body.entry.submissionUrl) {
+      void params.prepareNotebook(body, current).then(prepared => {
+        if (!current()) return;
+        retainedBodiesRef.current.set(sourceIndex, prepared); queueRef.current.push(prepared); pump();
+      }).catch(error => {
+        if (!current()) return;
+        const failure = classifyItemFailure(sourceIndex, body.entry, error);
+        recordArrival({ sourceIndex, result: { ...failure, strengths: "Thank you for submitting your work.", overallComment: "Thank you for submitting your work.", feedback: "Thank you for submitting your work." } });
+        pendingRef.current.delete(sourceIndex); publishPending(); setCompletedCount(arrivedRef.current.length); rebuildRun();
+      });
+    } else { queueRef.current.push(body); pump(); }
   };
 
   // Unlike retry, works on an already-GRADED row. Resolves student -> sourceIndex
@@ -860,10 +840,20 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     regradeStartRef.current.set(sourceIndex, repositoryRevisionsRef.current.get(sourceIndex) ?? 0);
     setRegradeFailures((previous) => { const next = new Set(previous); next.delete(student); return next; });
     pendingRef.current.add(sourceIndex);
-    queueRef.current.push(body);
     markQueued(sourceIndex, "regrade");
     publishPending();
-    pump();
+    const request = body, epoch = sessionIdRef.current;
+    const current = () => epoch === sessionIdRef.current && regradeBodiesRef.current.get(sourceIndex)?.body === request && pendingRef.current.has(sourceIndex);
+    if (params.prepareNotebook && request.entry.submissionUrl) {
+      void params.prepareNotebook(request, current).then(prepared => {
+        if (!current()) return;
+        regradeBodiesRef.current.set(sourceIndex, { body: prepared, setupVersion });
+        queueRef.current.push(prepared); pump();
+      }).catch(() => {
+        if (!current()) return;
+        pendingRef.current.delete(sourceIndex); publishPending(); setRegradeFailures(previous => new Set(previous).add(student));
+      });
+    } else { queueRef.current.push(request); pump(); }
   };
 
   const discardRegrade = (student: string) => {
@@ -918,6 +908,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     queueRef.current = [];
     inFlightRef.current = 0;
     dispatchedCountRef.current = 0;
+    nextSourceIndexRef.current = 0;
     ordinalRef.current = 0;
     setHeaderState("unset");
     setResults([]);
@@ -951,6 +942,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     correctSetup: (setup) => params.enableSetupCorrections && headerRef.current ? beginSession(setup, true) : Promise.resolve({ kind: "refused", reason: "Setup correction is unavailable." }),
     submit,
     reset,
+    recoverNotebook,
     retry,
     regrade,
     regradeCandidates,

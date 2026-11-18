@@ -112,7 +112,7 @@ async function scoreAxis(
 
   const imageNote =
     inlineFiles.length > 0
-      ? `\n\nThe student also submitted ${inlineFiles.length} file(s) (e.g. required screenshots or documents), attached below: ${inlineFiles
+      ? `\n\n${codeRun?.notebookExecutionObserved ? "The following evidence is attached; files labeled Observed cell are generated kernel outputs, and other files are submitted evidence" : `The student also submitted ${inlineFiles.length} file(s) (e.g. required screenshots or documents), attached below`}: ${inlineFiles
           .map((f) => f.name)
           .join(", ")}. Treat them as part of the submission and evaluate them against the rubric.`
       : "";
@@ -125,15 +125,14 @@ async function scoreAxis(
   // student for a platform limitation, the same mistake gradeEntriesEmbedded
   // (embedded-grader/index.ts) avoids for its own deterministic criterion.
   const codeNote = codeRun && !codeRun.error && !codeRun.neededStdin && !runtimeDependencyUnavailable(codeRun) ? buildCodeExecutionNote(codeRun) : "";
-  // The current runner cannot establish completion or reproducibility of a
-  // notebook. Running a companion file does not change that fact.
-  const unverifiedNotebook = submittedFiles.some(file => file.extension.replace(/^\./, "").toLowerCase() === "ipynb" || /\.ipynb$/i.test(file.name)) || !!repositoryInventories?.some(inventory => inventory.files.some(file => /\.ipynb$/i.test(file.path)));
+  const hasNotebook = submittedFiles.some(file => file.extension.replace(/^\./, "").toLowerCase() === "ipynb" || /\.ipynb$/i.test(file.name)) || !!repositoryInventories?.some(inventory => inventory.files.some(file => /\.ipynb$/i.test(file.path)));
+  const notebookNotObserved = hasNotebook && !codeRun?.notebookExecutionObserved;
   const fileListBlock = buildSubmittedFileNamesBlock(submittedFiles, repositoryInventories);
   if (repositoryInventories?.length && fileListBlock.length > getGeminiMaxCharsPerSubmission()) throw new GradeCallError("Repository file inventory exceeds the grading input budget.", "model unparseable");
 
   const parts: LlmPart[] = [
     {
-      text: `${systemPrompt}\n\nDo not deduct points for unavailable evaluator access, missing sandbox dependencies, or other grading-environment limitations. A file listed in the repository inventory is present even if its content cannot be inspected.${unverifiedNotebook ? " Notebook execution and reproducibility were not verified. Judge only observable source and saved outputs; do not claim that the notebook ran, passed tests, or produced reproducible results." : ""}\n\nStudent: ${studentName}${fileListBlock}\n\nSubmission:\n${SUBMISSION_FRAMING_HEADER}\n\n${content}${imageNote}${codeNote}${videoGradeWindowSec ? buildVideoWindowNote(videoGradeWindowSec) : ""}`,
+      text: `${systemPrompt}\n\nDo not deduct points for unavailable evaluator access, missing sandbox dependencies, or other grading-environment limitations. A file listed in the repository inventory is present even if its content cannot be inspected.${notebookNotObserved ? " Notebook execution and reproducibility were not verified. Notebook source, saved outputs and images are submitted artifacts, not observed execution. Judge only observable source and saved outputs; do not claim the notebook ran, passed tests, or produced reproducible results." : hasNotebook ? " Observed notebook execution does not establish reproducibility; saved outputs were not compared." : ""}\n\nStudent: ${studentName}${fileListBlock}\n\nSubmission:\n${SUBMISSION_FRAMING_HEADER}\n\n${content}${imageNote}${codeNote}${videoGradeWindowSec ? buildVideoWindowNote(videoGradeWindowSec) : ""}`,
     },
     ...inlineFiles.map((f): LlmPart =>
       "fileUri" in f
@@ -180,7 +179,7 @@ async function scoreAxis(
   if (executionOptions?.evidenceContext) {
     const strict = parseRepositoryProposalOutput(result.text, executionOptions.evidenceContext.criteria, executionOptions.evidenceContext.allowedEvidenceIds);
     if (!strict.ok || (commentSplit && !strict.value.separateStrengths)) throw new GradeCallError("Repository proposal output was incomplete.", "model unparseable");
-    if (unverifiedNotebook && [strict.value.overallComment, strict.value.improvements, strict.value.separateStrengths ?? "", ...strict.value.rubricAreas.map(area => area.comment)].some(notebookFeedbackClaimsRuntime)) throw new GradeCallError(UNSAFE_EVIDENCE_DEDUCTION, "model unparseable");
+    if (notebookNotObserved && [strict.value.overallComment, strict.value.improvements, strict.value.separateStrengths ?? "", ...strict.value.rubricAreas.map(area => area.comment)].some(notebookFeedbackClaimsRuntime)) throw new GradeCallError(UNSAFE_EVIDENCE_DEDUCTION, "model unparseable");
     if (executionOptions?.suppressLengthDeduction && ([strict.value.overallComment, strict.value.improvements, strict.value.separateStrengths ?? "", ...strict.value.rubricAreas.map((area) => area.comment)].some(reportsLengthPenalty) || strict.value.rubricAreas.some((area) => reportsLengthCriterionDeduction(area.area, area.score)))) throw new GradeCallError("The model reported a length penalty even though length deductions are disabled. Review or retry this submission; no grade was produced.", "model unparseable");
     return { ...strict.value, strengths: commentSplit ? strict.value.separateStrengths! : strict.value.overallComment, improvements: commentSplit ? [strict.value.overallComment, strict.value.improvements].filter(Boolean).join("\n\n") : strict.value.improvements };
   }
@@ -190,7 +189,7 @@ async function scoreAxis(
 
   const feedback = result.text.trim() || "No feedback generated.";
   const parsed = parseRubricResponse(feedback);
-  if (unverifiedNotebook && [parsed.overallComment, parsed.improvements, extractStrengthsField(feedback), ...parsed.rubricAreas.map(area => area.comment)].some(notebookFeedbackClaimsRuntime)) throw new GradeCallError(UNSAFE_EVIDENCE_DEDUCTION, "model unparseable");
+  if (notebookNotObserved && [parsed.overallComment, parsed.improvements, extractStrengthsField(feedback), ...parsed.rubricAreas.map(area => area.comment)].some(notebookFeedbackClaimsRuntime)) throw new GradeCallError(UNSAFE_EVIDENCE_DEDUCTION, "model unparseable");
   if ([parsed.overallComment, parsed.improvements, extractStrengthsField(feedback), ...parsed.rubricAreas.map((area) => area.comment)].some(reportsUnavailableEvidence)) throw new GradeCallError(UNSAFE_EVIDENCE_DEDUCTION, "model unparseable");
   if (executionOptions?.suppressLengthDeduction && ([parsed.overallComment, parsed.improvements, extractStrengthsField(feedback), ...parsed.rubricAreas.map((area) => area.comment)].some(reportsLengthPenalty) || parsed.rubricAreas.some((area) => reportsLengthCriterionDeduction(area.area, area.score)))) throw new GradeCallError("The model reported a length penalty even though length deductions are disabled. Review or retry this submission; no grade was produced.", "model unparseable");
 
@@ -371,6 +370,7 @@ async function gradeDiscussionAxes(a: {
  * existing call site compiles unchanged.
  */
 export interface GradingRunOptions {
+  readonly abortSignal?: AbortSignal;
   readonly executionPolicy?: "evidence-only";
   readonly evidenceContext?: { criteria: readonly RubricCriterion[]; allowedEvidenceIds: readonly string[]; provenance: string };
   readonly modelCallOptions?: BoundedLlmCallOptions;
@@ -416,6 +416,8 @@ export interface GradingRunOptions {
    *  graded in this call. Only the single-entry grade-run-item route sets it;
    *  unset keeps every other caller byte-identical. */
   readonly extraAttachments?: readonly GradeAttachment[];
+  /** Set only by a server-side verified notebook receipt handoff. */
+  readonly verifiedNotebookReceipt?: boolean;
   /** Chat-grading diagnostics WA: receives one record per model call and the
    *  typed failure class of a failed entry. Total (never throws), additive;
    *  unset keeps every other caller byte-identical. */
@@ -544,12 +546,6 @@ async function gradeStudentEntries(
       continue;
     }
     const notebookNeedsRuntime = submittedFiles.some(file => file.extension.replace(/^\./, "").toLowerCase() === "ipynb" || /\.ipynb$/i.test(file.name)) || !!repositoryInventories?.some(inventory => inventory.files.some(file => /\.ipynb$/i.test(file.path)));
-    // No current runner has an attestation that the notebook completed; a
-    // successful helper-script run is not equivalent evidence.
-    if (notebookNeedsRuntime && explicitlyRequiresNotebookExecution(assignmentInstructions, rubric)) {
-      results.push(buildEvidenceHeldRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}Notebook execution could not be verified. No score was assigned; review execution before grading.` }, precomputedCodeRun));
-      continue;
-    }
     const axes = limitedEntries[i].discussionAxes;
     if (limitedEntries[i].staticOnly === true && axes) {
       results.push(buildUngradedRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}Static project evidence cannot be graded as separate discussion sections. No grade was produced.` }));
@@ -614,10 +610,47 @@ async function gradeStudentEntries(
     // Run any code the student submitted (returns null with no network when there
     // is nothing runnable). A coordinated dispatch propagates an uncertain
     // sandbox outcome so the reservation stays fenced.
-    const codeRun = evidenceOnly ? null : precomputedCodeRun ?? (options.autoRunCode === false ? null
+    const notebooks = submittedFiles.filter(file => file.extension.replace(/^\./, "").toLowerCase() === "ipynb");
+    const runNotebook = process.env.CODE_RUNNER_NOTEBOOK_ENABLED === "true" && !evidenceOnly && !precomputedCodeRun && options.autoRunCode !== false && notebooks.length > 0;
+    let notebookRun: import("./notebook-kernel-runner").NotebookKernelResult | null = null;
+    if (runNotebook) {
+      try {
+        if (notebooks.length !== 1 || modelExecution?.beforeDispatch || !process.env.CODE_RUNNER_PYTHON_SNAPSHOT?.trim()) throw new Error("Notebook execution unavailable.");
+        const decoded = submittedFiles.map(file => {
+          if (file.previewTruncated && !file.rawBase64) throw new Error("Incomplete submission.");
+          if (!file.rawBase64 && file.previewContent === undefined) throw new Error("Missing file content.");
+          if (!file.rawBase64 && !/^(?:ipynb|py|txt|csv|tsv|json|md|xml|yaml|yml|dat)$/i.test(file.extension.replace(/^\./, ""))) throw new Error("Original file bytes unavailable.");
+          if (file.rawBase64 && (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(file.rawBase64))) throw new Error("Invalid file content.");
+          const content = file.rawBase64 ? Buffer.from(file.rawBase64, "base64") : Buffer.from(file.previewContent!, "utf8");
+          return { path: file.name.replace(/\\/g, "/"), content };
+        });
+        if (!repositoryInventories?.length || repositoryInventories.some(inventory => !inventory.enumerationComplete || inventory.files.some(file => file.content !== "read" || decoded.filter(item => item.path === file.path).length !== 1))) throw new Error("Incomplete project inventory.");
+        const { runNotebookKernel } = await import("./notebook-kernel-runner");
+        notebookRun = await runNotebookKernel(decoded, notebooks[0].name.replace(/\\/g, "/"), process.env.CODE_RUNNER_PYTHON_SNAPSHOT.trim(), AbortSignal.any([AbortSignal.timeout(35_000), ...(options.abortSignal ? [options.abortSignal] : [])]));
+      } catch { notebookRun = { ok: false, reason: "Notebook execution did not complete; review the submission." }; }
+      if (!notebookRun.ok) {
+        results.push(buildEvidenceHeldRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}${notebookRun.reason}` }));
+        continue;
+      }
+      const { validateNotebookOutputImages } = await import("./notebook-output-images");
+      const outputImages = await validateNotebookOutputImages(notebookRun.observations);
+      if (!outputImages) {
+        results.push(buildEvidenceHeldRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}Notebook output images could not be inspected. No score was assigned.` }));
+        continue;
+      }
+      inlineFiles.push(...outputImages);
+    }
+    options.abortSignal?.throwIfAborted();
+    const codeRun = notebookRun?.ok ? { language: "python", files: [notebooks[0].name], entryPoint: notebooks[0].name, ran: true, exitCode: 0, notebookExecutionObserved: true, notebookOutputImages: notebookRun.observations.images.length, stdout: JSON.stringify({ observedCells: notebookRun.observations.observed, outputs: notebookRun.observations.outputs, images: notebookRun.observations.images.map(image => ({ cell: image.cell, attached: true })), caveat: notebookRun.caveat }), stderr: "" } : evidenceOnly ? null : precomputedCodeRun ?? (options.autoRunCode === false ? null
       : modelExecution?.beforeDispatch
         ? await runSubmittedCode(submittedFiles, undefined, modelExecution.beforeDispatch)
         : await runSubmittedCode(submittedFiles));
+
+    const notebookReproducibilityRequired = /\b(?:verify|demonstrate|ensure|confirm|establish)\s+(?:the\s+)?reproducibility\b|\b(?:results|outputs|analysis)\s+must\s+be\s+reproducible\b|\b(?:produce|produces|producing|provide|provides)\s+reproducible\s+results\b/i.test(`${assignmentInstructions}\n${rubric}`);
+    if (notebookNeedsRuntime && explicitlyRequiresNotebookExecution(assignmentInstructions, rubric) && (notebookReproducibilityRequired || !(notebookRun?.ok || (options.verifiedNotebookReceipt === true && precomputedCodeRun?.notebookExecutionObserved === true && precomputedCodeRun.ran === true && precomputedCodeRun.exitCode === 0 && !precomputedCodeRun.error)))) {
+      results.push(buildEvidenceHeldRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}Notebook execution could not be verified. No score was assigned; review execution before grading.` }, codeRun));
+      continue;
+    }
 
     if (runtimeDependencyUnavailable(codeRun) || codeRun?.error) {
       results.push(buildEvidenceHeldRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}Code execution was unavailable. No score was assigned; retry after the execution environment is ready.` }, codeRun, submissionTruncated));

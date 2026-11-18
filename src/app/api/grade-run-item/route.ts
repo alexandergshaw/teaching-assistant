@@ -11,7 +11,7 @@ import { verifySingleZipOwnerSession } from "@/lib/supabase/single-zip-owner-ses
 import { isExpectedOwnerSession } from "@/lib/grade/owner-session-binding";
 import { normalizeProvider } from "@/lib/llm";
 import { raceWithTimeout } from "@/lib/bounded-race";
-import { gradeEntries } from "@/lib/grade/engine";
+import { gradeEntries, type GradeAttachment } from "@/lib/grade/engine";
 import { discussionAxesMatchContent } from "@/lib/grade/discussion-axes-consistency";
 import { resolveEntryLinks } from "@/lib/grade/extraction";
 import { VIDEO_EXTENSIONS, VIDEO_GRADING_ENABLED } from "@/lib/grade/constants";
@@ -89,6 +89,7 @@ const MAX_CONTENT_CHARS = 2_000_000;
 const MAX_URL_CHARS = 2048;
 
 interface GradeRunItemRequestBody {
+  notebookAttempt?: unknown;
   expectedOwnerSession?: unknown;
   sourceIndex?: unknown;
   entry?: unknown;
@@ -355,6 +356,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "This submission could not be read." }, { status: 400 });
   }
   const { sourceIndex, entry, assignmentInstructions, rubric, provider, pointsPossible, commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, suppressLengthDeduction, lengthDeductionThresholdWords, videoGradeWindowSec } = parsed;
+  if (rawBody.notebookAttempt !== undefined && (process.env.CODE_RUNNER_NOTEBOOK_DURABLE_ENABLED !== "true" || typeof rawBody.notebookAttempt !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawBody.notebookAttempt) || !isExpectedOwnerSession(rawBody.expectedOwnerSession))) return NextResponse.json({ error: "Notebook execution evidence is unavailable. Nothing was graded." }, { status: 422 });
   const includesIndexEvidence = entry.submittedFiles.some((file) => /brightspace-index-evidence\.txt$/i.test(file.name));
   if ((rawBody.expectedOwnerSession !== undefined || includesIndexEvidence) && (!isExpectedOwnerSession(rawBody.expectedOwnerSession) || !await verifySingleZipOwnerSession(rawBody.expectedOwnerSession))) return NextResponse.json({ error: "The owner session changed. Nothing was graded." }, { status: 401 });
 
@@ -420,12 +422,27 @@ export async function POST(req: NextRequest) {
         if (archiveLink && !entry.submissionUrl) return { unavailablePastedLink: true };
         const archiveUrls = archiveLink ? [...entry.content.matchAll(/(?:^|\n)Submitted link:\s*(\S+)/g)].map((match) => match[1]) : [];
         if (archiveLink && (!archiveUrls.length || archiveUrls.some((url) => url !== entry.submissionUrl))) return { unavailablePastedLink: true };
-        const needsLink = pastedLink || (archiveLink && !!entry.submissionUrl);
+        const needsLink = pastedLink || (archiveLink && !!entry.submissionUrl) || (typeof rawBody.notebookAttempt === "string" && !!entry.submissionUrl);
         if (needsLink) {
           const url = new URL(entry.submissionUrl!);
           if (url.username || url.password) return { unavailablePastedLink: true };
         }
-        const resolved = await resolveEntryLinks(needsLink ? { ...entry, gradedRepo: null, gradedRef: null, repoReadNote: null, linkFetch: undefined } : entry);
+        const freshEntry = rawBody.notebookAttempt && entry.submissionUrl ? { ...entry, content: `Submitted link: ${entry.submissionUrl}`, submittedFiles: [], repositoryInventories: undefined, gradedRepo: null, gradedRef: null, repoReadNote: null, linkFetch: undefined } : { ...entry, gradedRepo: null, gradedRef: null, repoReadNote: null, linkFetch: undefined };
+        let resolved = await resolveEntryLinks(needsLink ? freshEntry : entry);
+        let notebookImages: GradeAttachment[] = [];
+        let verifiedNotebookReceipt = false;
+        if (process.env.CODE_RUNNER_NOTEBOOK_DURABLE_ENABLED === "true" && !entry.staticOnly && !rawBody.notebookAttempt && (resolved.submittedFiles.some(file => /\.ipynb$/i.test(file.name)) || resolved.repositoryInventories?.some(inventory => inventory.files.some(file => /\.ipynb$/i.test(file.path))))) return { notebookEvidenceRequired: true };
+        if (typeof rawBody.notebookAttempt === "string") {
+          if (!needsLink || !entry.submissionUrl || !resolved.gradedRef || !isExpectedOwnerSession(rawBody.expectedOwnerSession)) return { unavailablePastedLink: true };
+          const { isExactNotebookRepositoryEntry } = await import("@/lib/grade/notebook-single-source");
+          if (!await isExactNotebookRepositoryEntry(rawBody.entry, entry.submissionUrl, resolved.gradedRef)) return { unavailablePastedLink: true };
+          const { notebookGradeHandoff } = await import("@/lib/grade/notebook-grade-handoff");
+          const evidence = await notebookGradeHandoff(rawBody.expectedOwnerSession, rawBody.notebookAttempt, rawBody, entry.submissionUrl, resolved.gradedRef);
+          if (!evidence) return { unavailablePastedLink: true };
+          resolved = { ...resolved, codeRun: evidence.codeRun };
+          verifiedNotebookReceipt = true;
+          notebookImages = evidence.images;
+        }
         // A GitHub repository can resolve successfully while its notebook or
         // tree remains incomplete. Let the grading engine produce its
         // copyable, unscored evidence-hold row for that precise case. Other
@@ -445,14 +462,14 @@ export async function POST(req: NextRequest) {
         );
         if (unavailableVideo) return { unavailableVideo: { name: unavailableVideo.name } };
         if (videoMode) {
-          const options = { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, suppressLengthDeduction, lengthDeductionThresholdWords, callSink, ...(entry.staticOnly ? { autoRunCode: false } : {}), ...(videoGradeWindowSec ? { videoGradeWindowSec } : {}) };
+          const options = { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, suppressLengthDeduction, lengthDeductionThresholdWords, callSink, abortSignal: videoAbort.signal, ...(entry.staticOnly ? { autoRunCode: false } : {}), ...(videoGradeWindowSec ? { videoGradeWindowSec } : {}) };
           const videoOutcome = await withEntryVideos(
             buildVideoSeamDeps(),
             { userId: videoOwnerId, uploadDeadlineMs: startedAtMs + VIDEO_PREPARE_BUDGET_MS, signal: videoAbort.signal },
             resolved,
             (extraAttachments) => {
               gradeStartedAtMs = Date.now();
-              return gradeEntries([resolved], partialEvidenceInstructions(assignmentInstructions, resolved), rubric, provider, pointsPossible, { ...options, extraAttachments });
+              return gradeEntries([resolved], partialEvidenceInstructions(assignmentInstructions, resolved), rubric, provider, pointsPossible, { ...options, verifiedNotebookReceipt, extraAttachments: [...extraAttachments, ...notebookImages] });
             },
             (run) => Boolean(videoGradeWindowSec) || run.results[0]?.ungraded?.kind === "grading-failed"
           );
@@ -460,7 +477,7 @@ export async function POST(req: NextRequest) {
           return { graded: videoOutcome.value, linkFetch: resolved.linkFetch };
         }
         gradeStartedAtMs = Date.now();
-        const graded = await gradeEntries([resolved], partialEvidenceInstructions(assignmentInstructions, resolved), rubric, provider, pointsPossible, { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, suppressLengthDeduction, lengthDeductionThresholdWords, callSink, ...(entry.staticOnly ? { autoRunCode: false } : {}), ...(videoGradeWindowSec ? { videoGradeWindowSec } : {}) });
+        const graded = await gradeEntries([resolved], partialEvidenceInstructions(assignmentInstructions, resolved), rubric, provider, pointsPossible, { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, suppressLengthDeduction, lengthDeductionThresholdWords, callSink, abortSignal: videoAbort.signal, verifiedNotebookReceipt, ...(notebookImages.length ? { extraAttachments: notebookImages } : {}), ...(entry.staticOnly ? { autoRunCode: false } : {}), ...(videoGradeWindowSec ? { videoGradeWindowSec } : {}) });
         return { graded, linkFetch: resolved.linkFetch };
       })(),
       waitMs
@@ -478,6 +495,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (outcome.value.unavailablePastedLink) return NextResponse.json({ error: "The linked submission could not be read completely. Check access or upload its contents directly; no grade was produced.", ...diagnosticFor("route error") }, { status: 422 });
+    if (outcome.value.notebookEvidenceRequired) return NextResponse.json({ error: "Notebook execution evidence is required before grading this submission. No grade was produced.", ...diagnosticFor("route error") }, { status: 422 });
     if (outcome.value.unreadableAttachment) {
       return NextResponse.json({ error: `Attachment "${safeCanvasLabel(outcome.value.unreadableAttachment.name)}" could not be read. No grade was produced.`, ...diagnosticFor("route error") }, { status: 422 });
     }

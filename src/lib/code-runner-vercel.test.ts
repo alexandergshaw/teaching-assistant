@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ create: vi.fn(), writeFiles: vi.fn(), runCommand: vi.fn(), stop: vi.fn() }));
+const mocks = vi.hoisted(() => ({ create: vi.fn(), writeFiles: vi.fn(), mkDir: vi.fn(), runCommand: vi.fn(), stop: vi.fn() }));
 vi.mock("@vercel/sandbox", () => ({ Sandbox: { create: mocks.create } }));
 import { runVercelCode } from "./code-runner-vercel";
 import { selectCodeRunFiles } from "./code-run-selection";
@@ -17,8 +17,8 @@ describe("isolated code execution", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("CODE_RUNNER_SANDBOX_IMAGE", `registry.example/runner@sha256:${"a".repeat(64)}`);
-    mocks.stop.mockResolvedValue(undefined); mocks.writeFiles.mockResolvedValue(undefined);
-    mocks.create.mockResolvedValue({ writeFiles: mocks.writeFiles, runCommand: mocks.runCommand, stop: mocks.stop });
+    mocks.stop.mockResolvedValue(undefined); mocks.writeFiles.mockResolvedValue(undefined); mocks.mkDir.mockResolvedValue(undefined);
+    mocks.create.mockResolvedValue({ writeFiles: mocks.writeFiles, mkDir: mocks.mkDir, runCommand: mocks.runCommand, stop: mocks.stop });
     mocks.runCommand.mockImplementation(async ({ cmd, stdout }: { cmd: string; stdout: { write: (value: string) => void } }) => { if (cmd === "./__grade_program") stdout.write("synthetic output"); return { exitCode: 0 }; });
   });
   afterEach(() => vi.unstubAllEnvs());
@@ -34,6 +34,13 @@ describe("isolated code execution", () => {
   it("rejects unsafe names before creating a VM", async () => {
     await expect(runVercelCode("python", [{ name: "../main.py", content: "print(1)" }], new AbortController().signal)).rejects.toThrow(/filename/i);
     expect(mocks.create).not.toHaveBeenCalled();
+  });
+  it("stages a project tree and runs from its root", async () => {
+    await runVercelCode("python", [{ name: "src/generate_data.py", content: "print(1)" }, { name: "data/input.csv", content: "x" }], new AbortController().signal);
+    expect(mocks.mkDir).toHaveBeenCalledWith("/vercel/project/src", expect.anything());
+    expect(mocks.mkDir).toHaveBeenCalledWith("/vercel/project/data", expect.anything());
+    expect(mocks.writeFiles.mock.calls[0][0]).toEqual(expect.arrayContaining([expect.objectContaining({ path: "/vercel/project/src/generate_data.py" }), expect.objectContaining({ path: "/vercel/project/data/input.csv" })]));
+    expect(mocks.runCommand).toHaveBeenLastCalledWith(expect.objectContaining({ cmd: "python3", args: ["./src/generate_data.py"], cwd: "/vercel/project" }));
   });
   it("requires a digest-pinned image before creating a VM", async () => {
     vi.stubEnv("CODE_RUNNER_SANDBOX_IMAGE", "registry.example/runner:latest");

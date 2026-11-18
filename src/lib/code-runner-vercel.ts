@@ -14,9 +14,9 @@ export async function runVercelCode(language: string, files: readonly CodeRunSel
   if (!supportsVercelCodeRun(language) || !files.length || files.length > 100) throw new Error("Unsupported sandbox input.");
   const seen = new Set<string>(); let bytes = 0;
   const mapped = files.map((file) => {
-    if (!isSafeGenericExecutionComponent(file.name) || file.name.startsWith("-") || file.name.length > 200 || seen.has(file.name.toLowerCase()) || file.name.toLowerCase() === "__grade_program") throw new Error("Unsupported sandbox filename.");
+    if (file.name.length > 200 || file.name.split("/").some(part => !part || part.startsWith("-") || !isSafeGenericExecutionComponent(part)) || seen.has(file.name.toLowerCase()) || file.name.toLowerCase() === "__grade_program" || file.name.toLowerCase() === "data") throw new Error("Unsupported sandbox filename.");
     seen.add(file.name.toLowerCase()); const content = Buffer.from(file.content, "utf8"); bytes += content.length;
-    return { path: file.name, content };
+    return { path: `/vercel/project/${file.name}`, content };
   });
   if (bytes > 4_000_000) throw new Error("Sandbox input exceeds the supported size.");
   const source = files.filter((file) => language === "c" ? /\.c$/i.test(file.name) : /\.(?:cpp|cc|cxx)$/i.test(file.name));
@@ -29,9 +29,9 @@ export async function runVercelCode(language: string, files: readonly CodeRunSel
   const sandbox = await Sandbox.create({ ...(pythonSnapshot ? { source: { type: "snapshot" as const, snapshotId: pythonSnapshot } } : { image }), persistent: false, resources: { vcpus: 1 }, timeout: 30_000, networkPolicy: "deny-all", signal });
   const stop = () => { void sandbox.stop().catch(() => {}); }; signal.addEventListener("abort", stop, { once: true });
   try {
-    const stage = async (cmd: string, args: string[]) => {
+    const stage = async (cmd: string, args: string[], cwd?: string) => {
       const stdout = createGenericOutputCapture(20_000), stderr = createGenericOutputCapture(20_000);
-      const result = await sandbox.runCommand({ cmd, args, timeoutMs: 8_000, signal, stdout: stdout.stream, stderr: stderr.stream });
+      const result = await sandbox.runCommand({ cmd, args, ...(cwd ? { cwd } : {}), timeoutMs: 8_000, signal, stdout: stdout.stream, stderr: stderr.stream });
       const completion = Promise.all([finished(stdout.stream), finished(stderr.stream)]); stdout.stream.end(); stderr.stream.end(); await completion;
       if (!Number.isSafeInteger(result.exitCode) || result.exitCode < 0) throw new Error("Sandbox command did not report a terminal outcome.");
       const out = stdout.result(), err = stderr.result();
@@ -44,17 +44,21 @@ export async function runVercelCode(language: string, files: readonly CodeRunSel
       const libraries = await stage("python3", ["-I", "-c", "import numpy, pandas, matplotlib, scipy, sklearn"]);
       if (libraries.exitCode !== 0) throw new Error("The configured Python sandbox snapshot does not provide the required scientific libraries.");
     }
-    signal.throwIfAborted(); await sandbox.writeFiles(mapped, { signal });
+    signal.throwIfAborted();
+    const directories = new Set<string>(["/vercel/project", "/vercel/project/data"]);
+    for (const file of files) { const parts = file.name.split("/"); parts.pop(); let current = "/vercel/project"; for (const part of parts) { current += `/${part}`; directories.add(current); } }
+    for (const directory of [...directories].sort((a, b) => a.length - b.length)) await sandbox.mkDir(directory, { signal });
+    await sandbox.writeFiles(mapped, { signal });
     let compileOutput: string | undefined;
     if (language === "c" || language === "c++") {
-      const compile = await stage(language === "c" ? "gcc" : "g++", [...source.map((file) => `./${file.name}`), "-o", "__grade_program"]);
+      const compile = await stage(language === "c" ? "gcc" : "g++", [...source.map((file) => `./${file.name}`), "-o", "__grade_program"], "/vercel/project");
       compileOutput = [compile.stdout, compile.stderr].filter(Boolean).join("\n");
       if (compile.exitCode >= 128) throw new Error("Compiler termination was not confirmed.");
       if (compile.exitCode !== 0) return { language, files: files.map((file) => file.name), ran: false, exitCode: null, stdout: "", stderr: "", compileOutput };
     }
     const command = language === "python" ? "python3" : language === "javascript" ? "node" : "./__grade_program";
     const args = language === "python" || language === "javascript" ? [`./${files[0].name}`] : [];
-    const run = await stage(command, args);
+    const run = await stage(command, args, "/vercel/project");
     if (run.exitCode >= 128) throw new Error("Program termination was not confirmed.");
     const ran = run.exitCode === 0;
     return { language, files: files.map((file) => file.name), ran, exitCode: run.exitCode, stdout: run.stdout, stderr: run.stderr, ...(compileOutput ? { compileOutput } : {}), neededStdin: !ran && isStdinEofFailure(run.stderr, [...files]), stdinReadSuspected: ran && sourceLooksLikeItReadsStdin(language, [...files]) };

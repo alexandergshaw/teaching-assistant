@@ -25,6 +25,7 @@ import {
   type CodeRunSkip,
   type CodeRunSelectionFile,
 } from "./code-run-selection";
+import { restoreRunnerProjectPaths } from "./grade/runner-project-paths";
 
 export { languageForExtension, CODE_RUN_TIMEOUT_MS, CODE_RUN_OUTPUT_CAP_CHARS };
 
@@ -640,7 +641,9 @@ export async function runSubmittedCode(
   if (useVercel) {
     try {
       const { runVercelCode } = await import("./code-runner-vercel");
-      return finalizeCodeRunResult(await runVercelCode(selection.language, selection.runFiles, signal), selection.entryPoint, selection.skipped);
+      const projectFiles = restoreRunnerProjectPaths(selection.runFiles, files);
+      if (!projectFiles) return finalizeCodeRunResult({ language: selection.language, files: selection.runFiles.map(file => file.name), ran: false, exitCode: null, stdout: "", stderr: "", error: "Submission paths could not be safely staged; no code was run." }, selection.entryPoint, selection.skipped);
+      return finalizeCodeRunResult(await runVercelCode(selection.language, projectFiles, signal), selection.entryPoint, selection.skipped);
     } catch (error) {
       const timedOut = isTimeoutError(error) || signal.aborted;
       const configurationFailure = error instanceof Error && ["A digest-pinned prebuilt sandbox image is required.", "The configured sandbox image does not provide the required toolchain.", "A valid Python sandbox snapshot ID is required.", "The configured Python sandbox snapshot does not provide the required scientific libraries."].includes(error.message) ? error.message : null;

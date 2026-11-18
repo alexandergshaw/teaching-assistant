@@ -70,6 +70,37 @@ describe("notebook visual evidence", () => {
     const text = JSON.stringify({ nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "code", source: [], outputs: Array.from({ length: 3 }, () => ({ output_type: "display_data", data: { "image/png": large } })) }] });
     expect((await prepareNotebookVisuals(text, false)).status).toBe("failed");
   });
+  it("losslessly compacts a PNG just over the transport cap", async () => {
+    const pixels = Buffer.alloc(500 * 400 * 3);
+    for (let i = 0; i < pixels.length; i++) pixels[i] = i % 251;
+    const png = await sharp(pixels, { raw: { width: 500, height: 400, channels: 3 } }).png({ compressionLevel: 0 }).toBuffer();
+    expect(png.length).toBeGreaterThan(512 * 1024);
+    const result = await prepareNotebookVisuals(notebook({ "image/png": png.toString("base64") }), false);
+    expect(result.status).toBe("complete"); expect(result.parts[0].mimeType).toBe("image/webp");
+    const actual = await sharp(Buffer.from(result.parts[0].base64, "base64")).removeAlpha().raw().toBuffer();
+    expect(actual.equals(pixels)).toBe(true);
+  });
+  it("preserves alpha in the converted image", async () => {
+    const pixels = Buffer.alloc(500 * 400 * 4);
+    for (let i = 0; i < pixels.length; i += 4) { pixels[i] = 90; pixels[i + 1] = 120; pixels[i + 2] = 180; pixels[i + 3] = 1 + (i / 4) % 255; }
+    const png = await sharp(pixels, { raw: { width: 500, height: 400, channels: 4 } }).png({ compressionLevel: 0 }).toBuffer();
+    const result = await prepareNotebookVisuals(notebook({ "image/png": png.toString("base64") }), false);
+    expect(result.status).toBe("complete"); expect(result.parts[0].mimeType).toBe("image/webp");
+    const actual = await sharp(Buffer.from(result.parts[0].base64, "base64")).ensureAlpha().raw().toBuffer();
+    expect(actual.equals(pixels)).toBe(true);
+  });
+  it("holds high-depth images that need conversion", async () => {
+    const png = await sharp({ create: { width: 500, height: 400, channels: 3, background: "white" } }).toColourspace("rgb16").png({ compressionLevel: 0 }).toBuffer();
+    expect(png.length).toBeGreaterThan(512 * 1024);
+    expect((await sharp(png).metadata()).depth).not.toBe("uchar");
+    expect((await prepareNotebookVisuals(notebook({ "image/png": png.toString("base64") }), false)).status).toBe("failed");
+  });
+  it("holds images with embedded color profiles that need conversion", async () => {
+    const png = await sharp({ create: { width: 500, height: 400, channels: 3, background: "white" } }).withIccProfile("srgb").png({ compressionLevel: 0 }).toBuffer();
+    expect(png.length).toBeGreaterThan(512 * 1024);
+    expect((await sharp(png).metadata()).hasProfile).toBe(true);
+    expect((await prepareNotebookVisuals(notebook({ "image/png": png.toString("base64") }), false)).status).toBe("failed");
+  });
   it("fails closed above the image count limit", async () => {
     const text = JSON.stringify({ nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "code", source: [], outputs: Array.from({ length: 17 }, () => ({ output_type: "display_data", data: { "image/png": image } })) }] });
     expect((await prepareNotebookVisuals(text, false)).status).toBe("failed");

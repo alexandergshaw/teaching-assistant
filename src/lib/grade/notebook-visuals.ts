@@ -72,20 +72,33 @@ export async function prepareNotebookVisuals(text: string, truncated: boolean): 
         if (!rich.length) continue;
         if (rich.length !== 1 || !["image/png", "image/jpeg"].includes(rich[0])) return failed();
         const raw = data[rich[0]];
-        const base64 = Array.isArray(raw) && raw.every(x => typeof x === "string") ? raw.join("") : raw;
-        if (typeof base64 !== "string" || base64.length === 0 || base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64) || base64.length > 4 * Math.ceil(DOCUMENT_PICTURE_BYTE_LIMIT / 3)) return failed();
+        let base64 = Array.isArray(raw) && raw.every(x => typeof x === "string") ? raw.join("") : raw;
+        // A modestly larger PNG can be losslessly encoded below the wire cap.
+        // The enclosing notebook and decoded pixel budgets remain bounded.
+        const sourceLimit = 1_500_000;
+        if (typeof base64 !== "string" || base64.length === 0 || base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64) || base64.length > 4 * Math.ceil(sourceLimit / 3)) return failed();
         const bytes = Buffer.from(base64, "base64");
-        if (bytes.toString("base64") !== base64 || bytes.length > DOCUMENT_PICTURE_BYTE_LIMIT) return failed();
+        if (bytes.toString("base64") !== base64 || bytes.length > sourceLimit || (rich[0] !== "image/png" && bytes.length > DOCUMENT_PICTURE_BYTE_LIMIT)) return failed();
         const valid = rich[0] === "image/png" ? bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) : bytes.length >= 4 && bytes[0] === 255 && bytes[1] === 216 && bytes[bytes.length-2] === 255 && bytes[bytes.length-1] === 217;
         if (!valid) return failed();
         if (result.parts.length >= DOCUMENT_PICTURE_LIMIT) return failed();
         const decoder = sharp(bytes, { limitInputPixels: 16_000_000, failOn: "warning" });
         const info = await decoder.metadata();
-        if (!info.width || !info.height || info.width > 4096 || info.height > 4096 || info.width * info.height > 16_000_000 || decodedBytes + info.width * info.height * 4 > 32_000_000) return failed();
+        if (!info.width || !info.height || info.width > 4096 || info.height > 4096 || info.width * info.height > 16_000_000 || decodedBytes + info.width * info.height * 4 > 40_000_000) return failed();
         const decoded = await decoder.toColourspace("srgb").ensureAlpha().raw().toBuffer();
         decodedBytes += decoded.length;
-        if (decodedBytes > 32_000_000) return failed();
-        result.parts.push({ name: `cell ${cellIndex + 1} output ${outputIndex + 1}`, mimeType: rich[0], base64 });
+        if (decodedBytes > 40_000_000) return failed();
+        let outputMime = rich[0];
+        if (bytes.length > DOCUMENT_PICTURE_BYTE_LIMIT) {
+          if (info.depth !== "uchar" || info.hasProfile || (info.pages ?? 1) !== 1) return failed();
+          const compact = await sharp(bytes, { limitInputPixels: 16_000_000, failOn: "warning" }).webp({ lossless: true, effort: 6 }).toBuffer();
+          if (compact.length > DOCUMENT_PICTURE_BYTE_LIMIT) return failed();
+          const verified = await sharp(compact, { limitInputPixels: 16_000_000, failOn: "warning" }).toColourspace("srgb").ensureAlpha().raw().toBuffer();
+          if (!decoded.equals(verified)) return failed();
+          base64 = compact.toString("base64");
+          outputMime = "image/webp";
+        }
+        result.parts.push({ name: `cell ${cellIndex + 1} output ${outputIndex + 1}`, mimeType: outputMime, base64 });
         result.found++;
         if (result.parts.length > DOCUMENT_PICTURE_LIMIT || Buffer.byteLength(JSON.stringify(result)) > DOCUMENT_VISUAL_BYTE_LIMIT) return failed();
       }

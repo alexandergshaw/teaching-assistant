@@ -38,6 +38,9 @@ import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { resolveInstitutionByCode } from "@/lib/canvas-core";
 import { parseGoogleDriveUrl } from "@/lib/google-drive-url";
 import { fetchGoogleDriveFile } from "@/lib/grade/google-drive-content";
+import { pastedSubmissionUrl } from "@/lib/grade/pasted-submission-url";
+import { isSubmissionFileInventories } from "@/lib/grade/submission-file-inventory";
+import { hasUnreviewedNotebook } from "@/lib/grade/unavailable-evidence";
 import { resolveRunHeader } from "@/lib/grade/run-header";
 import type { GradingRunHeader, StudentSubmissionEntry, SubmissionZipClassification } from "@/lib/grade/types";
 import {
@@ -398,24 +401,38 @@ export async function prepareCompositeSubmissionAction(formData: FormData): Prom
   }
 
   const entries: StudentSubmissionEntry[] = [];
+  let singlePastedLink = false;
   for (let i = 0; i < partCount; i += 1) {
     const partLabel = `Part ${i + 1}`;
-    const outcome = await resolveOnePart(((formData.get(`part.${i}.kind`) as string | null) ?? ""), {
+    const kind = ((formData.get(`part.${i}.kind`) as string | null) ?? "");
+    const content = (formData.get(`part.${i}.content`) as string | null) ?? "";
+    const textUrl = kind === "text" ? pastedSubmissionUrl(content) : undefined;
+    const lines = kind === "text" ? content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) : [];
+    const repositoryLinks = kind === "text" ? [...content.matchAll(/https?:\/\/(?:www\.)?github\.com\/[^\s<>"']+/gi)].filter(([link]) => !("error" in parseSubmissionGithubUrl(link.replace(/[),.;!?]+$/, "")))).length : 0;
+    // One link embedded in prose may be a citation; it stays text. Two
+    // repository links need separate parts to avoid silently grading URLs.
+    if (repositoryLinks > 1 || (!textUrl && lines.length > 1 && lines.every((line) => /^https?:\/\/\S+$/i.test(line)))) return { kind: "refused", reason: `${partLabel} contains multiple links. Add each link as a separate part so its contents can be read. Nothing was queued.`, refusalClass: "read-failed" };
+    if (partCount === 1 && textUrl) singlePastedLink = true;
+    const outcome = await resolveOnePart(textUrl ? "url" : kind, {
       provider,
-      content: (formData.get(`part.${i}.content`) as string | null) ?? "",
+      content,
       label: "Text",
       ordinal: i + 1,
       file: formData.get(`part.${i}.file`) as File | null,
-      url: ((formData.get(`part.${i}.url`) as string | null) ?? "").trim(),
+      url: textUrl ?? ((formData.get(`part.${i}.url`) as string | null) ?? "").trim(),
       labelled: true,
       singleProjectStudent: student,
     });
     const got = extractSingleEntry(outcome, partLabel);
     if (!got.ok) return got.refusalClass ? { kind: "refused", reason: got.reason, refusalClass: got.refusalClass } : { kind: "refused", reason: got.reason };
+    const notebookHold = got.entry.linkFetch === "flagged" && !!got.entry.gradedRepo && !!got.entry.repositoryInventories?.length && isSubmissionFileInventories(got.entry.repositoryInventories) && hasUnreviewedNotebook(got.entry.repositoryInventories);
+    if (got.entry.linkFetch === "failed" || (got.entry.linkFetch === "flagged" && !notebookHold) || got.entry.submissionUrl) return { kind: "refused", reason: `${partLabel} contains a link that could not be read completely. Nothing was queued.`, refusalClass: "read-failed" };
     entries.push(got.entry);
   }
 
-  const merged = mergeCompositeEntries(entries, student);
+  const combined = mergeCompositeEntries(entries, student);
+  const single = entries[0];
+  const merged = singlePastedLink && single.gradedRepo ? { ...combined, gradedRepo: single.gradedRepo, gradedRef: single.gradedRef, linkFetch: single.linkFetch ?? "ok" as const, repoReadNote: single.repoReadNote } : combined;
   const oversized = firstOversizedEntryReason([merged]);
   if (oversized) return { kind: "refused", reason: oversized, refusalClass: "entry-too-large" };
   return compactIntakeOutcome({ kind: "entries", entries: [merged], pointsPossible: null });

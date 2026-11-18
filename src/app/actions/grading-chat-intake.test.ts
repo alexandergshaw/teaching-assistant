@@ -388,6 +388,43 @@ function compositeFormData(student: string, parts: Array<Record<string, string |
 }
 
 describe("prepareCompositeSubmissionAction", () => {
+  it.each([false, true])("resolves a pasted GitHub URL before merging (mixed=%s)", async (mixed) => {
+    mockDetectCanvasUrlKind.mockReturnValue(null);
+    mockFetchGradableRepoContent.mockResolvedValue({ repo: "justinn80/LifeTimeProject", ref: "commit", content: "STRATEGIC OPTIONS COMPARISON", fileCount: 1, truncated: false, files: [{ path: "README.md", text: "Five strategies", truncated: false }] });
+    const parts = [{ kind: "text", content: "https://github.com/justinn80/LifeTimeProject" }, ...(mixed ? [{ kind: "text", content: "Companion notes" }] : [])];
+    const outcome = await prepareCompositeSubmissionAction(compositeFormData("Justin", parts));
+    expect(mockFetchGradableRepoContent).toHaveBeenCalledWith("https://github.com/justinn80/LifeTimeProject");
+    expect(outcome.kind).toBe("entries");
+    if (outcome.kind === "entries") { expect(outcome.entries[0].student).toBe("Justin"); expect(outcome.entries[0].content).toContain("STRATEGIC OPTIONS COMPARISON"); expect(outcome.entries[0].submittedFiles[0].name).toBe("README.md"); if (!mixed) expect(outcome.entries[0]).toMatchObject({ gradedRepo: "justinn80/LifeTimeProject", gradedRef: "commit", linkFetch: "ok" }); }
+  });
+  it.each([{ error: "unreachable" }, { repo: "owner/repo", ref: "commit", content: "partial", fileCount: 1, truncated: true, files: [{ path: "work.py", text: "partial", truncated: true }] }])("refuses a pasted URL if its evidence is unavailable or incomplete", async (result) => {
+    mockDetectCanvasUrlKind.mockReturnValue(null); mockFetchGradableRepoContent.mockResolvedValue(result);
+    const outcome = await prepareCompositeSubmissionAction(compositeFormData("Justin", [{ kind: "text", content: "https://github.com/owner/repo" }]));
+    expect(outcome.kind).toBe("refused");
+  });
+  it("preserves incomplete notebook inventory for the engine's unscored evidence hold", async () => {
+    const inventory = { source: "owner/repo @ commit", scope: { kind: "repository" as const, path: null }, enumerationComplete: true, files: [{ path: "work.ipynb", content: "budget" as const }] };
+    mockDetectCanvasUrlKind.mockReturnValue(null);
+    mockFetchGradableRepoContent.mockResolvedValue({ repo: "owner/repo", ref: "commit", content: "readme", fileCount: 1, truncated: true, files: [{ path: "README.md", text: "readme", truncated: false }], inventory });
+    const outcome = await prepareCompositeSubmissionAction(compositeFormData("Justin", [{ kind: "text", content: "https://github.com/owner/repo" }]));
+    expect(outcome.kind).toBe("entries");
+    if (outcome.kind === "entries") expect(outcome.entries[0].repositoryInventories).toEqual([inventory]);
+  });
+  it("holds multiple bare links while allowing an essay with a citation", async () => {
+    const multiple = await prepareCompositeSubmissionAction(compositeFormData("Ada", [{ kind: "text", content: "https://github.com/a/b\nhttps://github.com/a/c" }]));
+    expect(multiple.kind).toBe("refused");
+    const essay = await prepareCompositeSubmissionAction(compositeFormData("Ada", [{ kind: "text", content: "My discussion cites https://example.com/article for this point." }]));
+    expect(essay.kind).toBe("entries");
+  });
+  it.each(["https://github.com/a/b https://github.com/a/c", "Compare (https://github.com/a/b) and https://github.com/a/c."])("holds multiple GitHub links on one line: %s", async (content) => {
+    const outcome = await prepareCompositeSubmissionAction(compositeFormData("Ada", [{ kind: "text", content }]));
+    expect(outcome).toMatchObject({ kind: "refused", reason: expect.stringContaining("separate part") });
+    expect(mockFetchGradableRepoContent).not.toHaveBeenCalled();
+  });
+  it("keeps one GitHub citation embedded in ordinary prose as text", async () => {
+    const outcome = await prepareCompositeSubmissionAction(compositeFormData("Ada", [{ kind: "text", content: "I referenced https://github.com/a/b in my discussion." }]));
+    expect(outcome.kind).toBe("entries"); expect(mockFetchGradableRepoContent).not.toHaveBeenCalled();
+  });
   it("refuses a composite part when a class archive has oversized students", async () => {
     const large = { ...canvasEntry, student: "Big", content: "x".repeat(ITEM_REQUEST_BYTE_BUDGET + 1) };
     mockIngestZipEntries.mockResolvedValue(ingested([canvasEntry, large]));

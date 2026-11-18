@@ -401,7 +401,8 @@ export async function prepareCompositeSubmissionAction(formData: FormData): Prom
   }
 
   const entries: StudentSubmissionEntry[] = [];
-  let singlePastedLink = false;
+  let singleGithubUrl: string | undefined;
+  let singleResolvedRepo = false;
   for (let i = 0; i < partCount; i += 1) {
     const partLabel = `Part ${i + 1}`;
     const kind = ((formData.get(`part.${i}.kind`) as string | null) ?? "");
@@ -412,14 +413,14 @@ export async function prepareCompositeSubmissionAction(formData: FormData): Prom
     // One link embedded in prose may be a citation; it stays text. Two
     // repository links need separate parts to avoid silently grading URLs.
     if (repositoryLinks > 1 || (!textUrl && lines.length > 1 && lines.every((line) => /^https?:\/\/\S+$/i.test(line)))) return { kind: "refused", reason: `${partLabel} contains multiple links. Add each link as a separate part so its contents can be read. Nothing was queued.`, refusalClass: "read-failed" };
-    if (partCount === 1 && textUrl) singlePastedLink = true;
+    const partUrl = textUrl ?? ((formData.get(`part.${i}.url`) as string | null) ?? "").trim();
     const outcome = await resolveOnePart(textUrl ? "url" : kind, {
       provider,
       content,
       label: "Text",
       ordinal: i + 1,
       file: formData.get(`part.${i}.file`) as File | null,
-      url: textUrl ?? ((formData.get(`part.${i}.url`) as string | null) ?? "").trim(),
+      url: partUrl,
       labelled: true,
       singleProjectStudent: student,
     });
@@ -427,12 +428,19 @@ export async function prepareCompositeSubmissionAction(formData: FormData): Prom
     if (!got.ok) return got.refusalClass ? { kind: "refused", reason: got.reason, refusalClass: got.refusalClass } : { kind: "refused", reason: got.reason };
     const notebookHold = got.entry.linkFetch === "flagged" && !!got.entry.gradedRepo && !!got.entry.repositoryInventories?.length && isSubmissionFileInventories(got.entry.repositoryInventories) && hasUnreviewedNotebook(got.entry.repositoryInventories);
     if (got.entry.linkFetch === "failed" || (got.entry.linkFetch === "flagged" && !notebookHold) || got.entry.submissionUrl) return { kind: "refused", reason: `${partLabel} contains a link that could not be read completely. Nothing was queued.`, refusalClass: "read-failed" };
+    if (partCount === 1 && (textUrl || kind === "url") && got.entry.gradedRepo) singleResolvedRepo = true;
+    if (partCount === 1 && (textUrl || kind === "url") && got.entry.gradedRepo && got.entry.gradedRef && got.entry.repositoryInventories?.length === 1) {
+      try {
+        const url = new URL(partUrl), parsed = parseSubmissionGithubUrl(partUrl), inventory = got.entry.repositoryInventories[0];
+        if (url.protocol === "https:" && /^(?:www\.)?github\.com$/i.test(url.hostname) && !url.username && !url.password && !url.port && !url.search && !url.hash && !url.pathname.includes("%") && !("error" in parsed) && `${parsed.owner}/${parsed.repo}`.toLowerCase() === got.entry.gradedRepo.toLowerCase() && inventory.source === `${got.entry.gradedRepo} @ ${got.entry.gradedRef}` && inventory.scope.kind === (parsed.subpath ? parsed.kind ?? "tree" : "repository") && inventory.scope.path === (parsed.subpath ?? null)) singleGithubUrl = partUrl;
+      } catch { /* Unverified or ambiguous provenance is omitted. */ }
+    }
     entries.push(got.entry);
   }
 
   const combined = mergeCompositeEntries(entries, student);
   const single = entries[0];
-  const merged = singlePastedLink && single.gradedRepo ? { ...combined, gradedRepo: single.gradedRepo, gradedRef: single.gradedRef, linkFetch: single.linkFetch ?? "ok" as const, repoReadNote: single.repoReadNote } : combined;
+  const merged = singleResolvedRepo ? { ...combined, gradedRepo: single.gradedRepo, gradedRef: single.gradedRef, ...(singleGithubUrl ? { submissionUrl: singleGithubUrl } : {}), linkFetch: single.linkFetch ?? "ok" as const, repoReadNote: single.repoReadNote } : combined;
   const oversized = firstOversizedEntryReason([merged]);
   if (oversized) return { kind: "refused", reason: oversized, refusalClass: "entry-too-large" };
   return compactIntakeOutcome({ kind: "entries", entries: [merged], pointsPossible: null });

@@ -388,6 +388,28 @@ function compositeFormData(student: string, parts: Array<Record<string, string |
 }
 
 describe("prepareCompositeSubmissionAction", () => {
+  it.each([
+    { url: "https://github.com/owner/repo", scope: { kind: "repository" as const, path: null } },
+    { url: "https://github.com/owner/repo/tree/main/src", scope: { kind: "tree" as const, path: "src" } },
+    { url: "https://github.com/owner/repo/blob/main/work.ipynb", scope: { kind: "blob" as const, path: "work.ipynb" } },
+  ])("preserves the original verified GitHub submission scope: $url", async ({ url, scope }) => {
+    mockDetectCanvasUrlKind.mockReturnValue(null);
+    mockFetchGradableRepoContent.mockResolvedValue({ repo: "owner/repo", ref: "abc123", content: "source", fileCount: 1, truncated: false, files: [{ path: scope.path ?? "README.md", text: "source", truncated: false }], inventory: { source: "owner/repo @ abc123", scope, enumerationComplete: true, files: [] } });
+    const outcome = await prepareCompositeSubmissionAction(compositeFormData("Ada", [{ kind: "text", content: url }]));
+    expect(outcome.kind).toBe("entries"); if (outcome.kind === "entries") expect(outcome.entries[0]).toMatchObject({ submissionUrl: url, gradedRepo: "owner/repo", gradedRef: "abc123" });
+  });
+  it("does not preserve a widened or mismatched repository scope as the submitted URL", async () => {
+    mockDetectCanvasUrlKind.mockReturnValue(null);
+    mockFetchGradableRepoContent.mockResolvedValue({ repo: "owner/repo", ref: "abc123", content: "source", fileCount: 1, truncated: false, files: [], inventory: { source: "owner/repo @ abc123", scope: { kind: "repository", path: null }, enumerationComplete: true, files: [] } });
+    const outcome = await prepareCompositeSubmissionAction(compositeFormData("Ada", [{ kind: "text", content: "https://github.com/owner/repo/tree/main/src" }]));
+    expect(outcome.kind).toBe("entries"); if (outcome.kind === "entries") expect(outcome.entries[0].submissionUrl).toBeUndefined();
+  });
+  it("does not assign one submission URL to a mixed composite", async () => {
+    mockDetectCanvasUrlKind.mockReturnValue(null);
+    mockFetchGradableRepoContent.mockResolvedValue({ repo: "owner/repo", ref: "abc123", content: "source", fileCount: 1, truncated: false, files: [], inventory: { source: "owner/repo @ abc123", scope: { kind: "repository", path: null }, enumerationComplete: true, files: [] } });
+    const outcome = await prepareCompositeSubmissionAction(compositeFormData("Ada", [{ kind: "text", content: "https://github.com/owner/repo" }, { kind: "text", content: "notes" }]));
+    expect(outcome.kind).toBe("entries"); if (outcome.kind === "entries") expect(outcome.entries[0].submissionUrl).toBeUndefined();
+  });
   it.each([false, true])("resolves a pasted GitHub URL before merging (mixed=%s)", async (mixed) => {
     mockDetectCanvasUrlKind.mockReturnValue(null);
     mockFetchGradableRepoContent.mockResolvedValue({ repo: "justinn80/LifeTimeProject", ref: "commit", content: "STRATEGIC OPTIONS COMPARISON", fileCount: 1, truncated: false, files: [{ path: "README.md", text: "Five strategies", truncated: false }] });

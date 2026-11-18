@@ -11,6 +11,7 @@ import {
 } from "./submission-repo";
 
 describe("parseSubmissionGithubUrl", () => {
+  it.each(["https://github.com/owner/repo/issues/123", "https://github.com/owner/repo/pull/1", "https://github.com/owner/repo/commit/abc", "https://github.com/owner/repo/tree", "https://github.com/owner/repo/blob", "https://github.com/owner/repo/tree/main/src%2Fhidden", "https://github.com/owner/repo/tree/main/src%5Chidden"])("rejects non-submission or ambiguous GitHub URL %s", (url) => expect(parseSubmissionGithubUrl(url)).toHaveProperty("error"));
   it("parses a plain owner/repo URL", () => {
     const result = parseSubmissionGithubUrl("https://github.com/octocat/Hello-World");
     expect(result).toEqual({ owner: "octocat", repo: "Hello-World", ref: undefined, subpath: undefined });

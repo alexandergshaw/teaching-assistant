@@ -89,6 +89,12 @@ export function parseSubmissionGithubUrl(raw: string): ParsedSubmissionRepoUrl |
     return { error: "The GitHub URL has an invalid owner or repository name." };
   }
 
+  // Never reinterpret an issue, pull request, commit, or other GitHub page as
+  // a submission of the entire repository. Tree/blob paths need an explicit
+  // ref, and decoded segments must remain individual safe path components.
+  if (segments.length > 2 && (!["tree", "blob"].includes(segments[2]) || segments.length < 4)) return { error: "Use a repository, tree, or file URL with an explicit ref." };
+  if (segments.slice(2).some((part) => !part || DOT_SEGMENT.test(part) || /[\\/\x00-\x1f\x7f]/.test(part))) return { error: "The GitHub URL contains an invalid path." };
+
   let ref: string | undefined;
   let subpath: string | undefined;
   if (segments.length > 3 && (segments[2] === "tree" || segments[2] === "blob")) {

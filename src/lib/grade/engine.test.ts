@@ -57,6 +57,22 @@ beforeEach(() => {
 });
 
 describe("gradeEntries - compiler auto-run preference", () => {
+  it("holds the supplied reproducibility requirement when only a helper ran", async () => {
+    const file = { name: "work.ipynb", extension: "ipynb", previewContent: JSON.stringify({ nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "code", source: "print(1)", outputs: [] }] }), previewTruncated: false };
+    const codeRun = { language: "python", files: ["helper.py"], ran: true, exitCode: 0, stdout: "ok", stderr: "" };
+    const result = await gradeEntries([entry({ submittedFiles: [file], codeRun })], "Your code must run without errors and produce reproducible results.", "Correctness (120 points)", "gemini", 120, { autoRunCode: false });
+    expect(mockCallLlm).not.toHaveBeenCalled(); expect(result.results[0]).toMatchObject({ totalScore: "", ungraded: { kind: "grading-failed" } });
+  });
+  it("holds unsupported notebook reproducibility claims while retaining static grading", async () => {
+    const file = { name: "work.ipynb", extension: "ipynb", previewContent: JSON.stringify({ nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "code", source: "print(1)", outputs: [] }] }), previewTruncated: false };
+    mockCallLlm.mockResolvedValueOnce({ ok: true, text: JSON.stringify({ overallComment: "The notebook ran successfully and results are reproducible.", rubricResults: [{ area: "Overall", score: "10/10" }] }) });
+    const held = await gradeEntries([entry({ submittedFiles: [file] })], "Review.", "Correctness (10 points)", "gemini", 10, { autoRunCode: false });
+    expect(held.results[0]).toMatchObject({ totalScore: "", ungraded: { kind: "grading-failed" } });
+    expect(JSON.stringify(mockCallLlm.mock.calls[0])).toContain("Notebook execution and reproducibility were not verified");
+    mockCallLlm.mockResolvedValueOnce({ ok: true, text: JSON.stringify({ overallComment: "Your source defines the strategy.", rubricResults: [{ area: "Overall", score: "10/10" }] }) });
+    const staticGrade = await gradeEntries([entry({ submittedFiles: [file] })], "Review.", "Correctness (10 points)", "gemini", 10, { autoRunCode: false });
+    expect(staticGrade.results[0].ungraded).toBeUndefined();
+  });
   it("holds a notebook with a literal CSV missing from its complete repository inventory", async () => {
     const source = "import pandas as pd\ndf = pd.read_csv('data/soc_alert_data.csv')";
     const submittedFiles = [{ name: "work.ipynb", extension: "ipynb", previewContent: JSON.stringify({ nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "code", source, outputs: [] }] }), previewTruncated: false }];

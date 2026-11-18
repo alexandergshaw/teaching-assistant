@@ -14,3 +14,9 @@ it("retains the legacy runner behavior when execution policy is absent", async (
   llm.mockResolvedValue({ ok: true, text: '{"overallComment":"Clear logic.","improvements":"","rubricResults":[{"area":"Algorithm","score":"10/10"}]}' });
   await gradeEntries([entry], "instructions", rubric); expect(runner).toHaveBeenCalledOnce();
 });
+it("holds a strict rubric comment claiming an unobserved notebook run", async () => {
+  const file = { name: "work.ipynb", extension: "ipynb", previewContent: JSON.stringify({ nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: "code", source: "print(1)", outputs: [] }] }), previewTruncated: false };
+  llm.mockResolvedValue({ ok: true, text: JSON.stringify({ overallComment: "Clear logic.", improvements: "", rubricResults: [{ area: "Algorithm", score: { earned: 10, possible: 10 }, comment: "The notebook ran successfully. [evidence:work.ipynb]" }] }) });
+  const run = await gradeEntries([{ ...entry, submittedFiles: [file] }], "instructions", rubric, "gemini", 10, { executionPolicy: "evidence-only", evidenceContext: { criteria: [{ name: "Algorithm", points: 10 }], allowedEvidenceIds: ["work.ipynb"], provenance: "Source only." } });
+  expect(run.results[0]).toMatchObject({ totalScore: "", ungraded: { kind: "grading-failed" } });
+});

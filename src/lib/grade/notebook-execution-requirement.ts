@@ -1,0 +1,6 @@
+/** Detect selected explicit affirmative runtime requirements; wording outside
+ * these patterns remains unknown and must not be treated as proof of absence. */
+export function explicitlyRequiresNotebookExecution(instructions: string, rubric: string): boolean {
+  const text = `${instructions}\n${rubric}`.split(/\r?\n|(?<=[.!?])\s+/).filter((line) => !/\b(?:(?:not|never|no longer)\s+(?:be\s+)?(?:required|necessary|needed|expected)\s+to\s+(?:run|execute|reproduce|restart|verify)|no\s+need\s+to\s+(?:run|execute|reproduce|restart|verify)|(?:do not|don't|never)\s+(?:run|execute|restart|verify|demonstrate|confirm))\b/i.test(line)).join("\n");
+  return /\b(?:must|shall|(?:is|are)\s+required\s+to)\s+(?:be\s+)?(?:run|execute[ds]?)\b|\b(?:run|execute)\s+(?:the|your|each)\s+(?:notebook|program|code)\b|\b(?:run|execute)\s+(?:all|every)\s+(?:notebook\s+)?cells?\b|\b(?:restart|reset)\s+(?:the\s+)?kernel\b[^.!?\n]{0,80}\b(?:run|execute)\b|\b(?:verify|demonstrate|ensure|confirm|establish)\s+(?:the\s+)?reproducibility\b|\b(?:results|outputs|analysis)\s+must\s+be\s+reproducible\b|\b(?:code|notebook|program|implementation)\b[^.!?\n]{0,100}\b(?:runs?|executes?)\s+(?:without errors|successfully|correctly)\b|\b(?:produce|produces|producing|provide|provides)\s+reproducible\s+results\b/i.test(text);
+}

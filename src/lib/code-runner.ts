@@ -619,6 +619,9 @@ export async function runSubmittedCode(
   if (selection.runFiles.length === 0) {
     return null;
   }
+  if (beforeDispatch && selection.language === "python" && process.env.CODE_RUNNER_VERCEL_ENABLED === "true" && process.env.VERCEL === "1" && process.env.CODE_RUNNER_PYTHON_SNAPSHOT?.trim() && !process.env.PISTON_API_URL?.trim() && !process.env.PISTON_API_KEY?.trim()) {
+    return finalizeCodeRunResult({ language: selection.language, files: selection.runFiles.map(file => file.name), ran: false, exitCode: null, stdout: "", stderr: "", error: "The configured Python snapshot cannot be used for coordinated execution; no code was run." }, selection.entryPoint, selection.skipped);
+  }
   if (selection.skipped.some((file) => file.reason === "data-too-large")) {
     return finalizeCodeRunResult({ language: selection.language, files: selection.runFiles.map((file) => file.name), ran: false, exitCode: null, stdout: "", stderr: "", error: "Execution was not attempted because a submitted data file exceeds the runner's input limit." }, selection.entryPoint, selection.skipped);
   }
@@ -640,7 +643,7 @@ export async function runSubmittedCode(
       return finalizeCodeRunResult(await runVercelCode(selection.language, selection.runFiles, signal), selection.entryPoint, selection.skipped);
     } catch (error) {
       const timedOut = isTimeoutError(error) || signal.aborted;
-      const configurationFailure = error instanceof Error && ["A digest-pinned prebuilt sandbox image is required.", "The configured sandbox image does not provide the required toolchain."].includes(error.message) ? error.message : null;
+      const configurationFailure = error instanceof Error && ["A digest-pinned prebuilt sandbox image is required.", "The configured sandbox image does not provide the required toolchain.", "A valid Python sandbox snapshot ID is required.", "The configured Python sandbox snapshot does not provide the required scientific libraries."].includes(error.message) ? error.message : null;
       return finalizeCodeRunResult({ language: selection.language, files: selection.runFiles.map((file) => file.name), ran: false, exitCode: null, stdout: "", stderr: "", error: timedOut ? "Isolated code execution timed out; no execution result was established." : configurationFailure ?? "Isolated code execution is unavailable; no execution result was established.", timedOut }, selection.entryPoint, selection.skipped);
     }
   }

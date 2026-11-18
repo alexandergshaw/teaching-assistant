@@ -21,10 +21,12 @@ export async function runVercelCode(language: string, files: readonly CodeRunSel
   if (bytes > 4_000_000) throw new Error("Sandbox input exceeds the supported size.");
   const source = files.filter((file) => language === "c" ? /\.c$/i.test(file.name) : /\.(?:cpp|cc|cxx)$/i.test(file.name));
   if ((language === "c" || language === "c++") && !source.length) throw new Error("No compilable source file was found.");
+  const pythonSnapshot = language === "python" ? process.env.CODE_RUNNER_PYTHON_SNAPSHOT?.trim() : undefined;
   const image = language === "c" || language === "c++" ? process.env.CODE_RUNNER_SANDBOX_IMAGE?.trim() ?? "" : SCRIPT_IMAGE;
-  if (!/^[a-z0-9][a-z0-9._:/-]{0,255}@sha256:[a-f0-9]{64}$/.test(image)) throw new Error("A digest-pinned prebuilt sandbox image is required.");
+  if (pythonSnapshot && !/^snap_[A-Za-z0-9]{1,128}$/.test(pythonSnapshot)) throw new Error("A valid Python sandbox snapshot ID is required.");
+  if (!pythonSnapshot && !/^[a-z0-9][a-z0-9._:/-]{0,255}@sha256:[a-f0-9]{64}$/.test(image)) throw new Error("A digest-pinned prebuilt sandbox image is required.");
   signal.throwIfAborted();
-  const sandbox = await Sandbox.create({ image, persistent: false, resources: { vcpus: 1 }, timeout: 30_000, networkPolicy: "deny-all", signal });
+  const sandbox = await Sandbox.create({ ...(pythonSnapshot ? { source: { type: "snapshot" as const, snapshotId: pythonSnapshot } } : { image }), persistent: false, resources: { vcpus: 1 }, timeout: 30_000, networkPolicy: "deny-all", signal });
   const stop = () => { void sandbox.stop().catch(() => {}); }; signal.addEventListener("abort", stop, { once: true });
   try {
     const stage = async (cmd: string, args: string[]) => {
@@ -38,6 +40,10 @@ export async function runVercelCode(language: string, files: readonly CodeRunSel
     const tool = language === "c" ? "gcc" : language === "c++" ? "g++" : language === "python" ? "python3" : "node";
     const preflight = await stage(tool, ["--version"]);
     if (preflight.exitCode !== 0) throw new Error("The configured sandbox image does not provide the required toolchain.");
+    if (pythonSnapshot) {
+      const libraries = await stage("python3", ["-I", "-c", "import numpy, pandas, matplotlib, scipy, sklearn"]);
+      if (libraries.exitCode !== 0) throw new Error("The configured Python sandbox snapshot does not provide the required scientific libraries.");
+    }
     signal.throwIfAborted(); await sandbox.writeFiles(mapped, { signal });
     let compileOutput: string | undefined;
     if (language === "c" || language === "c++") {

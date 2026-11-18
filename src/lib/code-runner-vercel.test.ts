@@ -46,6 +46,23 @@ describe("isolated code execution", () => {
       expect(mocks.create).toHaveBeenLastCalledWith(expect.objectContaining({ image: "vercel/sandbox/universal@sha256:9b2669397f26336812ec6835c2f67db6a546074cbabb05db93bf5e669f71ec5d" }));
     }
   });
+  it("preflights a configured scientific Python snapshot before uploading student files", async () => {
+    const snapshotId = "snap_Abc123";
+    vi.stubEnv("CODE_RUNNER_PYTHON_SNAPSHOT", snapshotId);
+    await runVercelCode("python", [{ name: "main.py", content: "import numpy" }], new AbortController().signal);
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ source: { type: "snapshot", snapshotId }, networkPolicy: "deny-all", persistent: false }));
+    expect(mocks.runCommand.mock.calls[1][0]).toMatchObject({ cmd: "python3", args: ["-I", "-c", "import numpy, pandas, matplotlib, scipy, sklearn"] });
+    expect(mocks.runCommand.mock.invocationCallOrder[1]).toBeLessThan(mocks.writeFiles.mock.invocationCallOrder[0]);
+  });
+  it("holds files back when scientific libraries are missing or the snapshot ID is invalid", async () => {
+    vi.stubEnv("CODE_RUNNER_PYTHON_SNAPSHOT", "snap_Abc123");
+    mocks.runCommand.mockResolvedValueOnce({ exitCode: 0 }).mockResolvedValueOnce({ exitCode: 1 });
+    await expect(runVercelCode("python", [{ name: "main.py", content: "import numpy" }], new AbortController().signal)).rejects.toThrow(/scientific libraries/);
+    expect(mocks.writeFiles).not.toHaveBeenCalled();
+    vi.stubEnv("CODE_RUNNER_PYTHON_SNAPSHOT", "snapshot:latest"); mocks.create.mockClear();
+    await expect(runVercelCode("python", [{ name: "main.py", content: "1" }], new AbortController().signal)).rejects.toThrow(/snapshot ID/);
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
   it("holds source bytes back if the configured image lacks its toolchain", async () => {
     mocks.runCommand.mockResolvedValue({ exitCode: 1 });
     await expect(runVercelCode("c++", [{ name: "main.cpp", content: "int main() {}" }], new AbortController().signal)).rejects.toThrow(/toolchain/i);

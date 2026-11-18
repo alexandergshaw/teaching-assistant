@@ -599,6 +599,11 @@ async function gradeStudentEntries(
         ? await runSubmittedCode(submittedFiles, undefined, modelExecution.beforeDispatch)
         : await runSubmittedCode(submittedFiles));
 
+    if (runtimeDependencyUnavailable(codeRun) || codeRun?.error) {
+      results.push(buildEvidenceHeldRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}Code execution was unavailable. No score was assigned; retry after the execution environment is ready.` }, codeRun, submissionTruncated));
+      continue;
+    }
+
     try {
       if (initialTrunc && brightspace.kind === "parsed") throw new GradeCallError("This rubric cannot be safely scored as separate discussion axes. Review manually; no grade was produced.", "model unparseable");
       const result = initialTrunc

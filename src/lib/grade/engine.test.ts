@@ -69,6 +69,13 @@ describe("gradeEntries - compiler auto-run preference", () => {
     expect(run.results[0]).toMatchObject({ totalScore: "", ungraded: { kind: "grading-failed" } });
     expect(run.results[0].strengths).toBe("Thank you for submitting your work.");
   });
+  it("holds a missing numpy runtime without generating a score", async () => {
+    const codeRun = { language: "python", files: ["submission.py"], ran: false, exitCode: 1, stdout: "", stderr: "ModuleNotFoundError: No module named 'numpy'" };
+    const result = await gradeEntries([entry({ codeRun })], "Grade it.", "Correctness (120 points).", "gemini", null, { autoRunCode: false });
+    expect(mockCallLlm).not.toHaveBeenCalled();
+    expect(result.results[0]).toMatchObject({ totalScore: "", strengths: "Thank you for submitting your work.", codeExecution: codeRun, ungraded: { kind: "grading-failed" } });
+    expect(result.results[0].ungraded?.message).toContain("Code execution was unavailable");
+  });
   it("does not expose evaluator-access claims even when the model awards full credit", async () => {
     mockCallLlm.mockResolvedValueOnce({ ok: true, text: JSON.stringify({ overallComment: "The notebook itself and the data/ directory were not fully visible in the scope for evaluation", rubricResults: [{ area: "Correctness", score: "10/10" }], totalScore: "10/10" }) });
     const run = await gradeEntries([entry()], "Grade it.", "Correctness (10 points).", "gemini", null, { autoRunCode: false });

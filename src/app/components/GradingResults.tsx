@@ -3,6 +3,7 @@
 import type { ReactNode, Ref } from "react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import Button from "@mui/material/Button";
+import Alert from "@mui/material/Alert";
 import { Table, TableHead, TableBody, TableRow, TableCell } from "@mui/material";
 import TextField from "@mui/material/TextField";
 import { postCanvasGradesAction, runSubmissionCodeAction } from "../actions";
@@ -12,6 +13,7 @@ import { codeRunDisplay } from "@/lib/code-run-display";
 import Typography from "@mui/material/Typography";
 import { ModalShell } from "./ui/ModalShell";
 import { RowFeedbackBoxes } from "./grading-results/RowFeedbackBoxes";
+import { instructorHoldReason } from "./grading-results/instructorHoldReason";
 import SubmittedFilesPanel from "./grading-results/SubmittedFilesPanel";
 import { FilesCell } from "./grading-results/FilesCell";
 import { RegradeButton } from "./grading-results/RegradeButton";
@@ -710,6 +712,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                       speedGraderHref={sgHref}
                       unresolved={unresolvedStudents?.has(result.student) ?? false}
                     />
+                    {result.ungraded?.kind === "grading-failed" && <Alert severity="warning" sx={{ mt: 1 }}>Instructor review: {instructorHoldReason(result.ungraded.message)}</Alert>}
                     {versionedResult && <VersionedResultDetails row={versionedResult} displayCriteria={JSON.stringify(versionedResult.areas) !== JSON.stringify(result.rubricAreas)} />}
                     <IncompleteEvidenceReview row={result} reviewed={reviewedEvidence.has(result)} onChange={(value) => setEvidenceReview((previous) => { const next = new Set(previous.run === run ? previous.rows : []); if (value) next.add(result); else next.delete(result); return { run, rows: next }; })} />
                     {canPostRow && (

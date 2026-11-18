@@ -63,6 +63,7 @@ describe("gradeEntries - compiler auto-run preference", () => {
     const repositoryInventories = [{ source: "owner/repo", scope: { kind: "repository" as const, path: null }, enumerationComplete: true, files: [{ path: "work.ipynb", content: "read" as const }] }];
     const result = await gradeEntries([entry({ submittedFiles, repositoryInventories })], "Review the work.", "Correctness (10 points)", "gemini", 10, { autoRunCode: false });
     expect(mockCallLlm).not.toHaveBeenCalled(); expect(result.results[0]).toMatchObject({ totalScore: "", ungraded: { kind: "grading-failed", message: expect.stringContaining("data/soc_alert_data.csv") } });
+    expect(result.results[0].feedback).not.toContain("data/soc_alert_data.csv");
   });
   it("holds a missing sandbox data directory before the model can award a score", async () => {
     const codeRun = { language: "python", files: ["generate_data.py"], ran: false, exitCode: 1, stdout: "", stderr: "OSError: Cannot save file into a non-existent directory: '/data'" };

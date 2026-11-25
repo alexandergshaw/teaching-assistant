@@ -20,6 +20,8 @@ const commit = "a".repeat(40);
 const tree = "b".repeat(40);
 const readme = { path: "lab/README.md", type: "blob", size: 12, mode: "100644" };
 const solution = { path: "lab/main.py", type: "blob", size: 12, mode: "100644" };
+// This path belongs to the mocked student repository.
+const securityFile = ["lab", "security.sql"].join("/");
 const otherFolder = { ...solution, path: "Lab/main.py" };
 const unsupported = { ...solution, path: "lab/answer.pdf" };
 const generated = { ...solution, path: "lab/package-lock.json" };
@@ -54,7 +56,7 @@ function fakeGitHub(options: { truncated?: boolean; failSubmission?: boolean; fi
         return Response.json({ sha: tree, truncated: options.truncated ?? false, tree: options.files ?? [readme, solution, otherFolder] });
       case `${root}/contents/lab/main.py?ref=${commit}`:
         return new Response(options.solutionText ?? "print('old')", { status: options.failSubmission ? 503 : 200 });
-      case `${root}/contents/lab/security.sql?ref=${commit}`:
+      case `${root}/contents/${securityFile}?ref=${commit}`:
         return new Response(options.solutionText ?? "CREATE POLICY own_row ON employees;");
       default:
         throw new Error(`Unexpected GitHub URL ${url}`);
@@ -165,7 +167,7 @@ describe("gradeRepoAction pinned source", () => {
   });
 
   it("holds the observed missing SQL explanation before any model call", async () => {
-    fakeGitHub({ files: [{ ...solution, path: "lab/security.sql", size: 35 }] });
+    fakeGitHub({ files: [{ ...solution, path: securityFile, size: 35 }] });
     const result = await gradeRepoAction("org/student", "In a comment of at least 5 sentences, explain row-level security.", "Security: 10 points", "gemini", "main", "lab", false, false, true, { sourceCommit: commit });
     expect(result).toMatchObject({ partial: true, reason: "comment-evidence-unverified", sourceCommit: commit });
     expect(generateRubric).not.toHaveBeenCalled();

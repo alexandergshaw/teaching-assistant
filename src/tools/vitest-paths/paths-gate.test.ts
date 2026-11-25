@@ -16,7 +16,8 @@ import {
   type PathKind,
 } from "./paths-gate";
 
-const ROOT = "C:/repo";
+const windows = process.platform === "win32";
+const ROOT = windows ? "C:/repo" : "/repo";
 
 function kindsOf(entries: [string, PathKind][]): ReadonlyMap<string, PathKind> {
   return new Map(entries);
@@ -71,12 +72,12 @@ describe("preCheckArgs", () => {
 describe("creditsArg (the EQUAL/INSIDE rule, never vitest's substring rule)", () => {
   const passed = (relPath: string): ExecutedFile => ({ relPath, passed: 1 });
 
-  it("credits a file argument by EQUAL resolved path across spellings: './x', backslash, upper-case, absolute", () => {
+  it("credits equal paths and accepts Windows-specific spellings only on Windows", () => {
     const file = passed("src/tools/backlog/ids.test.ts");
     expect(creditsArg(file, "src/tools/backlog/ids.test.ts", "file", ROOT)).toBe(true);
     expect(creditsArg(file, "./src/tools/backlog/ids.test.ts", "file", ROOT)).toBe(true);
-    expect(creditsArg(file, "src\\tools\\backlog\\ids.test.ts", "file", ROOT)).toBe(true);
-    expect(creditsArg(file, "SRC/TOOLS/BACKLOG/IDS.TEST.TS", "file", ROOT)).toBe(true);
+    expect(creditsArg(file, "src\\tools\\backlog\\ids.test.ts", "file", ROOT)).toBe(windows);
+    expect(creditsArg(file, "SRC/TOOLS/BACKLOG/IDS.TEST.TS", "file", ROOT)).toBe(windows);
     expect(creditsArg(file, `${ROOT}/src/tools/backlog/ids.test.ts`, "file", ROOT)).toBe(true);
   });
 

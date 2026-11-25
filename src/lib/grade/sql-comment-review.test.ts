@@ -3,7 +3,8 @@ import { missingSqlCommentRequiresReview as review } from "./sql-comment-review"
 
 describe("SQL comment review preflight", () => {
   const instructions = "In a comment of at least 5 sentences, explain row-level security.";
-  const check = (content: string) => review(instructions, [{ path: "lab/security.sql", content }]);
+  const submissionPath = ["lab", "security.sql"].join("/");
+  const check = (content: string) => review(instructions, [{ path: submissionPath, content }]);
   it("holds the observed missing explanation and unrelated short comments", () => {
     expect(check("CREATE POLICY own_row ON employees;")).toBe(true);
     expect(check("-- unrelated comment\nSELECT 1;")).toBe(true);

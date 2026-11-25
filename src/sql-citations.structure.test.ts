@@ -52,7 +52,7 @@ interface Citation {
 
 /** A directory-qualified `.sql` candidate: contains a "/" and ends (ignoring
  * trailing punctuation/quotes) in ".sql", found on a line with no "://". */
-const CANDIDATE_PATTERN = /[A-Za-z0-9_./-]*\/[A-Za-z0-9_.-]+\.sql/g;
+const CANDIDATE_PATTERN = /[A-Za-z0-9_./-]*\/[A-Za-z0-9_.-]+\.sql(?![A-Za-z0-9_-])/g;
 
 function findCitations(files: string[]): Citation[] {
   const out: Citation[] = [];
@@ -95,6 +95,13 @@ describe("every directory-qualified .sql citation in src/**/*.{ts,tsx} resolves 
   it("exclusion check: a bare migration filename with no directory is not treated as a candidate", () => {
     const bareExample = "See 20261008000000_scheduled_releases.sql for the shape.";
     expect(bareExample.match(CANDIDATE_PATTERN)).toBeNull();
+  });
+
+  it("requires the SQL extension to end at a filename boundary", () => {
+    const sqliteFile = ".vs/slnx.sqlite";
+    expect(sqliteFile.match(CANDIDATE_PATTERN)).toBeNull();
+    const migration = "supabase/migrations/20261026000000_accessibility_scans.sql";
+    expect(`${migration}.`.match(CANDIDATE_PATTERN)).toEqual([migration]);
   });
 
   it("exclusion check: a URL fragment on its own line is skipped entirely", () => {

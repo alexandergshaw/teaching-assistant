@@ -32,10 +32,15 @@ describe("the ingest route", () => {
   });
   it("binds the .zip extension as well as the segment (O-10) and forwards the ledger counts", () => {
     expect(src).toMatch(/\.zip\$\/i\.test\(storagePath\)/);
-    expect(src).toMatch(/buildIngestLines\([^)]*videoOutcomes/);
+    expect(src).toMatch(/buildIngestLines\(preparedEntries, failedSupportedFiles, undefined, classification, videoOutcomes\)/);
   });
   it("removes staged videos on every non-success outcome", () => {
-    expect((src.match(/await discardStaged\(\)/g) ?? []).length).toBe(3);
+    expect(src).toMatch(/if \(outcome\.kind === "timedout"\) \{\s*downloadAbort\.abort\(\);\s*await discardStaged\(\)/);
+    expect(src).toMatch(/if \(outcome\.kind === "failed"\) \{\s*await discardStaged\(\)/);
+    expect(src).toMatch(/if \(!outcome\.value\.ok\) \{\s*await discardStaged\(\)/);
+    expect(src).toMatch(/if \(failedSupportedFiles\.length > 0\) \{\s*await discardStaged\(\)/);
+    expect(src).toMatch(/if \(staticStudents && [^\n]+\) \{\s*await discardStaged\(\)/);
+    expect((src.match(/await discardStaged\(\)/g) ?? []).length).toBe(5);
   });
 });
 

@@ -38,6 +38,6 @@ describe("buildIngestLines with VIDEO_GRADING_ENABLED on", () => {
 
   it("still skips (named) an oversized entry", () => {
     const lines = buildIngestLines([videoOnly()], [], 1);
-    expect(lines[0]).toMatchObject({ type: "skip", student: "Vic" });
+    expect(lines[0]).toMatchObject({ type: "skip", student: "Vic (item 1)" });
   });
 });

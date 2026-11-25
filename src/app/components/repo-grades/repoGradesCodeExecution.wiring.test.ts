@@ -7,9 +7,10 @@
 //      gated behind an explicit, off-by-default instructor control.
 //   2. "there should also be a button ... that can kick off the interpreter/
 //      compiler for any specified file(s) in a student's folder" - Task A: a
-//      per-cell Run control in RepoGradeCellControl.tsx, reusing
-//      runSubmissionCodeAction (the SAME server action the results page's
-//      own Run buttons already call).
+//      per-cell Run control in RepoGradeCellControl.tsx originally reused
+//      runSubmissionCodeAction. The current gradebook uses the persistent
+//      grading queue and shows execution evidence from its saved attempt.
+//      The tests cover the legacy control separately from the live path.
 //
 // vitest in this codebase is node-env and collects only src/**/*.test.ts, so
 // none of RepoGradeCellControl.tsx / RepoGradesControls.tsx / RepoGradesGrid.tsx
@@ -35,6 +36,8 @@ const cellControlSource = read(`${REPO_GRADES}/RepoGradeCellControl.tsx`);
 const controlsSource = read(`${REPO_GRADES}/RepoGradesControls.tsx`);
 const gridSource = read(`${REPO_GRADES}/RepoGradesGrid.tsx`);
 const indexSource = read(`${REPO_GRADES}/index.tsx`);
+const targetActionsSource = read(`${REPO_GRADES}/RepoTargetGradeActions.tsx`);
+const dashboardSource = read(`${REPO_GRADES}/RepoGradesDashboard.tsx`);
 const uiStateSource = read(`${REPO_GRADES}/repoGradesUiState.ts`);
 const gradingActionsSource = read(`${REPO_GRADES}/useRepoGradesGradingActions.ts`);
 const bulkGradeSource = read(`${REPO_GRADES}/useRepoGradesBulkGrade.ts`);
@@ -272,9 +275,21 @@ describe("RepoGradeCellControl.tsx renders a Run control reusing runSubmissionCo
     expect(cellControlSource).not.toMatch(/setRepoGradeCellEdit\([^)]*manualRun/);
   });
 
-  it("RepoGradeCellControl (and therefore its Run control) is actually rendered by RepoGradesGrid.tsx, which index.tsx renders for the current course's model - the reachability chain a Run button ships dead through if broken anywhere along it", () => {
-    expect(gridSource).toContain("<RepoGradeCellControl");
-    expect(indexSource).toContain("<RepoGradesGrid");
+  it("the live gradebook dispatches the exact cell to the guarded persistent worker from an explicit click", () => {
+    const grid = stripJsComments(gridSource);
+    const index = stripJsComments(indexSource);
+    const target = stripJsComments(targetActionsSource);
+    expect(grid).not.toContain("<RepoGradeCellControl");
+    expect(grid).not.toContain("runSubmissionCodeAction");
+    expect(grid).toMatch(/<RepoTargetGradeActions[\s\S]*?available=\{durableGradeAvailable\} pending=\{durableGradePending\} root=\{!folder\}\s*onStart=\{\(\) => onGradeTarget\(repo.name, folder\)\}/);
+    expect(index).toMatch(/<RepoGradesGrid[\s\S]*?onGradeTarget=\{\(repo, folder\) => \{ void startSavedGrade\(folder, repo\); \}\}/);
+    expect(index).toMatch(/const startSavedGrade = async \(folder: string, repo: string \| null\) => \{\s*if \(!ownerId \|\| !selectedCourseId \|\| !targetedGrading \|\| !targetRequests.ready\)/);
+    expect(index).toContain("await targetedGrading.startTargeted(selectedCourseId, folder, repo)");
+    expect(target).toMatch(/<MenuItem key="grade" disabled=\{root \|\| !available \|\| pending\} onClick=\{\(\) => \{ close\(\); onStart\(\); \}\}/);
+
+    expect(grid).toMatch(/<RepoGradeResultDetails courseId=\{targetCourseId\} repo=\{repo\} folder=\{folder\}/);
+    expect(dashboardSource).toMatch(/\{draft\?\.module12_evidence &&\s*<FeedbackDisclosure compact title="Execution observations"/);
+    expect(dashboardSource).toContain("draft.module12_evidence.sourceReceipts.map");
   });
 });
 

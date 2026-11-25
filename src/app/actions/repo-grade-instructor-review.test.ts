@@ -1,12 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const { owner, rpc, retry } = vi.hoisted(() => ({ owner: vi.fn(), rpc: vi.fn(), retry: vi.fn() }));
-vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: owner }));
-vi.mock("@/lib/supabase/server", () => ({ createServiceClient: () => ({ rpc }) }));
+import { actionAuthClient, actionAuthUser } from "./action-auth.fixtures";
+const { readIdentity, rpc, retry } = vi.hoisted(() => ({ readIdentity: vi.fn(), rpc: vi.fn(), retry: vi.fn() }));
+vi.mock("@/lib/supabase/server", () => ({ createClient: () => actionAuthClient(readIdentity), createServiceClient: () => ({ rpc }) }));
+vi.mock("@/lib/supabase/app-users", async (original) => ({
+  ...await original<typeof import("@/lib/supabase/app-users")>(),
+  getAppUser: async (id: string) => actionAuthUser(id, "owner"),
+}));
 import { instructorReviewAction, instructorReviewEligibilityAction, latestInstructorReviewAction } from "./repo-grade-instructor-review";
 const base = { courseId: "course", accountId: "owner", generation: 7, sourceSha: "a".repeat(40) };
 const criteria = ["one", "two", "three", "four"].map(area => ({ area, score: 18.75, note: "Evidence" }));
 describe("instructor review action", () => {
-  beforeEach(() => { vi.clearAllMocks(); owner.mockResolvedValue({ id: "owner" }); retry.mockResolvedValue({ data: true, error: null }); rpc.mockReturnValue({ retry }); });
+  beforeEach(() => { vi.clearAllMocks(); readIdentity.mockResolvedValue({ id: "owner" }); retry.mockResolvedValue({ data: true, error: null }); rpc.mockReturnValue({ retry }); });
   it("uses the authenticated owner, expected revision, and no automatic retry", async () => {
     expect(await instructorReviewAction({ ...base, criteria, feedback: "Reviewed", expectedReviewId: 9 })).toBe(true);
     expect(rpc).toHaveBeenCalledWith("repo_grade_save_instructor_review", expect.objectContaining({ p_user_id: "owner", p_expected_review_id: 9, p_source_sha: base.sourceSha }));

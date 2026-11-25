@@ -61,9 +61,11 @@ describe("single-snap wiring", () => {
     expect(capture).toContain('operation: "capture_screenshot"');
   });
 
-  it("the composer routes the snap through the same addParts tray as Record", () => {
-    expect(composer).toContain("capture.snapOnce()");
-    expect(composer).toMatch(/useChatScreenFrameCapture\(\(files\) =>\s*addParts\(/);
+  it("the composer appends snapped and recorded frames to the same composite tray", () => {
+    expect(composer).toContain("onClick={() => void capture.snapOnce()}");
+    expect(composer).toContain("onClick={capture.stop}");
+    expect(capture).toContain("onFramesRef.current(frames.map((base64, i) => frameToImageFile(base64, i + 1)))");
+    expect(composer).toMatch(/const capture = useChatScreenFrameCapture\(\(files\) => \{\s*captureRevision\.current \+= 1;\s*setParts\(\(previous\) => \[\.\.\.previous, \.\.\.files\.map\(\(file\): CompositePartInput => \(\{ kind: "file", file \}\)\)\]\);\s*\}\);/);
   });
 });
 

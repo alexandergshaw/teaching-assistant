@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ requireUser: vi.fn(), createServiceClient: vi.fn() }));
-vi.mock("@/lib/supabase/auth", () => ({ requireUser: mocks.requireUser }));
-vi.mock("@/lib/supabase/server", () => ({ createServiceClient: mocks.createServiceClient }));
+import { actionAuthClient, actionAuthUser } from "./action-auth.fixtures";
+const mocks = vi.hoisted(() => ({ readIdentity: vi.fn(), createServiceClient: vi.fn() }));
+vi.mock("@/lib/supabase/server", () => ({ createClient: () => actionAuthClient(mocks.readIdentity), createServiceClient: mocks.createServiceClient }));
+vi.mock("@/lib/supabase/app-users", async (original) => ({
+  ...await original<typeof import("@/lib/supabase/app-users")>(),
+  getAppUser: async (id: string) => actionAuthUser(id, "instructor"),
+}));
 import { listDiscussionRostersAction } from "./discussion-rosters";
 
 function client(data: unknown, error: unknown = null) {
@@ -13,7 +17,7 @@ function client(data: unknown, error: unknown = null) {
 }
 
 describe("discussion roster actions", () => {
-  beforeEach(() => { vi.clearAllMocks(); mocks.requireUser.mockResolvedValue({ id: "owner-a" }); });
+  beforeEach(() => { vi.clearAllMocks(); mocks.readIdentity.mockResolvedValue({ id: "owner-a" }); });
   it("scopes reads to the authenticated owner and surfaces database errors", async () => {
     const q = client([{ id: "course-1", name: "Course", roster: "Ada", course_code: "CS1", term: "Fall", institution: "College" }]);
     expect(await listDiscussionRostersAction()).toEqual({ rosters: [{ id: "course-1", name: "Course", roster: "Ada", courseCode: "CS1", term: "Fall", institution: "College" }] });
@@ -21,7 +25,7 @@ describe("discussion roster actions", () => {
     client(null, { message: "unavailable" }); expect(await listDiscussionRostersAction()).toHaveProperty("error");
   });
   it("does not touch storage on failed authentication", async () => {
-    mocks.requireUser.mockRejectedValueOnce(new Error("no auth"));
+    mocks.readIdentity.mockResolvedValueOnce(null);
     expect(await listDiscussionRostersAction()).toHaveProperty("error");
     expect(mocks.createServiceClient).not.toHaveBeenCalled();
   });

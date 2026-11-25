@@ -46,7 +46,9 @@ export async function prepareRepositoryProposal(request: RepositoryProposeReques
   if (entry.content.length > getGeminiMaxCharsPerSubmission() || estimateNeededWireBytes(entry) > ITEM_REQUEST_BYTE_BUDGET || wireBytes({ ...request.base, entry }) > ITEM_REQUEST_BYTE_BUDGET) throw new Error("Combined original and repository evidence exceeds the input budget.");
   const evidenceIds = [...entry.submittedFiles.map((file) => file.name)];
   const snapshotDigest = repositoryDigest(JSON.stringify(result.evidence.map((item) => item.manifest.digest)));
-  return { entry, evidence: result.evidence, criteria: audit.criteria, evidenceIds, snapshotDigest };
+  // The assembler inserts this inventory after the baseline's real repository inventories.
+  const retainedUploads = entry.repositoryInventories?.[request.base.entry.repositoryInventories?.length ?? 0];
+  return { entry, evidence: result.evidence, criteria: audit.criteria, evidenceIds, snapshotDigest, retainedUploads };
 }
 const publicResult = (result: GradeResult): GradeResult => ({ ...structuredClone(result), submittedFiles: [] });
 export function validateRepositoryCandidate(proposal: RepositoryGradeProposal, criteria: readonly RubricCriterion[], evidenceIds: readonly string[]): void {
@@ -61,7 +63,7 @@ export function validateRepositoryCandidate(proposal: RepositoryGradeProposal, c
 export async function proposeRepositoryGrade(request: RepositoryProposeRequest, deadline: number): Promise<RepositoryProposeResponse> {
   const frozen = freezeRepositorySnapshot(request);
   const prepared = await prepareRepositoryProposal(frozen, deadline);
-  const run = await gradeEntries([prepared.entry], frozen.base.assignmentInstructions, frozen.base.rubric, "gemini", frozen.base.pointsPossible, { ...frozen.base, executionPolicy: "evidence-only", deadlineMs: deadline, modelCallOptions: repositoryModelOptions(deadline), evidenceContext: { criteria: prepared.criteria, allowedEvidenceIds: prepared.evidenceIds, provenance: repositoryEvidenceInstructions(prepared.evidence) } });
+  const run = await gradeEntries([prepared.entry], frozen.base.assignmentInstructions, frozen.base.rubric, "gemini", frozen.base.pointsPossible, { ...frozen.base, executionPolicy: "evidence-only", deadlineMs: deadline, modelCallOptions: repositoryModelOptions(deadline), evidenceContext: { criteria: prepared.criteria, allowedEvidenceIds: prepared.evidenceIds, provenance: repositoryEvidenceInstructions(prepared.evidence), retainedUploads: prepared.retainedUploads } });
   if (Date.now() >= deadline) throw new Error("Proposal deadline expired.");
   const proposed = run.results[0];
   if (!proposed || proposed.ungraded || proposed.codeExecution) throw new Error("Repository proposal was incomplete.");

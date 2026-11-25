@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { actionAuthClient, actionAuthUser } from "./action-auth.fixtures";
 import JSZip from "jszip";
-vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn(async () => ({ id: "owner" })), requireUser: vi.fn() }));
+vi.mock("@/lib/supabase/server", () => ({ createClient: () => actionAuthClient(() => ({ id: "owner" })) }));
+vi.mock("@/lib/supabase/app-users", async (original) => ({
+  ...await original<typeof import("@/lib/supabase/app-users")>(),
+  getAppUser: async (id: string) => actionAuthUser(id, "owner"),
+}));
 vi.mock("@/lib/canvas", async (original) => ({ ...(await original<typeof import("@/lib/canvas")>()), fetchCanvasWork: vi.fn(), fetchSubmissionDetail: vi.fn(), fetchCanvasMeta: vi.fn(async () => ({ description: "instructions", rubricText: "rubric", linkedFileIds: [] })), canvasWorkToZipBase64: vi.fn(), fetchAssignmentPointsPossible: vi.fn(async () => 10), getSpeedGraderUrl: vi.fn(async () => null) }));
 vi.mock("@/lib/grade", async (original) => ({ ...(await original<typeof import("@/lib/grade")>()), gradeEntries: vi.fn(), gradeCanvasUrl: vi.fn(), synthesizeFullCreditChecklist: vi.fn(), generateSampleAnswer: vi.fn() }));
 vi.mock("@/lib/grading-engine", async (original) => ({ ...(await original<typeof import("@/lib/grading-engine")>()), gradeViaGradingEngine: vi.fn() }));

@@ -37,8 +37,9 @@ describe("Wave B display-only: grid-internal split", () => {
     expect(props).toMatch(/\bgradebookRows,/);
   });
 
-  it("the table body maps gradebookRows (the query reaches the body)", () => {
-    expect(GRID).toMatch(/<TableBody[^>]*>\s*\{\s*gradebookRows\.map\(/);
+  it("the table body renders the search-filtered gradebook rows after expanding grouped repositories", () => {
+    expect(GRID).toMatch(/const displayedRows = gradebookRows\.flatMap\(\(student\) => student\.repos\.length\s*\? student\.repos\.map/);
+    expect(GRID).toMatch(/<TableBody[^>]*>\s*\{\s*displayedRows\.map\(/);
   });
 
   it("the column header keeps the query-free rows and never reads bodyRows", () => {

@@ -1,14 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { actionAuthClient, actionAuthUser } from "./action-auth.fixtures";
 import { readRepoGradeAutomaticBlocksAction } from "./repo-grade-automatic-blocks";
 
 const mocks = vi.hoisted(() => ({
-  requireAppOwner: vi.fn(),
+  readIdentity: vi.fn(),
   from: vi.fn(),
   rpc: vi.fn(),
 }));
 vi.mock("@/lib/repo-grades-dashboard/admission-mode", () => ({ repoGradeDurableStartupAvailable: () => true }));
-vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: mocks.requireAppOwner }));
-vi.mock("@/lib/supabase/server", () => ({ createServiceClient: () => ({ from: mocks.from, rpc: mocks.rpc }) }));
+vi.mock("@/lib/supabase/server", () => ({ createClient: () => actionAuthClient(mocks.readIdentity), createServiceClient: () => ({ from: mocks.from, rpc: mocks.rpc }) }));
+vi.mock("@/lib/supabase/app-users", async (original) => ({
+  ...await original<typeof import("@/lib/supabase/app-users")>(),
+  getAppUser: async (id: string) => actionAuthUser(id, "owner"),
+}));
 
 const owner = "00000000-0000-0000-0000-000000000001";
 const course = "00000000-0000-0000-0000-000000000002";
@@ -36,7 +40,7 @@ function query(result: unknown) {
 describe("automatic gradebook blockers", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    mocks.requireAppOwner.mockResolvedValue({ id: owner });
+    mocks.readIdentity.mockResolvedValue({ id: owner });
     mocks.rpc.mockReturnValue({ retry: vi.fn().mockResolvedValue({ data: { total: 0, targets: [] }, error: null }) });
   });
 

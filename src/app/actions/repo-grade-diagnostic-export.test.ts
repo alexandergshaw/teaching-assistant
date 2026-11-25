@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ owner: vi.fn(), from: vi.fn() }));
-vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: mocks.owner }));
-vi.mock("@/lib/supabase/server", () => ({ createServiceClient: () => ({ from: mocks.from }) }));
+import { actionAuthClient, actionAuthUser } from "./action-auth.fixtures";
+const mocks = vi.hoisted(() => ({ readIdentity: vi.fn(), from: vi.fn() }));
+vi.mock("@/lib/supabase/server", () => ({ createClient: () => actionAuthClient(mocks.readIdentity), createServiceClient: () => ({ from: mocks.from }) }));
+vi.mock("@/lib/supabase/app-users", async (original) => ({
+  ...await original<typeof import("@/lib/supabase/app-users")>(),
+  getAppUser: async (id: string) => actionAuthUser(id, "owner"),
+}));
 import { readRepoGradeDiagnosticTargetsAction } from "./repo-grade-diagnostic-export";
 
 function query(resolve: (filter: string, start: number, end: number) => unknown) {
@@ -15,7 +19,7 @@ function query(resolve: (filter: string, start: number, end: number) => unknown)
 }
 const run = (id: string, phase = "complete") => ({ id, created_at: "2026-11-09T00:00:00Z", phase, repo_grade_automatic_courses: [{ state: "scanned" }] });
 describe("repository diagnostic export", () => {
-  beforeEach(() => { vi.clearAllMocks(); mocks.owner.mockResolvedValue({ id: "owner" }); });
+  beforeEach(() => { vi.clearAllMocks(); mocks.readIdentity.mockResolvedValue({ id: "owner" }); });
   it("exports every state across distinct runs with validated links and fixed reasons", async () => {
     mocks.from.mockImplementation((table: string) => table === "repo_grade_automatic_runs"
       ? query(() => ({ data: [run("a"), run("b", "incomplete")], count: 2, error: null }))
@@ -26,7 +30,7 @@ describe("repository diagnostic export", () => {
   });
   it("refuses a mismatched or missing owner before reading", async () => {
     expect((await readRepoGradeDiagnosticTargetsAction("other")).status).toBe("unavailable");
-    mocks.owner.mockRejectedValueOnce(new Error("auth"));
+    mocks.readIdentity.mockResolvedValueOnce(null);
     expect((await readRepoGradeDiagnosticTargetsAction("owner")).status).toBe("unavailable");
     expect(mocks.from).not.toHaveBeenCalled();
   });

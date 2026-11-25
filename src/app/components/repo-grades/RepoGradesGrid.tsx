@@ -692,7 +692,7 @@ function RepoGradebookIdentity({ repo, row, linked, selectedFolder, selected, on
         ) : row.repo}
       </div>
       {row.folderError && <div className={pageStyles.error}>{row.folderError}</div>}
-
+      {!linked && <span className={dashboardStyles.matrixMeta}>Unlinked repository</span>}
     </div>
   );
 }

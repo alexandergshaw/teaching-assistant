@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn(async () => ({ id: "owner" })) }));
+import { actionAuthClient, actionAuthUser } from "./action-auth.fixtures";
+vi.mock("@/lib/supabase/server", () => ({ createClient: () => actionAuthClient(() => ({ id: "owner" })) }));
+vi.mock("@/lib/supabase/app-users", async (original) => ({
+  ...await original<typeof import("@/lib/supabase/app-users")>(),
+  getAppUser: async (id: string) => actionAuthUser(id, "owner"),
+}));
 vi.mock("@/lib/grade/repo-content", () => ({ fetchGradableRepoContent: vi.fn() }));
 vi.mock("@/lib/code-runner", () => ({ runSubmittedCode: vi.fn(async () => null) }));
 vi.mock("@/lib/llm", async (original) => ({ ...await original<object>(), callLlm: vi.fn() }));

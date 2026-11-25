@@ -102,10 +102,12 @@ describe("name derivation: the name columns are gone, search still reads the one
     expect(bodyFixedTd).toBe(1);
   });
 
-  it("AC-2: binding is disclosed for unconfirmed repositories inside the identity cell", () => {
-    expect(gridCode).toMatch(/row\.binding\.state !== "confirmed" && \(\s*<FeedbackDisclosure compact title="Bind student"[^>]*>\s*<RepoBindingControl /);
-    expect(gridCode).toMatch(/<TableCell component="th" scope="row"[\s\S]*?<RepoGradebookIdentity[\s\S]*?<\/TableCell>/);
-    expect(gridCode).not.toMatch(/<TableCell[^>]*>\s*<RepoBindingControl/);
+  it("AC-2: the roster link state is disclosed inside the identity cell for scanned and saved-only repositories", () => {
+    expect(gridCode).toMatch(/<TableCell component="th" scope="row"[\s\S]*?<RepoGradebookIdentity repo=\{repo.name\} row=\{repo.active\} linked=\{name !== null\}[\s\S]*?<\/TableCell>/);
+    const identity = gridCode.slice(gridCode.indexOf("function RepoGradebookIdentity"));
+    expect(identity).toMatch(/if \(!row\) return \([\s\S]*?\{!linked && <span[^>]+>Unlinked repository<\/span>\}/);
+    expect(identity).toMatch(/\{row.folderError &&[^\n]+\}\s*\{!linked && <span[^>]+>Unlinked repository<\/span>\}/);
+    expect(gridCode).not.toContain("<RepoBindingControl");
   });
 
   it("AC-4: the sort-field set carries no removed column and nothing in the sort module reads a name derivation", () => {

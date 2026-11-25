@@ -202,8 +202,9 @@ describe("G2: restored source-text instruments (AC :92, :130, :138)", () => {
     .map((f) => fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, f), "utf-8"))
     .join("\n");
 
-  it("AC-F6's amended Markdown-formatting notice is present somewhere in this directory's non-test source", () => {
-    expect(combinedSource).toMatch(/Markdown formatting \(##, -, numbered lists, \*\*bold\*\*, \*italic\*\)/);
+  it("AC-F6 explains formatting for the Markdown and rich draft editors", () => {
+    const slot = stripComments(fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementDraftSlot.tsx"), "utf-8"));
+    expect(slot).toMatch(/richHtml !== undefined && slot\.draft\.draft\.richSourceMessage === slot\.draft\.draft\.message\s*\? "Edits preserve the displayed formatting for copying and posting\."\s*:\s*"Markdown headings, lists and emphasis are formatted for copying and posting\."/);
   });
 
   it("the Copy path's source references markdownToHtml", () => {
@@ -625,7 +626,7 @@ describe("AC-10 W2 wiring: the panel's auto-draft / extraction-window / fresh-ru
   describe("D: fresh-run reset is gated by isRunComplete in handleStartStop", () => {
     const hssBlock = sliceBetween(
       "const handleStartStop = useCallback",
-      "}, [capturing, extracting, pendingFrames, start, stop, reset, inputKind, upload.busy, pushNotice]);"
+      "}, [capturing, extracting, pendingFrames, start, stop, reset, inputKind, upload.busy, pushNotice,"
     );
 
     it("D1: reset(), batchBlocksRef clear and setLegibleBlockCount(0) all live INSIDE if (isRunComplete(slots))", () => {
@@ -678,6 +679,7 @@ describe("W3 SURFACE: run bar, field order, draft-slot layout, auto-draft toggle
   const fieldset = stripComments(read("AnnouncementCourseFieldset.tsx"));
   const slot = stripComments(read("AnnouncementDraftSlot.tsx"));
   const setup = stripComments(read("useWalkthroughSetup.ts"));
+  const recordingLabel = "Record walkthrough";
 
   describe("W3-R1: capture controls and Start precede the format/options controls", () => {
     it("fieldset: Course and notes come before the three draft toggles", () => {
@@ -702,7 +704,7 @@ describe("W3 SURFACE: run bar, field order, draft-slot layout, auto-draft toggle
 
     it("panel: AC-1 the run bar is a panel-body sibling, NOT inside the fieldset mount", () => {
       const mount = panel.indexOf("<AnnouncementCourseFieldset");
-      const startIdx = panel.indexOf("Start capture");
+      const startIdx = panel.indexOf(recordingLabel);
       expect(mount).toBeGreaterThan(-1);
       expect(startIdx).toBeGreaterThan(-1);
       // The mount is self-closing: no closing tag exists for Start to sit inside.
@@ -742,7 +744,7 @@ describe("W3 SURFACE: run bar, field order, draft-slot layout, auto-draft toggle
 
   // The run bar's wrapper: the nearest <div before the Start text. The Buttons
   // hold no nested <div>, so the first </div> after Start closes the wrapper.
-  const startTextIdx = panel.indexOf("Start capture");
+  const startTextIdx = panel.indexOf(recordingLabel);
   const barOpen = panel.lastIndexOf("<div", startTextIdx);
   const barClose = panel.indexOf("</div>", startTextIdx);
   const barSlice = panel.slice(barOpen, barClose);
@@ -813,7 +815,8 @@ describe("W3 SURFACE: run bar, field order, draft-slot layout, auto-draft toggle
     const gridOpen = slot.indexOf("<div className={styles.adaptFieldGrid2}>");
     const messageIdx = slot.indexOf('label="Message (Markdown)"');
     const previewIdx = slot.indexOf("dangerouslySetInnerHTML");
-    const gridEnd = slot.indexOf("Markdown formatting (##");
+    const gridClose = /\/>\s*<\/div>\s*<\/div>/.exec(slot.slice(previewIdx));
+    const gridEnd = gridClose ? previewIdx + gridClose.index + gridClose[0].length : -1;
     const rowOpen = slot.indexOf("`${styles.ghActions} ${controls.runRow}`");
     it("all anchors resolve", () => {
       for (const i of [gridOpen, messageIdx, previewIdx, gridEnd, rowOpen]) expect(i).toBeGreaterThan(-1);
@@ -957,10 +960,12 @@ describe("W3 SURFACE: run bar, field order, draft-slot layout, auto-draft toggle
       expect(library).toContain("onClick={() => setArmed(card.id)}");
     });
     it("Start prevents switching an uploaded input without explicit reset", () => {
-      const startOpen = panel.lastIndexOf("<Button", panel.indexOf("Start capture"));
+      const startOpen = panel.lastIndexOf("<Button", startTextIdx);
+      expect(startOpen).toBeGreaterThan(-1);
       const tag = panel.slice(startOpen, panel.indexOf(">", startOpen));
-      expect(tag).toContain("handleStartStop");
-      expect(tag).toContain('disabled={upload.busy || inputKind === "upload"}');
+      expect(tag).toContain("onClick={handleStartStop}");
+      expect(tag).toContain('disabled={recordingFinalizing || upload.busy || inputKind === "upload"}');
+      expect(panel).toMatch(/if \(inputKind === "upload" \|\| upload\.busy\) \{ pushNotice\([^]*?return; \}/);
     });
   });
 });

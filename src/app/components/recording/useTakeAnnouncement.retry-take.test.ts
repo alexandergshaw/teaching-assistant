@@ -90,10 +90,8 @@ describe("useTakeAnnouncement failure wiring (READ)", () => {
   });
 
   it("AC-5: a rejection takes the same exit and the branch routes the transport shape", () => {
-    expect(commitPostBody).toMatch(/createAnnouncementAction\([\s\S]*?\)\s*\.catch\(/);
-    expect(commitPostBody).toMatch(/transport/);
-    expect(commitPostBody).toMatch(/"transport"\s+in\s+\w+/);
-    expect(commitPostBody).toMatch(/resolveTakePostFailure\(/);
+    expect(commitPostBody).toMatch(/const result = await postRecordingAnnouncementAction\([\s\S]*?\)\s*\.catch\(\(\) => \(\{ transport: true as const \}\)\)/);
+    expect(commitPostBody).toMatch(/if \("error" in result \|\| "transport" in result\) \{[\s\S]*?resolveTakePostFailure\(result\)/);
   });
 
   it("AC-8: Back to review no longer clears the failure message", () => {

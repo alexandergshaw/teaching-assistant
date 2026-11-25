@@ -500,28 +500,33 @@ function isAccountRenderRoot(node: Node | undefined): boolean {
   return !!entry && ts.isFunctionDeclaration(entry) && isDefaultExportedFunction(entry)
     && returned.parent === entry.body;
 }
-/** Walks from `wrapper` (the element directly enclosing the mount) up to the
- * render root, requiring EXACTLY the chain section 13.2's A-6 row names: an
- * optional parens, one `trendsEntry &&` BinaryExpression, a JsxExpression,
- * the top-level JsxFragment, then a ReturnStatement that is a DIRECT
- * statement of the render component's own body. The render component is
- * reached from the default export through its direct, account-keyed return.
- * Returns the gating
- * JsxExpression on success, for A-8's sibling-order check. */
-function gatePathFromWrapper(wrapper: Node): import("typescript").JsxExpression | null {
+/** The saved-data section lives within the settings accordion. Every
+ * intervening gate must allow a valid trends entry to reach the render root. */
+function settingsPathFromTrendsWrapper(wrapper: Node): import("typescript").JsxElement | null {
   let node = skipParens(wrapper);
   const bin = node.parent;
   if (!ts.isBinaryExpression(bin) || bin.operatorToken.kind !== ts.SyntaxKind.AmpersandAmpersandToken) return null;
   if (!isIdent(bin.left, "trendsEntry") || bin.right !== node) return null;
   node = skipParens(bin);
   if (!ts.isJsxExpression(node.parent)) return null;
-  const jsxExpr = node.parent;
-  if (!ts.isJsxFragment(jsxExpr.parent)) return null;
-  const up = skipParens(jsxExpr.parent);
+  const section = node.parent.parent;
+  if (!ts.isJsxElement(section) || section.openingElement.tagName.getText() !== "Box") return null;
+  const outer = section.parent;
+  if (!ts.isBinaryExpression(outer) || outer.operatorToken.kind !== ts.SyntaxKind.AmpersandAmpersandToken || outer.right !== section
+      || !ts.isParenthesizedExpression(outer.left) || outer.left.expression.getText() !== "course && cellDraft || trendsEntry") return null;
+  if (!ts.isJsxExpression(outer.parent)) return null;
+  const details = outer.parent.parent;
+  if (!ts.isJsxElement(details) || details.openingElement.tagName.getText() !== "AccordionDetails") return null;
+  const accordion = details.parent;
+  if (!ts.isJsxElement(accordion) || accordion.openingElement.tagName.getText() !== "Accordion") return null;
+  if (accordion.openingElement.attributes.properties.some((prop) => !ts.isJsxAttribute(prop) || ["disabled", "expanded"].includes(prop.name.getText()))) return null;
+  if (!accordion.children.some((child) => ts.isJsxElement(child) && child.openingElement.tagName.getText() === "AccordionSummary")) return null;
+  if (!ts.isJsxFragment(accordion.parent)) return null;
+  const up = skipParens(accordion.parent);
   if (!ts.isReturnStatement(up.parent) || !ts.isBlock(up.parent.parent)) return null;
   const fn = enclosingFunction(up.parent);
   if (!fn || !ts.isFunctionDeclaration(fn) || fn.body !== up.parent.parent) return null;
-  return isAccountRenderRoot(fn) ? jsxExpr : null;
+  return isAccountRenderRoot(fn) ? accordion : null;
 }
 function findJsxSelfClosing(root: Node, tagName: string): import("typescript").JsxSelfClosingElement[] {
   const found: import("typescript").JsxSelfClosingElement[] = [];
@@ -584,28 +589,38 @@ function hidingAttrNames(el: JsxTag): string[] {
 const A6_ACCOUNT_ENTRY = `export default function RepoGradesTab() {
   return !loading && user ? <AccountRepoGradesTab key={user.id} accountId={user.id} /> : null;
 }`;
+const A6_MOUNT = '<ClassTrendsPanel entry={trendsEntry} defaultExpanded />';
+const A6_GATE = `trendsEntry && (<div>${A6_MOUNT}</div>)`;
+function trendsFixture(gate: string, name = "AccountRepoGradesTab", entry = A6_ACCOUNT_ENTRY, accordion = "<Accordion>"): string {
+  return `${entry} function ${name}() {
+    return (<>${accordion}<AccordionSummary>Grading settings</AccordionSummary><AccordionDetails>
+      {(course && cellDraft || trendsEntry) && <Box component="section">{${gate}}</Box>}
+    </AccordionDetails></Accordion></>);
+  }`;
+}
 const A6_CANARIES: Array<[string, string]> = [
   [
     "a correct gate wrapping a negated one",
-    `${A6_ACCOUNT_ENTRY} function AccountRepoGradesTab() { return (<>{trendsEntry && (<div>{!trendsEntry && <ClassTrendsPanel entry={trendsEntry} defaultExpanded />}</div>)}</>); }`,
+    trendsFixture(`trendsEntry && (<div>{!trendsEntry && ${A6_MOUNT}}</div>)`),
   ],
   [
     "S-23a: left operand is not bare trendsEntry",
-    `${A6_ACCOUNT_ENTRY} function AccountRepoGradesTab() { return (<>{model && trendsEntry && (<div><ClassTrendsPanel entry={trendsEntry} defaultExpanded /></div>)}</>); }`,
+    trendsFixture(`model && ${A6_GATE}`),
   ],
   [
     "S-23b: a ConditionalExpression sits on the path",
-    `${A6_ACCOUNT_ENTRY} function AccountRepoGradesTab() { return (<>{flag ? (trendsEntry && (<div><ClassTrendsPanel entry={trendsEntry} defaultExpanded /></div>)) : null}</>); }`,
+    trendsFixture(`flag ? (${A6_GATE}) : null`),
   ],
   [
     "F-8: the wrapping return belongs to a non-default, non-exported function",
-    `function helperRender() { return (<>{trendsEntry && (<div><ClassTrendsPanel entry={trendsEntry} defaultExpanded /></div>)}</>); }`,
+    trendsFixture(A6_GATE, "helperRender", ""),
   ],
   [
     "the account render component is unreachable from the default export",
-    `export default function RepoGradesTab() { return null; }
-     function AccountRepoGradesTab() { return (<>{trendsEntry && (<div><ClassTrendsPanel entry={trendsEntry} defaultExpanded /></div>)}</>); }`,
+    trendsFixture(A6_GATE, "AccountRepoGradesTab", "export default function RepoGradesTab() { return null; }"),
   ],
+  ["the accordion cannot be opened", trendsFixture(A6_GATE, "AccountRepoGradesTab", A6_ACCOUNT_ENTRY, "<Accordion expanded={false}>")],
+  ["the saved-data section excludes valid trends", trendsFixture(A6_GATE).replace("(course && cellDraft || trendsEntry)", "(course && cellDraft)")],
 ];
 
 describe("A-6: index.tsx mounts exactly one ClassTrendsPanel, gated by the enumerated path, no hiding ancestor", () => {
@@ -624,7 +639,11 @@ describe("A-6: index.tsx mounts exactly one ClassTrendsPanel, gated by the enume
   });
   it("the enumerated ancestor path reaches the default export through the account render component", () => {
     expect(ts.isJsxElement(panels[0].parent)).toBe(true);
-    expect(gatePathFromWrapper(panels[0].parent)).not.toBeNull();
+    expect(settingsPathFromTrendsWrapper(panels[0].parent)).not.toBeNull();
+  });
+  it("canary: the current account-keyed settings path is accepted", () => {
+    const [panel] = findJsxSelfClosing(parseFixture(trendsFixture(A6_GATE), true), "ClassTrendsPanel");
+    expect(settingsPathFromTrendsWrapper(panel.parent)).not.toBeNull();
   });
   it("no ancestor from the panel to the render root carries a hiding attribute", () => {
     expect(ancestorTags(panels[0]).flatMap(hidingAttrNames)).toEqual([]);
@@ -641,7 +660,7 @@ describe("A-6: index.tsx mounts exactly one ClassTrendsPanel, gated by the enume
 
   it.each(A6_CANARIES)("canary: %s -> fails", (_label, fixture) => {
     const [panel] = findJsxSelfClosing(parseFixture(fixture, true), "ClassTrendsPanel");
-    const passes = ts.isJsxElement(panel.parent) && gatePathFromWrapper(panel.parent) !== null;
+    const passes = ts.isJsxElement(panel.parent) && settingsPathFromTrendsWrapper(panel.parent) !== null;
     expect(passes).toBe(false);
   });
 });
@@ -686,18 +705,20 @@ describe("A-7: the label sits inside the panel's own wrapper, imported from the 
 });
 
 describe("A-8: source position and binding", () => {
-  it("the gate sits, among the top-level fragment's children, after postSummary's and before RepoGradesGrid's", () => {
+  it("the settings accordion, status message and gradebook keep their top-level order", () => {
     const [panel] = findJsxSelfClosing(indexFile, "ClassTrendsPanel");
-    const gateExpr = gatePathFromWrapper(panel.parent)!;
-    const fragment = gateExpr.parent as import("typescript").JsxFragment;
+    const settings = settingsPathFromTrendsWrapper(panel.parent);
+    expect(settings).not.toBeNull();
+    const fragment = settings!.parent as import("typescript").JsxFragment;
     const children = fragment.children.filter((c) => !(ts.isJsxText(c) && c.text.trim() === ""));
     const postSummaryIndex = children.findIndex((c) => ts.isJsxExpression(c) && c.expression && ts.isBinaryExpression(c.expression) && isIdent(c.expression.left, "postSummary"));
     const gridIndex = children.findIndex((c) => containsTag(c, "RepoGradesGrid"));
-    const gateIndex = children.indexOf(gateExpr);
+    const settingsIndex = children.indexOf(settings!);
+    expect(settingsIndex).toBeGreaterThan(-1);
     expect(postSummaryIndex).toBeGreaterThan(-1);
     expect(gridIndex).toBeGreaterThan(-1);
-    expect(gateIndex).toBeGreaterThan(postSummaryIndex);
-    expect(gateIndex).toBeLessThan(gridIndex);
+    expect(settingsIndex).toBeLessThan(postSummaryIndex);
+    expect(postSummaryIndex).toBeLessThan(gridIndex);
   });
   it("hasTrendableResults is unreferenced, and trendsEntry is bound by the useRepoGradesGradingActions(...) call's own destructure", () => {
     expect(countIdentRefs(indexFile, "hasTrendableResults")).toBe(0);

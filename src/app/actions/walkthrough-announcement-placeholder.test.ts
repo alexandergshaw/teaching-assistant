@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { actionAuthClient, actionAuthUser } from "./action-auth.fixtures";
 import * as fs from "fs";
 import * as path from "path";
 
 // Mirrors media.intro-script-diag.test.ts's own pattern: mock only the real
-// I/O boundaries (auth, Supabase, the LLM client, getGeminiModel) and let
+// I/O boundaries (Supabase, the LLM client, getGeminiModel) and let
 // every pure leaf this action composes with (buildWalkthroughAnnouncementPrompt,
 // composeWalkthroughScriptPrompt, walkthroughAnnouncementMaxOutputTokens,
 // deriveAnnouncementOutline) run FOR REAL - those already have their own
@@ -11,11 +12,13 @@ import * as path from "path";
 // would hide exactly the wiring bug this file exists to catch: whether the
 // action actually threads its inputs into a real prompt and a real,
 // OUTLINE-SIZED token budget, not a fixed one.
-vi.mock("@/lib/supabase/auth", () => ({
-  requireUser: vi.fn(),
-}));
 vi.mock("@/lib/supabase/server", () => ({
+  createClient: () => actionAuthClient(() => USER),
   createServiceClient: vi.fn(() => ({})),
+}));
+vi.mock("@/lib/supabase/app-users", async (original) => ({
+  ...await original<typeof import("@/lib/supabase/app-users")>(),
+  getAppUser: async (id: string) => actionAuthUser(id, "instructor", USER.email),
 }));
 vi.mock("./writing-style-block", () => ({
   getWritingStyleBlock: vi.fn(),
@@ -50,7 +53,6 @@ vi.mock("./learning-resource-links", () => ({
   findResourceLinksForConceptsAction: vi.fn(),
 }));
 
-import { requireUser } from "@/lib/supabase/auth";
 import { getWritingStyleBlock } from "./writing-style-block";
 import { callLlm } from "@/lib/llm";
 import {
@@ -87,7 +89,6 @@ const CREDENTIAL_SHAPED_BODY =
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(requireUser).mockResolvedValue(USER as never);
   vi.mocked(getWritingStyleBlock).mockResolvedValue("");
 });
 

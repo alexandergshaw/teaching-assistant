@@ -3,9 +3,8 @@
 // docs/walkthrough-overhaul-s2-m8-test-notes.md sections 2 and 3.B. Nothing
 // renders under vitest, so the viewport movement itself is an owner-walk item.
 //
-// Frozen counts: A1 pins ONE styles.adaptRow and W2 pins ONE useEffect in this
-// file. A later legitimate second row/effect bumps the count in the same
-// commit and names the new one here.
+// A1 pins one shared row. W2 pins the format-label synchronization effect
+// and the separate effect responsible for scrolling on the draft phase edge.
 
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
@@ -36,26 +35,27 @@ describe("S2: both selects share ONE styles.adaptRow", () => {
 });
 
 describe("M8: scroll gated inside one effect on the phase edge", () => {
-  const idxEffect = src.indexOf("useEffect(");
-  const idxReturn = src.indexOf("\n  return (");
+  const idxGate = src.indexOf("shouldScrollDraftIntoView(");
+  const idxEffect = src.lastIndexOf("useEffect(", idxGate);
+  const closing = /^\s*\}, \[([^\]]*)\]\);/m.exec(src.slice(idxEffect));
+  const idxEnd = closing ? idxEffect + closing.index + closing[0].length : -1;
   it("anchors resolve", () => {
     expect(idxEffect).toBeGreaterThan(-1);
-    expect(idxReturn).toBeGreaterThan(idxEffect);
+    expect(idxGate).toBeGreaterThan(idxEffect);
+    expect(idxEnd).toBeGreaterThan(idxGate);
   });
-  const win = idxEffect > -1 && idxReturn > idxEffect ? src.slice(idxEffect, idxReturn) : "";
+  const win = idxEffect > -1 && idxEnd > idxEffect ? src.slice(idxEffect, idxEnd) : "";
 
   it("W1: routes through the pure gate and scrollIntoView", () => {
     expect(src).toContain("shouldScrollDraftIntoView");
     expect(src).toContain("scrollIntoView");
   });
-  it("W2: exactly one useEffect, gate and scroll both inside its window", () => {
-    expect(src.split("useEffect(").length - 1).toBe(1);
-    const g = src.indexOf("shouldScrollDraftIntoView(");
-    const s = src.indexOf("scrollIntoView(");
-    expect(g).toBeGreaterThan(idxEffect);
-    expect(g).toBeLessThan(idxReturn);
-    expect(s).toBeGreaterThan(idxEffect);
-    expect(s).toBeLessThan(idxReturn);
+  it("W2: one gated scroll effect and one independent format-label effect", () => {
+    expect(src.split("useEffect(").length - 1).toBe(2);
+    expect(src).toMatch(/useEffect\(\(\) => \{ selectedFormatRef\.current = selectedFormatLabel; \}, \[selectedFormatLabel\]\)/);
+    expect(src.split("shouldScrollDraftIntoView(").length - 1).toBe(1);
+    expect(src.split("scrollIntoView(").length - 1).toBe(1);
+    expect(win).toMatch(/if \(shouldScrollDraftIntoView\(prevPhaseRef\.current, phase\)\) \{\s*rootRef\.current\?\.scrollIntoView\(/);
   });
   it("W3: scrollIntoView is called on a ref's .current", () => {
     expect(win).toMatch(/\.current\??\.scrollIntoView\(/);
@@ -68,12 +68,8 @@ describe("M8: scroll gated inside one effect on the phase edge", () => {
     expect(win).not.toContain(".focus(");
   });
   it("W6: the EFFECT'S OWN closing dep array contains phase", () => {
-    // Scoped to the first `}, [...]);` AFTER the useEffect( opens, i.e. the
-    // effect's own dep array. The sibling useMemo (before the effect) has
-    // `}, [phase, slot.draft])` and must not be able to satisfy this.
-    const m = /^\s*\}, \[([^\]]*)\]\);/m.exec(src.slice(idxEffect));
-    expect(m).not.toBeNull();
-    expect(m![1]).toMatch(/\bphase\b/);
+    expect(closing).not.toBeNull();
+    expect(closing![1]).toMatch(/\bphase\b/);
   });
   it("W7: the prev-phase advance is present in the effect", () => {
     expect(win).toMatch(/prevPhaseRef\.current\s*=\s*phase/);
@@ -100,14 +96,16 @@ describe("WA-POST-LOCK: Post control and hint", () => {
     expect(postSlice).toContain('visibility.kind === "invalid"');
   });
 
-  const regenStart = src.indexOf('idleLabel="Regenerate"');
-  const regenEnd = src.indexOf('<Button size="small" variant="outlined" onClick={() => onCopy');
+  const regenLabel = src.indexOf('idleLabel="Regenerate"');
+  const regenStart = src.lastIndexOf("<ConfirmArmButtons", regenLabel);
+  const regenEnd = src.indexOf("/>", regenLabel);
   const regenSlice = regenStart > -1 && regenEnd > regenStart ? src.slice(regenStart, regenEnd) : "";
 
   it("AC-9: Regenerate block is non-empty and never mentions postLocked", () => {
     expect(regenStart).toBeGreaterThan(-1);
-    expect(regenEnd).toBeGreaterThan(regenStart);
-    expect(regenSlice.length).toBeGreaterThan(0);
+    expect(regenLabel).toBeGreaterThan(regenStart);
+    expect(regenEnd).toBeGreaterThan(regenLabel);
+    expect(regenSlice).toContain("onConfirm={() => onRegenerateConfirm(slot.id)}");
     expect(regenSlice).not.toContain("postLocked");
   });
 

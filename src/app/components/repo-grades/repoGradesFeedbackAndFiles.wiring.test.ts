@@ -54,6 +54,8 @@ const SRC = join(process.cwd(), "src");
 const REPO_GRADES_DIR = join(SRC, "app", "components", "repo-grades");
 
 const CELL_CONTROL_SOURCE = read("src/app/components/repo-grades/RepoGradeCellControl.tsx");
+const DASHBOARD_SOURCE = read("src/app/components/repo-grades/RepoGradesDashboard.tsx");
+const INSTRUCTOR_REVIEW_SOURCE = read("src/app/components/repo-grades/RepoGradeInstructorReview.tsx");
 const GRID_SOURCE = read("src/app/components/repo-grades/RepoGradesGrid.tsx");
 const INDEX_SOURCE = read("src/app/components/repo-grades/index.tsx");
 const HOOK_SOURCE = read("src/app/components/repo-grades/useRepoGradesGradingActions.ts");
@@ -222,10 +224,27 @@ describe("applyRepoGradeFeedbackFieldEdit is the ONE place a feedback-box edit r
     expect(stripped).not.toContain(".comment =");
   });
 
-  it("RepoGradesGrid.tsx forwards onFeedbackFieldChange straight through to the cell control, never intercepting or transforming a box edit itself", () => {
-    expect(GRID_SOURCE).toContain(
-      "onFeedbackFieldChange={(field, value) => onFeedbackFieldChange(row.repo, column.folder, field, value)}"
-    );
+  it("the live gradebook links saved feedback and instructor review to the exact repository, folder and revision", () => {
+    const grid = stripComments(GRID_SOURCE);
+    expect(grid).toMatch(/<RepoGradeResultDetails courseId=\{targetCourseId\} repo=\{repo\} folder=\{folder\}/);
+    expect(grid).not.toContain("<RepoGradeCellControl");
+    expect(grid).not.toContain("<RepoDashboardFeedback");
+
+    const details = stripComments(DASHBOARD_SOURCE);
+    expect(details).toContain("const cell = repo.cells.get(folder)");
+    expect(details).toMatch(/\{draft && courseId && <RepoGradeInstructorReview key=\{draft.generation\} courseId=\{courseId\} generation=\{draft.generation\} sourceSha=\{draft.commit\}/);
+    expect(details).toMatch(/<RepoResultFeedback repo=\{repo.name\} folder=\{folder\} source="review-only draft"\s+feedback=\{\{ overall: draft.feedback/);
+    expect(details).toMatch(/<SavedMatrixResult result=\{cell.saved\} repo=\{repo.name\} folder=\{folder\} feedback=\{feedback\}/);
+  });
+
+  it("the active editor saves only a scoped instructor review and keeps the recorded evaluation separate", () => {
+    const review = stripComments(INSTRUCTOR_REVIEW_SOURCE);
+    expect(review).toContain("key={JSON.stringify([user.id, props.courseId, props.generation, props.sourceSha])}");
+    expect(review).toContain("instructorReviewEligibilityAction({ courseId, accountId: userId, generation, sourceSha })");
+    expect(review).toMatch(/async function save\(\) \{\s*if \(!valid \|\| saving \|\| uncertain\) return;/);
+    expect(review).toMatch(/await instructorReviewAction\(\{ courseId, accountId: userId, generation, sourceSha, expectedReviewId: review\?\.review_id \?\? null, criteria:/);
+    expect(review).toMatch(/<Button onClick=\{save\} disabled=\{!valid \|\| saving \|\| uncertain\}/);
+    expect(review).not.toContain("postCanvasGradesAction");
   });
 
   it("index.tsx wires handleFeedbackFieldChange straight through to RepoGradesGrid's onFeedbackFieldChange prop", () => {
@@ -309,6 +328,7 @@ const FROZEN_REPO_GRADES_ROOTS = [
   "RepoGradeActionsMenu.tsx",
   "RepoGradeCellControl.tsx",
   "RepoGradeCourseFilters.tsx",
+  "RepoGradeInstructorReview.tsx",
   "RepoGradePreparationPolicySettings.tsx",
   "RepoGradeProfileSettings.tsx",
   "RepoGradeRubricScores.tsx",
@@ -325,18 +345,23 @@ const FROZEN_REPO_GRADES_ROOTS = [
   "RepoGradesStatusBanners.tsx",
   // RG-SEARCH-STICKY Wave A: the sticky working-header shell (browser-safe only).
   "RepoGradesStickyHeader.tsx",
+  "RepoTargetGradeActions.tsx",
   // A16 wave 3 (docs/a16-wave3-scope.md WS-7): a new non-test .ts file in
   // this directory, so this frozen root set gains it in the same edit.
   "classTrendsFolderEntry.ts",
   "index.tsx",
+  "instructorReviewAvailability.ts",
   "linkRepoUsernames.ts",
+  "manualRepoGradeDiagnostics.ts",
   "repoFeedbackClipboard.ts",
   "repoFeedbackIdb.ts",
   "repoFeedbackIdbAdapter.ts",
   "repoGradeCellStatus.ts",
+  "repoGradeCopyAll.ts",
   "repoGradePostScore.ts",
   "repoGradeQueue.ts",
   "repoGradeScoreDisplay.ts",
+  "repoGradeSelection.ts",
   "repoGradeStudentName.ts",
   "repoGradeTreeLink.ts",
   "repoGradesAssignmentMapping.ts",
@@ -368,12 +393,15 @@ const FROZEN_REPO_GRADES_ROOTS = [
   // RG-SEARCH-STICKY Wave C: the pure visible-rows selector and filter summary.
   "repoGradesVisibleRows.ts",
   "rosterUsernameOverlay.ts",
+  "rubricAlignment.ts",
+  "useRepoChangedSubmissions.ts",
   "useRepoGradeHistory.ts",
   "useRepoGradeMatrixResults.ts",
   "useRepoGradesBulkGrade.ts",
   "useRepoGradesData.ts",
   "useRepoGradesGradingActions.ts",
   "useRepoGradesRubricSource.ts",
+  "useRepoGradeTargetRequests.ts",
 ].sort();
 
 describe("R-2: the derived repo-grades root set matches the hand-frozen list", () => {

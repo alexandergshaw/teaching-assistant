@@ -1,9 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { actionAuthClient, actionAuthUser } from "./action-auth.fixtures";
 
-const mocks = vi.hoisted(() => ({ owner: vi.fn(), rpc: vi.fn(), client: vi.fn() }));
-vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: mocks.owner }));
+const mocks = vi.hoisted(() => ({ readIdentity: vi.fn(), accountRole: vi.fn<() => "owner" | "instructor">(), rpc: vi.fn(), client: vi.fn() }));
+vi.mock("@/lib/supabase/server", () => ({ createClient: () => actionAuthClient(mocks.readIdentity), createServiceClient: mocks.client }));
+vi.mock("@/lib/supabase/app-users", async (original) => ({
+  ...await original<typeof import("@/lib/supabase/app-users")>(),
+  getAppUser: async (id: string) => actionAuthUser(id, mocks.accountRole()),
+}));
 vi.mock("@/lib/repo-grades-dashboard/admission-mode", () => ({ repoGradeDurableStartupAvailable: () => true }));
-vi.mock("@/lib/supabase/server", () => ({ createServiceClient: mocks.client }));
 import { controlRepoGradeTargetRequestAction, readRepoGradeTargetRequestsAction } from "./repo-grade-target-request";
 
 const owner = "11111111-1111-4111-8111-111111111111";
@@ -14,7 +18,7 @@ function respond(data: unknown, error: unknown = null) {
 }
 
 describe("targeted grading queue controls", () => {
-  beforeEach(() => { vi.resetAllMocks(); mocks.owner.mockResolvedValue({ id: owner }); mocks.client.mockReturnValue({ rpc: mocks.rpc }); });
+  beforeEach(() => { vi.resetAllMocks(); mocks.readIdentity.mockResolvedValue({ id: owner }); mocks.accountRole.mockReturnValue("owner"); mocks.client.mockReturnValue({ rpc: mocks.rpc }); });
 
   it("rejects foreign owners and malformed controls before reaching storage", async () => {
     expect(await controlRepoGradeTargetRequestAction("foreign", 1, "stop")).toEqual({ status: "unavailable" });
@@ -24,10 +28,10 @@ describe("targeted grading queue controls", () => {
   });
 
   it("rejects a non-owner and a mismatched owner before either RPC", async () => {
-    mocks.owner.mockRejectedValue(new Error("not owner"));
+    mocks.accountRole.mockReturnValue("instructor");
     expect(await readRepoGradeTargetRequestsAction(owner)).toEqual({ status: "unavailable" });
     expect(await controlRepoGradeTargetRequestAction(owner, 1, "stop")).toEqual({ status: "unavailable" });
-    mocks.owner.mockResolvedValue({ id: owner });
+    mocks.accountRole.mockReturnValue("owner");
     expect(await readRepoGradeTargetRequestsAction("foreign")).toEqual({ status: "unavailable" });
     expect(await controlRepoGradeTargetRequestAction("foreign", 1, "stop")).toEqual({ status: "unavailable" });
     expect(mocks.client).not.toHaveBeenCalled();

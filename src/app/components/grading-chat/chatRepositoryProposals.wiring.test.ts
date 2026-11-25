@@ -9,7 +9,9 @@ describe("repository collection production caller wiring (source only; no render
     expect(mappings).toContain("proposals.confirm(selected)");
     expect(mappings).toContain("proposals.collect(id)");
     expect(hook).toContain('fetch("/api/grading-chat-repository"');
-    expect(read("useContinuousGradingRun.ts")).toContain("listRepositoryStudents(\"grading-chat-\" + sessionIdRef.current, retainedBodiesRef.current)");
+    const driver = read("useContinuousGradingRun.ts");
+    expect(driver).toContain('pendingDisplay("grading-chat-" + sessionIdRef.current, pendingRef.current, inFlightIndexRef.current, retainedBodiesRef.current)');
+    expect(read("pendingVideoCount.ts")).toContain("repositoryStudents: listRepositoryStudents(session, bodies)");
   });
   it("links collection to the optional live proposal/review/adoption row adapter", () => {
     const source = read("ChatRepositoryMappings.tsx");

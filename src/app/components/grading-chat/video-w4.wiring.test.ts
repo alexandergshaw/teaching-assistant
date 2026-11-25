@@ -52,9 +52,15 @@ describe("video composer -> driver -> grade seam wiring", () => {
   });
 
   it("the grade POST turns a typed videoFailure into a typed error and the pump records it", () => {
-    expect(driver).toContain("gradeFailureFromBody(body)");
-    expect(driver).toContain("videoFailureOf(err)");
-    expect(driver).toContain("recordVideoSettled(");
+    const gradeItem = read("src/app/components/grading-chat/gradeItemClient.ts");
+    expect(gradeItem).toMatch(/fetch\("\/api\/grade-run-item", \{\s*method: "POST"/);
+    expect(gradeItem).toContain("if (!res.ok || !body.result) throw gradeFailureFromBody(body)");
+    expect(driver).toContain("const dispatchItem = params.dispatchItem ?? postGradeRunItem");
+    const dispatch = driver.indexOf("dispatchItem(request, sink)");
+    const failure = driver.indexOf("const videoFailure = videoFailureOf(err)", dispatch);
+    expect(dispatch).toBeGreaterThan(-1);
+    expect(failure).toBeGreaterThan(dispatch);
+    expect(driver.slice(failure)).toMatch(/^const videoFailure = videoFailureOf\(err\);\s*if \(videoFailure !== null\) \{\s*recordVideoSettled\(\{[^}]*failure: videoFailure \}\)/);
   });
 
   it("the in-zip ledger's video counts are recorded on the live zip path", () => {
@@ -89,7 +95,8 @@ describe("recording one-vs-many wiring (W2/W3, source text)", () => {
 
   it("split segments go through the SHARED admit loop (one assignUnclaimedLabel call site)", () => {
     expect(driver.match(/assignUnclaimedLabel\(/g)?.length).toBe(1);
-    expect(driver).toContain("enqueueAdmitted(header, admitted, { pointsPossible: null");
+    expect(driver).toContain("enqueueAdmitted(admitted, { pointsPossible, submitLabel, setup,");
+    expect(driver).toMatch(/const built = split \? buildSplitEntries\(pending\)[^]*?const admitted = built\.entries\.slice\(0, available\);\s*enqueueAdmitted\(admitted, \{ pointsPossible: null, submitLabel: split \? "" : pending\.label, setup: pending\.setup, windows: built\.windows \}\)/);
   });
 
   it("the panel renders the confirm card from driver.pendingSplit with both handlers wired", () => {

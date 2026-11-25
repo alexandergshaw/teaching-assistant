@@ -372,7 +372,7 @@ async function gradeDiscussionAxes(a: {
 export interface GradingRunOptions {
   readonly abortSignal?: AbortSignal;
   readonly executionPolicy?: "evidence-only";
-  readonly evidenceContext?: { criteria: readonly RubricCriterion[]; allowedEvidenceIds: readonly string[]; provenance: string };
+  readonly evidenceContext?: { criteria: readonly RubricCriterion[]; allowedEvidenceIds: readonly string[]; provenance: string; retainedUploads?: SubmissionFileInventory };
   readonly modelCallOptions?: BoundedLlmCallOptions;
   /** Opt-in server budget for grading model requests with ambiguous outcomes. */
   readonly modelExecution?: LlmExecutionPolicy;
@@ -536,7 +536,7 @@ async function gradeStudentEntries(
     const { student, content, mergedFileCount, submittedFiles, userId, codeRun: precomputedCodeRun, gradedRepo, gradedRef, repositoryInventories } = limitedEntries[i];
     const missingNotebookPayload = notebookVisualsEnabled() && repositoryInventories?.some(inventory => inventory.files.some(file => /\.ipynb$/i.test(file.path) && submittedFiles.filter(item => item.name === file.path && item.extension.toLowerCase() === "ipynb" && !item.previewTruncated).length !== 1));
     const unavailableDirectNotebook = !notebookVisualsEnabled() && submittedFiles.some(file => file.extension.toLowerCase() === "ipynb" && (file.previewTruncated || notebookNeedsVisualReview(file.previewContent)));
-    if (hasUnreviewedNotebook(repositoryInventories) || missingNotebookPayload || unavailableDirectNotebook) {
+    if (hasUnreviewedNotebook(repositoryInventories, evidenceOnly ? options.evidenceContext?.retainedUploads : undefined) || missingNotebookPayload || unavailableDirectNotebook) {
       results.push(buildEvidenceHeldRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: `${GRADING_FAILURE_PREFIX}Submission evidence could not be fully inspected. No score was assigned; review the submission before grading.` }));
       continue;
     }

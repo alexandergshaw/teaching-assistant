@@ -97,20 +97,26 @@ describe('public CLI conformance', () => {
   it('fences cancelled publishers and retains locks until reconciliation', async ({ onTestFinished }) => {
     const lateWriter = `
       const fs = require('node:fs');
+      const path = require('node:path');
+      const root = process.argv[1];
       const deadline = setTimeout(() => { clearInterval(timer); }, 50000);
       const timer = setInterval(() => {
-        if (!fs.existsSync('../allow-late-write')) return;
+        if (!fs.existsSync(path.join(root, 'allow-late-write'))) return;
         clearInterval(timer);
         clearTimeout(deadline);
-        fs.writeFileSync('output.txt', 'late');
+        fs.writeFileSync(path.join(root, 'project', 'output.txt'), 'late');
       }, 50);
-      fs.writeFileSync('../late-writer-ready', 'ready');
+      fs.writeFileSync(path.join(root, 'late-writer-ready'), 'ready');
     `;
     const d = await fixture(policy => {
+      policy.commandTimeout = 45_000;
       policy.gates.late = {
         executable: process.execPath,
         args: ['-e', `const { spawn } = require('node:child_process');
-          spawn(process.execPath, ['-e', ${JSON.stringify(lateWriter)}], { detached: true, stdio: 'ignore' }).unref();
+          const root = require('node:path').resolve('..');
+          spawn(process.execPath, ['-e', ${JSON.stringify(lateWriter)}, root], {
+            cwd: require('node:os').tmpdir(), detached: true, stdio: 'ignore',
+          }).unref();
           setTimeout(() => {}, 50000);`],
         resources: ['workspace'],
       };
@@ -124,7 +130,7 @@ describe('public CLI conformance', () => {
       await closed;
     });
     await expect.poll(() => readFile(path.join(d.root, 'late-writer-ready'), 'utf8').catch(() => ''), { timeout: 20_000 }).toBe('ready');
-    expect(Object.values((await d.state()).operations).some(operation => operation.status === 'running')).toBe(true);
+    await expect.poll(async () => Object.values((await d.state()).operations).some(operation => operation.status === 'running'), { timeout: 20_000 }).toBe(true);
     await d.event('assignment.cancel', { assignment: 'cancelled', reason: 'Controlled late writer' });
     await closed;
     expect(['cancelled', 'quarantined']).toContain((await d.state()).assignments.cancelled.status);

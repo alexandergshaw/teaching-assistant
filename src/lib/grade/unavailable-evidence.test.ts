@@ -18,6 +18,13 @@ describe("unavailable grading evidence", () => {
     expect(hasUnreviewedNotebook([{ ...inventory, files: [{ path: "work.ipynb", content: "read" }] }])).toBe(false);
     expect(hasUnreviewedNotebook([{ ...inventory, enumerationComplete: false, files: [] }])).toBe(true);
   });
+  it("distinguishes a server-assembled retained upload list from incomplete repository coverage", () => {
+    const retainedUploads = { source: "original submission", scope: { kind: "repository" as const, path: null }, enumerationComplete: false, files: [{ path: "main.py", content: "read" as const }] };
+    expect(hasUnreviewedNotebook([retainedUploads], retainedUploads)).toBe(false);
+    expect(hasUnreviewedNotebook([{ ...retainedUploads }], retainedUploads)).toBe(true);
+    const unreadNotebook = { ...retainedUploads, files: [{ path: "work.ipynb", content: "unreadable" as const }] };
+    expect(hasUnreviewedNotebook([unreadNotebook], unreadNotebook)).toBe(true);
+  });
   it.each([
     "The provided environment was missing dependencies and the visualization could not be verified.",
     "The missing dependencies in the provided environment prevented the notebook from running.",

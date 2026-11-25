@@ -11,8 +11,9 @@ export function runtimeDependencyUnavailable(run: CodeRunResult | null): boolean
 }
 
 /** A listed notebook is not absent merely because its bytes could not be read. */
-export function hasUnreviewedNotebook(inventories: readonly SubmissionFileInventory[] | undefined): boolean {
-  return !!inventories?.some((inventory) => !inventory.enumerationComplete || inventory.files.some((file) => /\.ipynb$/i.test(file.path) && file.content !== "read"));
+export function hasUnreviewedNotebook(inventories: readonly SubmissionFileInventory[] | undefined, retainedUploads?: SubmissionFileInventory): boolean {
+  return !!inventories?.some((inventory) => (inventory !== retainedUploads && !inventory.enumerationComplete)
+    || inventory.files.some((file) => /\.ipynb$/i.test(file.path) && file.content !== "read"));
 }
 
 /** Hold numeric grades when feedback cites evaluator access or runtime limits. */

@@ -55,9 +55,10 @@ describe("announcement library production wiring", () => {
   it("names directly editable template slots while retaining the card map and autosave edits", () => {
     const ui = source("AnnouncementLibrary.tsx");
     for (const token of ["Previous announcements", "Add previous announcement", 'label={`Previous announcement ${index + 1} label (optional)`}',
-      "Paste previous announcements here to save them for this course. They save automatically; choose one under Format to use its style in a new draft.",
-      'state.load === "loaded" && state.cards.length === 0 && "No previous announcements saved yet. Add one to paste its text."',
-      "state.cards.map((card, index)", "key={card.id}", "const id = controller.add()", "onClick={add}",
+      "Once it says Saved, choose Use for weekly overview or Use for midweek reminder.",
+      'state.load === "loaded" && state.cards.length === 0 && "Preparing a field for your announcement."',
+      "[...state.cards].sort((a, b) => Number(!!b.local) - Number(!!a.local)).map((card, index)",
+      "key={card.id}", "const id = controller.add()", "onClick={add}",
       'controller.edit(card.id, "label", e.target.value)', 'controller.edit(card.id, "exemplarText", value)',
       "value={card.label}", "value={card.exemplarText}", "PreviousAnnouncementEditor"]) expect(ui).toContain(token);
   });

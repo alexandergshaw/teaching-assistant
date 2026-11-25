@@ -1,7 +1,12 @@
 import { expect, it, vi } from "vitest";
+import { actionAuthClient, actionAuthUser } from "./action-auth.fixtures";
 import JSZip from "jszip";
 
-vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn().mockResolvedValue({ id: "owner" }) }));
+vi.mock("@/lib/supabase/server", () => ({ createClient: () => actionAuthClient(() => ({ id: "owner" })) }));
+vi.mock("@/lib/supabase/app-users", async (original) => ({
+  ...await original<typeof import("@/lib/supabase/app-users")>(),
+  getAppUser: async (id: string) => actionAuthUser(id, "owner"),
+}));
 const inferred = vi.hoisted(() => ({ value: undefined as { byRaw: Map<string, { studentDisplay: string; citationFileName: string }> } | undefined }));
 vi.mock("@/lib/grade/rubric", async (original) => ({ ...await original<object>(), inferFileNameConvention: vi.fn(async () => inferred.value) }));
 import { prepareChatSubmissionAction } from "./grading-chat-intake";

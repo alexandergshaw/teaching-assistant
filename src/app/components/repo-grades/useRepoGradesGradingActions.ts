@@ -703,7 +703,7 @@ export function useRepoGradesGradingActions(
     if (!isCurrent()) return;
     const plan = buildBulkGradePlan({ rows: mergeRepoGradeLiveScores(rows, cellEdits), folder, selected, selectionOnly: resolveGradeScope(selected, bulkSelectionOnly).selectionOnly });
     if (plan.targets.length === 0) {
-      for (const skipped of plan.skipped) beginManualRepoGrade(accountId, skipped.repo, "bulk", "skipped", manualSkipReason(skipped.reason));
+      plan.skipped.forEach((skipped) => beginManualRepoGrade(accountId, skipped.repo, "bulk", "skipped", manualSkipReason(skipped.reason)));
       const reasons = plan.skipped.length > 0 ? plan.skipped.map((s) => `${s.repo}: ${s.reason}`).join("; ") : "no repos have this folder.";
       setPostSummary(`${folder}: nothing to grade - ${reasons}`);
       // A16 wave 3, ruling W3-4: nothing ran, so the previous run's trends
@@ -722,8 +722,8 @@ export function useRepoGradesGradingActions(
     // assignmentId reaches the resolver, once per run - is unchanged.
     const release = admitRepoGradeTargets(activeTargets.current, courseId, plan.targets);
     if (!release) {
-      for (const target of plan.targets) beginManualRepoGrade(accountId, target.repo, "bulk", "blocked", "already-running");
-      for (const skipped of plan.skipped) beginManualRepoGrade(accountId, skipped.repo, "bulk", "skipped");
+      plan.targets.forEach((target) => beginManualRepoGrade(accountId, target.repo, "bulk", "blocked", "already-running"));
+      plan.skipped.forEach((skipped) => beginManualRepoGrade(accountId, skipped.repo, "bulk", "skipped"));
       announceGrade("A repository folder in this run is already being graded.");
       return;
     }

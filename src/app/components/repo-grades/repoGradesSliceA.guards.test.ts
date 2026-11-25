@@ -52,6 +52,7 @@ const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
 const REPO_GRADES = "src/app/components/repo-grades";
 const indexSource = read(`${REPO_GRADES}/index.tsx`);
 const bindingControlSource = read(`${REPO_GRADES}/RepoBindingControl.tsx`);
+const dataSource = stripJsComments(read(`${REPO_GRADES}/useRepoGradesData.ts`));
 const controlsSource = read(`${REPO_GRADES}/RepoGradesControls.tsx`);
 const gridCss = read(`${REPO_GRADES}/repo-grades.module.css`);
 const pageCss = read("src/app/page.module.css");
@@ -76,13 +77,6 @@ function stripCssComments(css: string): string {
  *  is a file where every removal gets a paragraph. */
 function stripJsComments(source: string): string {
   return source.replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-}
-
-/** Every JSX opening tag in the source, as `<tag ...attrs>` strings. Bounded
- *  by the tag itself - a real structural boundary - never by a character
- *  count. */
-function openingTags(source: string): string[] {
-  return source.match(/<[A-Za-z][^<>]*>/g) ?? [];
 }
 
 // ---------------------------------------------------------------------------
@@ -385,10 +379,22 @@ describe("U9.36/U9.37: both confirm paths call the guard, not merely import it",
 
   it("the per-row confirm control calls isConfirmableCandidate (U9.36)", () => {
     expect(usesSharedFunction(bindingControlSource, "isConfirmableCandidate", CONFIRM_MODULE)).toBe(true);
+    const handler = dataSource.slice(dataSource.indexOf("const acceptBinding ="), dataSource.indexOf("const linkFromCourseRoster ="));
+    expect(handler).toMatch(/if \(!isConfirmableCandidate\(\{ canvasUserId, name: student \}\)\) return \{ error:/);
+    expect(handler).toMatch(/applyRepoGradeBinding\(course\.studentRepos, repo, canvasUserId\.trim\(\), student, username\)/);
   });
 
-  it("the batch confirm path calls partitionConfirmableBindings (U9.37)", () => {
-    expect(usesSharedFunction(indexSource, "partitionConfirmableBindings", CONFIRM_MODULE)).toBe(true);
+  it("the batch write rejects invalid ids before persisting normalized bindings (U9.37)", () => {
+    expect(usesSharedFunction(dataSource, "partitionConfirmableBindings", CONFIRM_MODULE)).toBe(true);
+    const handler = dataSource.slice(dataSource.indexOf("const confirmSuggestedBindings ="));
+    expect(handler).toMatch(/const \{ confirmable, blocked \} = partitionConfirmableBindings\(bindings\.map/);
+    const rejectInvalid = handler.indexOf("if (blocked.length > 0) return");
+    const reduce = handler.indexOf("confirmable.reduce");
+    const write = handler.indexOf("await updateCourseHubAction(");
+    expect(rejectInvalid).toBeGreaterThan(-1);
+    expect(reduce).toBeGreaterThan(rejectInvalid);
+    expect(write).toBeGreaterThan(reduce);
+    expect(handler.match(/await updateCourseHubAction\(/g)).toHaveLength(1);
   });
 });
 

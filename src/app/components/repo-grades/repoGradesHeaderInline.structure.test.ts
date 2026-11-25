@@ -103,13 +103,19 @@ describe("header inline: CSS", () => {
 });
 
 describe("header inline: markup", () => {
-  it("AC-7: grade-set chips and status render on the trailing line, outside the popup anchor", () => {
+  it("AC-7: grade-set status stays outside the popup anchor and selected chips retain native removal controls", () => {
+    const autocomplete = TYPEAHEAD.indexOf("<Autocomplete");
+    const input = TYPEAHEAD.indexOf("renderInput=", autocomplete);
     const row = TYPEAHEAD.indexOf("styles.headerFullRow");
-    expect(row).toBeGreaterThan(-1);
-    expect(TYPEAHEAD.indexOf("styles.gradeSetList")).toBeLessThan(row);
-    expect(TYPEAHEAD.indexOf("styles.gradeSetChip")).toBeGreaterThan(row);
-    expect(TYPEAHEAD.indexOf("summary.counterText")).toBeGreaterThan(row);
-    expect(TYPEAHEAD).toMatch(/\{\(chips\.length > 0 \|\| summary\) && \(\s*<div className=\{styles\.headerFullRow\}>/);
+    expect(autocomplete).toBeGreaterThan(-1);
+    expect(input).toBeGreaterThan(autocomplete);
+    expect(row).toBeGreaterThan(input);
+    const anchor = TYPEAHEAD.slice(autocomplete, input);
+    expect(anchor).toContain("value={chips}");
+    expect(anchor).toMatch(/renderValue=\{\(repositories, getItemProps\) => repositories\.map/);
+    expect(anchor).toContain("getItemProps({ index })");
+    expect(anchor).toMatch(/<Chip[\s\S]*?component="button"[\s\S]*?onClick=\{onDelete\}[\s\S]*?onDelete=\{onDelete\}/);
+    expect(TYPEAHEAD).toMatch(/<\/div>\s*\{summary && \(\s*<div className=\{styles\.headerFullRow\}>\s*<span role="status"[^>]*>\s*\{summary.counterText\}/);
   });
 
   it("AC-8: folder notices sit on the trailing line, not inside the select's field", () => {

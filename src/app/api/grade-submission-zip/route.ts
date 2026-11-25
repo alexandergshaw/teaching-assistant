@@ -291,7 +291,10 @@ export async function POST(req: NextRequest) {
     await discardStaged();
     return ndjsonResponse([encodeIngestLine({ type: "done", error: "The per-student static review mapping does not match the archive. Nothing was queued." })]);
   }
-  const lines = buildIngestLines(staticOnly || staticKeys.size ? entries.map((entry) => staticOnly || staticKeys.has(key(entry.student)) ? { ...entry, staticOnly: true as const } : entry) : entries, failedSupportedFiles, undefined, classification, videoOutcomes);
+  const preparedEntries = staticOnly || staticKeys.size
+    ? entries.map((entry) => staticOnly || staticKeys.has(key(entry.student)) ? { ...entry, staticOnly: true as const } : entry)
+    : entries;
+  const lines = buildIngestLines(preparedEntries, failedSupportedFiles, undefined, classification, videoOutcomes);
   const emittedRefs = new Set(lines.flatMap((line) => line.type === "entry"
     ? line.entry.submittedFiles.flatMap((file) => file.videoRef ? [file.videoRef.storagePath] : [])
     : []));

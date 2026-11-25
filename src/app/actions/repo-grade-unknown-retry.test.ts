@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const { owner, rpc, retry } = vi.hoisted(() => ({ owner: vi.fn(), rpc: vi.fn(), retry: vi.fn() }));
-vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: owner }));
-vi.mock("@/lib/supabase/server", () => ({ createServiceClient: () => ({ rpc }) }));
+import { actionAuthClient, actionAuthUser } from "./action-auth.fixtures";
+const { readIdentity, rpc, retry } = vi.hoisted(() => ({ readIdentity: vi.fn(), rpc: vi.fn(), retry: vi.fn() }));
+vi.mock("@/lib/supabase/server", () => ({ createClient: () => actionAuthClient(readIdentity), createServiceClient: () => ({ rpc }) }));
+vi.mock("@/lib/supabase/app-users", async (original) => ({
+  ...await original<typeof import("@/lib/supabase/app-users")>(),
+  getAppUser: async (id: string) => actionAuthUser(id, "owner"),
+}));
 import { authorizeUnknownRepoRetryAction } from "./repo-grade-unknown-retry";
 describe("unknown retry authorization", () => {
-  beforeEach(() => { vi.clearAllMocks(); owner.mockResolvedValue({ id: "owner" }); rpc.mockReturnValue({ retry }); retry.mockResolvedValue({ data: true, error: null }); });
+  beforeEach(() => { vi.clearAllMocks(); readIdentity.mockResolvedValue({ id: "owner" }); rpc.mockReturnValue({ retry }); retry.mockResolvedValue({ data: true, error: null }); });
   it("uses the authenticated owner and does not retry the write", async () => {
     expect(await authorizeUnknownRepoRetryAction(1724, "owner")).toBe(true);
     expect(rpc).toHaveBeenCalledWith("repo_grade_authorize_unknown_retry", { p_user_id: "owner", p_generation: 1724 });

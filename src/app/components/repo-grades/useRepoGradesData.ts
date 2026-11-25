@@ -62,6 +62,7 @@ import { buildRepoGradeAssignmentOptions, type RepoGradeAssignmentOption } from 
 // the same way from src/lib/supabase/courses.ts.
 import type { CanvasAssignmentBrief } from "@/lib/canvas";
 import { applyRepoGradeBinding } from "./repoGradesRows";
+import { isConfirmableCandidate, partitionConfirmableBindings } from "./repoGradesBindingConfirm";
 // buildRosterUpdate is the exact merge the "Link GitHub usernames to roster"
 // workflow step (steps.course-setup.rosters.ts:70-173) uses to fold accepted
 // {student, canvasUserId, username} submissions into studentRepos/roster -
@@ -502,7 +503,8 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
     username: string | null
   ): Promise<{ ok: true } | { error: string }> => {
     if (!course) return { error: "Choose a course tile first." };
-    const nextStudentRepos = applyRepoGradeBinding(course.studentRepos, repo, canvasUserId, student, username);
+    if (!isConfirmableCandidate({ canvasUserId, name: student })) return { error: "A valid Canvas user id is required." };
+    const nextStudentRepos = applyRepoGradeBinding(course.studentRepos, repo, canvasUserId.trim(), student, username);
     const result = await updateCourseHubAction(course.id, {
       ...courseToInput(course),
       studentRepos: nextStudentRepos,
@@ -622,6 +624,12 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
     if (!course) return { error: "Choose a course tile first." };
     if (bindings.length === 0) return { error: "No bindings to confirm." };
 
+    const { confirmable, blocked } = partitionConfirmableBindings(bindings.map(({ repo, canvasUserId, student }) => ({
+      repo,
+      candidate: { canvasUserId, name: student },
+    })));
+    if (blocked.length > 0) return { error: "Every selected binding needs a valid Canvas user id." };
+
     // ONE reduce over ALL bindings, ONE write - never a loop calling
     // acceptBinding once per binding. acceptBinding computes its patch from
     // the `course` captured in this render's closure, which does not change
@@ -630,7 +638,7 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
     // course.studentRepos, so only the LAST binding would actually survive
     // the last write. Folding every binding into one array first and issuing
     // exactly one updateCourseHubAction avoids that entirely.
-    const next = bindings.reduce(
+    const next = confirmable.reduce(
       (acc, b) => applyRepoGradeBinding(acc, b.repo, b.canvasUserId, b.student, null),
       course.studentRepos
     );
@@ -641,7 +649,7 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
     });
     if ("error" in writeResult) return { error: writeResult.error };
     setCourses((prev) => prev.map((c) => (c.id === writeResult.course.id ? writeResult.course : c)));
-    return { confirmed: bindings.length };
+    return { confirmed: confirmable.length };
   };
 
   return {

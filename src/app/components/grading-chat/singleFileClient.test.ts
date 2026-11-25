@@ -104,9 +104,11 @@ describe("postPrepareSingleFile", () => {
 describe("wiring", () => {
   it("the panel consults the zip transport for zips and the single-file transport otherwise, after the video decision", () => {
     const panel = read("src/app/components/grading-chat/GradingChatPanel.tsx");
-    expect(panel.indexOf("submitLooseVideo(")).toBeLessThan(panel.indexOf("chooseSingleFileTransport(file)"));
-    expect(panel).toContain("chooseZipTransport(file)");
-    expect(panel).toContain("submitStoragedSingleFile(file, fileLabel)");
+    const video = panel.indexOf("submitLooseVideo(");
+    const pickTransport = panel.indexOf("const chosen = isZip ? chooseZipTransport(file) : chooseSingleFileTransport(file)");
+    expect(video).toBeGreaterThan(-1);
+    expect(pickTransport).toBeGreaterThan(video);
+    expect(panel).toMatch(/transport\.kind === "storage" \? \(isZip \? submitStoragedZip\([^\r\n]*\) : submitStoragedSingleFile\(file, fileLabel, safeCurrent\)\)/);
   });
 
   it("the driver handles storaged-file and the client leaf never imports the office extractor", () => {

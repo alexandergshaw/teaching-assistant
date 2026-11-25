@@ -28,15 +28,15 @@ const WALKTHROUGH_ANNOUNCEMENT_DIR = path.resolve(process.cwd(), "src/app/compon
 // ---------------------------------------------------------------------------
 
 describe("A19 AC-6: draftOne forwards ctx.timing into WalkthroughAnnouncementDraftInput.timing, sliced structurally", () => {
-  // SMOOTH-WALKTHROUGH W3 (R-AC16): draftOne moved verbatim from the panel into
-  // useWalkthroughGenerationAdapters.ts; the slice retargets there unchanged.
+  // The adapter supplies the same timing input for prompt review and drafting.
   const panelSource = fs.readFileSync(
     path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "useWalkthroughGenerationAdapters.ts"),
     "utf-8"
   );
 
   const startIdx = panelSource.indexOf("const draftOne = useCallback(");
-  const endIdx = panelSource.indexOf("},\n    []\n  );", startIdx);
+  const closing = /\},\s*\[scopeKey, reviewPrompt\]\s*\);/.exec(panelSource.slice(startIdx));
+  const endIdx = closing ? startIdx + closing.index : -1;
 
   it("finds draftOne's own useCallback opening (start anchor resolves)", () => {
     expect(startIdx, "expected to find draftOne's own useCallback opening").toBeGreaterThan(-1);
@@ -49,6 +49,8 @@ describe("A19 AC-6: draftOne forwards ctx.timing into WalkthroughAnnouncementDra
   it("the bounded slice forwards timing: ctx.timing", () => {
     const slice = panelSource.slice(startIdx, endIdx);
     expect(slice).toMatch(/timing:\s*ctx\.timing/);
+    expect(slice).toContain("prepareWalkthroughAnnouncementPromptAction(input)");
+    expect(slice).toContain("draftWalkthroughAnnouncementAction({ ...input,");
   });
 });
 
@@ -68,6 +70,8 @@ describe("A19 AC-7: draftWalkthroughAnnouncementAction forwards input.timing int
   // (draftWalkthroughVideoScriptAction, confirmed adjacent by direct
   // reading of the source file) is a reliable, simpler boundary here.
   const endIdx = actionSource.indexOf("export async function draftWalkthroughVideoScriptAction(", startIdx);
+  const composerStart = actionSource.indexOf("function composeProviderPrompt(");
+  const composerEnd = actionSource.indexOf("function promptSignature(", composerStart);
 
   it("finds draftWalkthroughAnnouncementAction's own opening (start anchor resolves)", () => {
     expect(startIdx, "expected to find draftWalkthroughAnnouncementAction's own opening").toBeGreaterThan(-1);
@@ -78,8 +82,13 @@ describe("A19 AC-7: draftWalkthroughAnnouncementAction forwards input.timing int
   });
 
   it("the bounded slice forwards timing: input.timing", () => {
-    const slice = actionSource.slice(startIdx, endIdx);
-    expect(slice).toMatch(/timing:\s*input\.timing/);
+    expect(composerStart).toBeGreaterThan(-1);
+    expect(composerEnd).toBeGreaterThan(composerStart);
+    expect(composerEnd).toBeLessThan(startIdx);
+    const action = actionSource.slice(startIdx, endIdx);
+    const composer = actionSource.slice(composerStart, composerEnd);
+    expect(action).toContain("composeProviderPrompt(input, styleBlock)");
+    expect(composer).toMatch(/buildWalkthroughAnnouncementPrompt\(\{[^]*?timing:\s*input\.timing/);
   });
 });
 

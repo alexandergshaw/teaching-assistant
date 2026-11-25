@@ -1,4 +1,4 @@
-import { expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 const llm = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn(async () => ({ id: "owner" })) }));
@@ -6,6 +6,7 @@ vi.mock("@/lib/grade/extraction", () => ({ resolveEntryLinks: vi.fn(async (entry
 vi.mock("@/lib/code-runner", () => ({ runSubmittedCode: vi.fn(async () => null) }));
 vi.mock("@/lib/llm", async (original) => ({ ...await original<object>(), callLlm: llm }));
 import { POST } from "./route";
+afterEach(() => vi.unstubAllEnvs());
 const names = ["Code Reflection", "Pseudocode or Flowchart", "Specifications and Correctness: Algorithm", "Specifications and Correctness: Data Structure", "Annotation and Documentation", "Modular and Reusable", "Readability"];
 const weights = [25, 10, 20, 20, 10, 10, 5];
 const rubric = ["Criteria", "Meets Expectations (100%)", "Partially Meets Expectations (70%)", "Does Not Meet Expectations (0%)", "Value", ...names.flatMap((name, i) => [name, "Complete work", "Partial work", "Missing work", String(weights[i])]), "Total:", "100%"].join("\n");
@@ -26,6 +27,7 @@ it.each([rubric.replace("\n25\n", "\nmissing\n"), rubric.replace("Criteria\n", "
 });
 
 it("passes bounded static project content to the model without truncation", async () => {
+  vi.stubEnv("GRADE_MAX_CHARS_PER_SUBMISSION", "2100000");
   llm.mockResolvedValue({ ok: true, text: JSON.stringify({ overallComment: "Reviewed", rubricResults: names.map((area, i) => ({ area, score: `${weights[i]}/${weights[i]}` })) }) });
   const content = "BEGIN " + "x".repeat(2_060_000) + " END_OF_FULL_DATA";
   const request = { sourceIndex: 0, entry: { student: "Synthetic", content, mergedFileCount: 0, submittedFiles: [], staticOnly: true }, assignmentInstructions: "Review this synthetic work.", rubric, provider: "gemini", pointsPossible: 100 };
@@ -34,7 +36,18 @@ it("passes bounded static project content to the model without truncation", asyn
   expect(JSON.stringify(llm.mock.lastCall?.[0])).toContain("END_OF_FULL_DATA");
 });
 
+it("holds static project evidence that exceeds the configured model limit", async () => {
+  vi.stubEnv("GRADE_MAX_CHARS_PER_SUBMISSION", "400000");
+  llm.mockClear();
+  const request = { sourceIndex: 0, entry: { student: "Synthetic", content: "x".repeat(400_001), mergedFileCount: 0, submittedFiles: [], staticOnly: true }, assignmentInstructions: "Review synthetic work.", rubric, provider: "gemini", pointsPossible: 100 };
+  const response = await POST({ headers: new Headers({ "content-type": "application/json" }), json: async () => request } as NextRequest);
+  expect(response.status).toBe(200);
+  expect((await response.json()).result.ungraded).toMatchObject({ kind: "grading-failed", message: expect.stringContaining("single-pass grading input budget") });
+  expect(llm).not.toHaveBeenCalled();
+});
+
 it("restores a large static CSV before the model call and refuses corrupt CSV evidence", async () => {
+  vi.stubEnv("GRADE_MAX_CHARS_PER_SUBMISSION", "2100000");
   const { stripUnneededRawBase64 } = await import("@/app/components/grading/incrementalRunPlan");
   const text = "id,value\n" + "x".repeat(2_040_000) + " END_OF_CSV", file = { name: "dataset.csv", extension: "csv", previewContent: "id,value", previewTruncated: true, mimeType: "text/csv", rawBase64: Buffer.from(text).toString("base64") };
   const entry = stripUnneededRawBase64({ student: "Synthetic", content: `header\n${text}\nfooter`, mergedFileCount: 1, submittedFiles: [file], staticOnly: true });

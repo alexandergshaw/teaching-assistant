@@ -1,11 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ requireUser: vi.fn(), callLlm: vi.fn() }));
-vi.mock("@/lib/supabase/auth", () => ({ requireUser: mocks.requireUser }));
+import { actionAuthClient, actionAuthUser } from "./action-auth.fixtures";
+const mocks = vi.hoisted(() => ({ readIdentity: vi.fn(), callLlm: vi.fn() }));
+vi.mock("@/lib/supabase/server", () => ({ createClient: () => actionAuthClient(mocks.readIdentity) }));
+vi.mock("@/lib/supabase/app-users", async (original) => ({
+  ...await original<typeof import("@/lib/supabase/app-users")>(),
+  getAppUser: async (id: string) => actionAuthUser(id, "instructor"),
+}));
 vi.mock("@/lib/llm", () => ({ callLlm: mocks.callLlm }));
 import { generateDiscussionTemplateAction } from "./discussions-tool";
 
 describe("discussion template action", () => {
-  beforeEach(() => { vi.clearAllMocks(); mocks.requireUser.mockResolvedValue({ id: "owner" }); });
+  beforeEach(() => { vi.clearAllMocks(); mocks.readIdentity.mockResolvedValue({ id: "owner" }); });
   it("sends exactly the instructor-edited prompt after authentication", async () => {
     mocks.callLlm.mockResolvedValue({ ok: true, text: "Hello {{name}}, thank you." });
     expect(await generateDiscussionTemplateAction("Edited prompt", "gemini")).toEqual({ template: "Hello {{name}}, thank you." });
@@ -29,7 +34,7 @@ describe("discussion template action", () => {
     expect(options.deadlineMs).toBeLessThanOrEqual(Date.now() + 45_000);
   });
   it("does not dispatch on auth failure or blank input", async () => {
-    mocks.requireUser.mockRejectedValueOnce(new Error("no session"));
+    mocks.readIdentity.mockResolvedValueOnce(null);
     expect(await generateDiscussionTemplateAction("test")).toHaveProperty("error");
     expect(await generateDiscussionTemplateAction("  ")).toHaveProperty("error");
     expect(mocks.callLlm).not.toHaveBeenCalled();

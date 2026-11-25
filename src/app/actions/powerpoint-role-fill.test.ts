@@ -1,12 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { actionAuthClient, actionAuthUser } from "./action-auth.fixtures";
 import { pptFixture } from "@/lib/powerpoint-template-library/inventory.test";
 import { inventorySlides } from "@/lib/powerpoint-template-library/inventory";
-const h = vi.hoisted(() => ({ user: vi.fn(), library: vi.fn(), source: vi.fn() }));
-vi.mock("@/lib/supabase/auth", () => ({ requireUser: h.user }));
+const h = vi.hoisted(() => ({ readIdentity: vi.fn(), library: vi.fn(), source: vi.fn() }));
+vi.mock("@/lib/supabase/server", () => ({ createClient: () => actionAuthClient(h.readIdentity) }));
+vi.mock("@/lib/supabase/app-users", async (original) => ({
+  ...await original<typeof import("@/lib/supabase/app-users")>(),
+  getAppUser: async (id: string) => actionAuthUser(id, "instructor"),
+}));
 vi.mock("@/lib/powerpoint-template-library/store", () => ({ getLibrary: h.library, getSource: h.source }));
 import { fillRoleAwarePowerPointAction } from "./powerpoint-role-fill";
 
-beforeEach(() => { vi.clearAllMocks(); h.user.mockResolvedValue({ id: "owner" }); });
+beforeEach(() => { vi.clearAllMocks(); h.readIdentity.mockResolvedValue({ id: "owner" }); });
 describe("role-aware PowerPoint action", () => {
   it("loads owner-scoped library/source and returns a real role-ordered package", async () => {
     const bytes = await pptFixture(["Content source", "Title source"]);
@@ -19,14 +24,21 @@ describe("role-aware PowerPoint action", () => {
     expect(h.source).toHaveBeenCalledWith("owner", "source");
     expect((await inventorySlides(Buffer.from(result.base64, "base64"))).map((slide) => slide.text)).toEqual(["Body", "Opening"]);
   });
-  it("refuses identity mismatch, unauthenticated requests and content it cannot preserve", async () => {
+  it("refuses identity mismatch and content it cannot preserve", async () => {
     h.library.mockResolvedValue({ sourceFileId: "other" });
     const deck = { presentationTitle: "Deck", slides: [{ role: "title", title: "Title", bullets: [] }] };
     expect(await fillRoleAwarePowerPointAction("library", "source", deck)).toHaveProperty("error", expect.stringContaining("no longer match"));
     expect(h.source).not.toHaveBeenCalled();
     expect(await fillRoleAwarePowerPointAction("library", "source", { ...deck, slides: [{ ...deck.slides[0], notes: "Important" }] })).toHaveProperty("error", expect.stringContaining("notes"));
-    h.user.mockRejectedValueOnce(new Error("no access"));
+  });
+  it("rejects an unauthenticated request before loading a matching library or source", async () => {
+    h.readIdentity.mockResolvedValueOnce(null);
+    h.library.mockResolvedValue({ sourceFileId: "source" });
+    const deck = { presentationTitle: "Deck", slides: [{ role: "title", title: "Title", bullets: [] }] };
     expect(await fillRoleAwarePowerPointAction("library", "source", deck)).toHaveProperty("error");
+    expect(h.readIdentity).toHaveBeenCalledOnce();
+    expect(h.library).not.toHaveBeenCalled();
+    expect(h.source).not.toHaveBeenCalled();
   });
   it("does not return output if the library changes while filling", async () => {
     const bytes = await pptFixture(["Source"]);

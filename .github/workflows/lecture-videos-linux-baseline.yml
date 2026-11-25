@@ -1,0 +1,22 @@
+name: Lecture Videos Linux baseline
+on:
+  push:
+    branches: [codex/lecture-videos-linux-baseline]
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    env:
+      TZ: America/Chicago
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 8ef2765bfd07dfe20a56578546c54da6ae03e012
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm test

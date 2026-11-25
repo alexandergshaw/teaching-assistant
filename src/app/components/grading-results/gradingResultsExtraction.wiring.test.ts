@@ -113,7 +113,7 @@ function tableRowsAreDrivenBySortedResults(source: string): boolean {
   const importsHook = /import\s*\{[^}]*\buseResultsSort\b[^}]*\}\s*from\s*["']\.\/grading-results\/useResultsSort["']/.test(
     source
   );
-  const callsHook = /=\s*useResultsSort\(run\)/.test(source);
+  const callsHook = /=\s*useResultsSort\(\s*run\s*[,)]/.test(source);
   const mapsSortedDirectly = /\bsortedResults\.map\(/.test(source);
   const mapsVisibleFromSorted =
     /\bvisibleResults\.map\(/.test(source) && /\bvisibleResults\s*=\s*[^;]*\bsortedResults\b/.test(source);

@@ -6,6 +6,16 @@ include publication, production deployment, real lecture footage, or live
 provider calls. Those local checks are regression evidence. Record each
 production check below separately before labeling the workflow live-verified.
 
+## Keep the release open
+
+An active gate is an unfinished step. Keep checking until it finishes. For a
+failed gate, record the failing command and run link, compare with clean main
+where needed, fix the failure, and rerun the full gates against the new
+candidate. A clean-main failure helps with diagnosis and still blocks release.
+Only close the release after both live recordings pass, the owner asks to stop,
+or a concrete blocker prevents further authorized work. For a blocker, record
+the exact dependency, the last verified commit, and which checks are pending.
+
 ## Required evidence
 
 Before publication, run the repo's standing gates and include the Recording

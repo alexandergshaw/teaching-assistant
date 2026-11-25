@@ -94,21 +94,37 @@ describe('public CLI conformance', () => {
     await assertRejected(d, 'assignment.start', { ...payload, writePaths: [], affectedPaths: [], resources: [] }, /paused|running/i);
   }, 60_000);
 
-  it('fences cancelled publishers and retains locks until reconciliation', async () => {
+  it('fences cancelled publishers and retains locks until reconciliation', async ({ onTestFinished }) => {
+    const lateWriter = `
+      const fs = require('node:fs');
+      const deadline = setTimeout(() => { clearInterval(timer); }, 50000);
+      const timer = setInterval(() => {
+        if (!fs.existsSync('../allow-late-write')) return;
+        clearInterval(timer);
+        clearTimeout(deadline);
+        fs.writeFileSync('output.txt', 'late');
+      }, 50);
+      fs.writeFileSync('../late-writer-ready', 'ready');
+    `;
     const d = await fixture(policy => {
-      policy.gates.late = { executable: process.execPath, args: ['-e', "const cp=require('node:child_process');cp.spawn(process.execPath,['-e',\"setTimeout(()=>require('node:fs').writeFileSync('output.txt','late'),1800)\"],{detached:true,stdio:'ignore'}).unref();setTimeout(()=>{},8000)"], resources: ['workspace'] };
+      policy.gates.late = {
+        executable: process.execPath,
+        args: ['-e', `const { spawn } = require('node:child_process');
+          spawn(process.execPath, ['-e', ${JSON.stringify(lateWriter)}], { detached: true, stdio: 'ignore' }).unref();
+          setTimeout(() => {}, 50000);`],
+        resources: ['workspace'],
+      };
     });
     await d.activity('criteria');
     await d.start('cancelled', 'criteria', 'criteria', demoWorker('cancelled'), [], {}, ['output.txt'], ['workspace']);
     const child = spawn(process.execPath, cliArguments(['run', 'cancelled', 'late', '--state', d.stateDirectory, '--actor', 'operator']), { stdio: 'ignore' });
     const closed = new Promise<void>((resolve, reject) => { child.once('exit', () => resolve()); child.once('error', reject); });
-    for (let attempt = 0; attempt < 100; attempt++) {
-      if (Object.values((await d.state()).operations).some(operation => operation.status === 'running')) break;
-      await new Promise(resolve => setTimeout(resolve, 30));
-    }
+    onTestFinished(async () => {
+      if (child.exitCode === null && child.signalCode === null) child.kill();
+      await closed;
+    });
+    await expect.poll(() => readFile(path.join(d.root, 'late-writer-ready'), 'utf8').catch(() => ''), { timeout: 20_000 }).toBe('ready');
     expect(Object.values((await d.state()).operations).some(operation => operation.status === 'running')).toBe(true);
-    // Wait for the controlled child to launch its separately tracked-by-fixture descendant.
-    await new Promise(resolve => setTimeout(resolve, 200));
     await d.event('assignment.cancel', { assignment: 'cancelled', reason: 'Controlled late writer' });
     await closed;
     expect(['cancelled', 'quarantined']).toContain((await d.state()).assignments.cancelled.status);
@@ -117,8 +133,8 @@ describe('public CLI conformance', () => {
     expect(d.command(['import', 'cancelled', 'late-artifact', source], false).code).not.toBe(0);
     await assertRejected(d, 'assignment.quiesce', { assignment: 'cancelled', quarantine: false }, /operation|running|terminat|quiescen/i);
     await assertRejected(d, 'assignment.start', { id: 'successor', item: 'transform', activity: 'criteria', role: 'criteria', worker: demoWorker('successor'), inputs: {}, writePaths: ['output.txt'], affectedPaths: ['output.txt'], resources: [], allowedActions: ['write'], deadline: Date.now() + 60_000, deliverables: [] }, /lock|conflict|overlap|quarantin/i);
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    expect(await readFile(path.join(d.workspace, 'output.txt'), 'utf8')).toBe('late');
+    await writeFile(path.join(d.root, 'allow-late-write'), 'go');
+    await expect.poll(() => readFile(path.join(d.workspace, 'output.txt'), 'utf8').catch(() => ''), { timeout: 5_000 }).toBe('late');
     expect(Object.values((await d.state()).operations).some(operation => operation.status === 'unknown')).toBe(true);
   }, 60_000);
 
@@ -129,7 +145,8 @@ describe('public CLI conformance', () => {
     await writeFile(file, JSON.stringify({ id: 'owner-spoof', expectedRevision: (await d.state()).revision, actor: 'worker', type: 'run.pause', payload: { reason: 'Spoof' } }));
     const result = invokeCli(['apply', file, '--state', d.stateDirectory, '--actor', 'worker']);
     expect(result.code).not.toBe(0);
-  });
+    expect(result.stdout + result.stderr).toMatch(/owner|actor|authority/i);
+  }, 60_000);
 
   it('arbitrates conflicting revisions from two actual CLI processes', async () => {
     const d = await fixture();

@@ -160,7 +160,9 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // clean main YAML; nine newly filed rows and four rows retained from the
 // committed rendered backlog bring the candidate to 247 row-start lines.
 // The prior 194 canary was already stale; this does not reconcile its history.
-const EXPECTED_ROW_COUNT = 247;
+// 2026-11-24: the committed YAML declares 273 rows. Measured independently
+// from the parser by counting lines beginning with `- id:`.
+const EXPECTED_ROW_COUNT = 273;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

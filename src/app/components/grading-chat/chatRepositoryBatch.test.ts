@@ -43,8 +43,8 @@ describe("repository evidence admission", () => {
     expect(result.error).toBeNull();
     expect(result.lines.map((line) => line.original)).toEqual(inputs.filter(Boolean));
     expect(result.lines.map((line) => line.status)).toEqual(["accepted", "accepted", "accepted", "accepted", "duplicate", "rejected", "unresolved", "unresolved"]);
-    expect(result.lines[1].requested).toEqual({ owner: "alpha", repo: "project", ref: "main", subpath: "src" });
-    expect(result.lines[2].requested).toEqual({ owner: "beta", repo: "project", ref: "v1", subpath: "app.ts" });
+    expect(result.lines[1].requested).toEqual({ owner: "alpha", repo: "project", kind: "tree", ref: "main", subpath: "src" });
+    expect(result.lines[2].requested).toEqual({ owner: "beta", repo: "project", kind: "blob", ref: "v1", subpath: "app.ts" });
     expect(result.lines[3].requested).toEqual({ owner: "gamma", repo: "project" });
   });
   it.each(["https://github.com/a/b/../c", "https://github.com/a/b/tree/main/%2e%2e/x", "https://github.com/a/b/tree/feature%2Fx", "https://github.com/a/b/tree/main/x%2fy", "https://github.com/a/b/tree/main/%zz", "https://github.com/a/b/issues", "https://github.com/a/b/tree", "https://github.com/a/b/blob/main", "https://evil.com/a/b", "https://github.com@evil.com/a/b", "ftp://github.com/a/b", "https://github.com/a/b?x=1", "https://github.com/a/b#x", "https://github.com/a/b//tree/main"])("rejects unsafe or unsupported scope %s", (input) => {

@@ -72,11 +72,11 @@ describe("preCheckArgs", () => {
 describe("creditsArg (the EQUAL/INSIDE rule, never vitest's substring rule)", () => {
   const passed = (relPath: string): ExecutedFile => ({ relPath, passed: 1 });
 
-  it("credits equal paths and accepts Windows-specific spellings only on Windows", () => {
+  it("credits equal paths across separators and folds case only on Windows", () => {
     const file = passed("src/tools/backlog/ids.test.ts");
     expect(creditsArg(file, "src/tools/backlog/ids.test.ts", "file", ROOT)).toBe(true);
     expect(creditsArg(file, "./src/tools/backlog/ids.test.ts", "file", ROOT)).toBe(true);
-    expect(creditsArg(file, "src\\tools\\backlog\\ids.test.ts", "file", ROOT)).toBe(windows);
+    expect(creditsArg(file, "src\\tools\\backlog\\ids.test.ts", "file", ROOT)).toBe(true);
     expect(creditsArg(file, "SRC/TOOLS/BACKLOG/IDS.TEST.TS", "file", ROOT)).toBe(windows);
     expect(creditsArg(file, `${ROOT}/src/tools/backlog/ids.test.ts`, "file", ROOT)).toBe(true);
   });

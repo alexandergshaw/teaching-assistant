@@ -2,8 +2,7 @@
 // top-level component key canary scans src/app/components/ NON-recursively, so
 // it never sees this subdirectory; a key added here would otherwise ship with
 // no canary bumped. The scan is over RAW source (comments included), so any
-// other ta- spelling in a non-test file in this directory joins the set: refer
-// to shared keys by description, never by literal.
+// other ta- spelling in a non-test file in this directory joins the set.
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "fs";
 import { join } from "path";
@@ -21,6 +20,8 @@ const EXPECTED: readonly string[] = [
   "ta-grading-chat-lms-picker",
   "ta-grading-chat-rubric",
   "ta-grading-chat-rubric-memory",
+  // Shared results key read by chat's legacy edit recovery.
+  "ta-grading-results-edits",
 ];
 
 function collectTaKeys(source: string): string[] {

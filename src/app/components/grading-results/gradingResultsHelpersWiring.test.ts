@@ -101,6 +101,11 @@ describe("grading-results client files stay client-bundle-safe (A23: transitive 
   // walk's real roots are directoryRoots(dir) plus GradingResults.tsx and
   // types.ts (Ruling Z3), below.
   const CLIENT_FILES = [
+    "./IncompleteEvidenceReview.tsx",
+    "./RegradeCandidate.tsx",
+    "./VersionedResultDetails.tsx",
+    "./instructorHoldReason.ts",
+    "./prioritizeRecentZipRows.ts",
     "./gradingResultsHelpers.ts",
     "./RowFeedbackBoxes.tsx",
     "./SubmittedFilesPanel.tsx",

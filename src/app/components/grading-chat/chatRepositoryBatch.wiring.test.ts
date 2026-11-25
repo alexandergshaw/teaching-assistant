@@ -19,12 +19,37 @@ describe("repository staging live caller boundary (source only)", () => {
     const panel = source("GradingChatPanel.tsx");
     const handler = panel.slice(panel.indexOf("const handleNewSession"), panel.indexOf("const withPreparing"));
     for (const confirmed of [false, true]) {
-      let key = 7;
       const effects: string[] = [];
-      const run = new Function("window", "driver", "roleIntake", "repositoryProposals", "setRepositoryEvidence", "emptyRepositoryEvidence", "setRepositoryEvidenceSession", "setSubmitError", "setSetupNote", "setSetupExpanded", "dropSessionEpoch", "setVisibleDropEpoch", "directIntake", "setIncludeSetupFiles", "setDirectPreparing", "setPreparing", "setZipPhase", `${handler}; return handleNewSession;`)({ confirm: () => confirmed }, { reset: () => effects.push("driver") }, { cancel: () => effects.push("roles") }, { reset: () => effects.push("proposals") }, () => effects.push("evidence"), () => ({ lines: [], error: null }), (update: (value: number) => number) => { key = update(key); }, () => effects.push("error"), () => effects.push("setup"), () => {}, { current: 0 }, () => {}, { current: { cancel: () => {} } }, () => {}, () => {}, () => {}, () => {});
+      const epoch = { current: 7 };
+      const record = (effect: string) => () => effects.push(effect);
+      const bindings = {
+        window: { confirm: () => confirmed },
+        dropSessionEpoch: epoch,
+        setVisibleDropEpoch: record("epoch"),
+        zipReview: { cancel: record("zip review") },
+        resetIntake: record("shared intake"),
+        sharedIntakeLatch: {},
+        directIntake: { current: { cancel: record("direct intake") } },
+        setDirectPreparing: record("direct preparing"),
+        setPreparing: record("preparing"),
+        setZipPhase: record("zip phase"),
+        driver: { reset: record("driver") },
+        setPrioritySourceIndices: record("priority"),
+        setSetupExpanded: record("setup expanded"),
+        archiveReviewQueue: { current: { reset: () => {
+          effects.push("archive queue");
+          return { wasActive: false, waiting: [] };
+        } } },
+        setWaitingArchiveNames: record("waiting names"),
+        setSubmitError: record("error"),
+        setReviewFile: record("review file"),
+        setPartialOmissions: record("omissions"),
+        setSetupNote: record("setup note"),
+      };
+      const run = new Function(...Object.keys(bindings), `${handler}; return handleNewSession;`)(...Object.values(bindings));
       run();
-      expect(key).toBe(7);
-      expect(effects).toEqual(confirmed ? ["driver", "error", "setup"] : []);
+      expect(epoch.current).toBe(confirmed ? 8 : 7);
+      expect(effects).toEqual(confirmed ? ["epoch", "zip review", "shared intake", "direct intake", "direct preparing", "preparing", "zip phase", "driver", "priority", "setup expanded", "archive queue", "waiting names", "error", "review file", "omissions", "setup note"] : []);
     }
   });
   it("calls the parser and safe diagnostics without grading controls", () => {

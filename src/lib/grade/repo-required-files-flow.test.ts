@@ -7,12 +7,17 @@ vi.mock("../gemini", async (original) => ({ ...await original<typeof import("../
 vi.mock("../code-runner", () => ({ runSubmittedCode: vi.fn(async () => null) }));
 import { prepareChatSubmissionAction } from "../../app/actions/grading-chat-intake";
 import { POST } from "../../app/api/grade-run-item/route";
-import { getRepoTreeWithMeta, getFileText } from "../github";
+import { getRepoTreeWithMeta, getFileText, type RepoTreeEntry } from "../github";
 import { callLlm } from "../llm";
 import { canvasWorkToEntry, ingestZipEntries } from "./extraction";
 import type { StudentSubmissionEntry } from "./types";
 const url = "https://github.com/org/student";
-const treeEntries = [{ path: "src/Main.py", type: "blob", size: 5, sha: "a" }, { path: "tests/Main.py", type: "blob", size: 5, sha: "b" }, { path: "REQUIRED", type: "blob", size: 0, sha: "c" }, { path: "proof.png", type: "blob", size: 2, sha: "d" }];
+const treeEntries: RepoTreeEntry[] = [
+  { path: "src/Main.py", type: "blob", size: 5, sha: "a" },
+  { path: "tests/Main.py", type: "blob", size: 5, sha: "b" },
+  { path: "REQUIRED", type: "blob", size: 0, sha: "c" },
+  { path: "proof.png", type: "blob", size: 2, sha: "d" },
+];
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getRepoTreeWithMeta).mockResolvedValue({ entries: treeEntries, truncated: false });

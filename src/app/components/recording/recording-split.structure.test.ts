@@ -150,7 +150,7 @@ describe("recording-split structure", () => {
         ["messages", "Message replies"], ["moduledeck", "Module walkthrough deck"],
         ["speed", "Change speed"], ["captions", "Caption a video"],
         ["slides", "Narrate a deck"], ["avatar", "Avatar"],
-        ["lecturevideos", "Lecture Videos"],
+        ["lecturevideos", "Narrated Videos"],
       ]);
     });
 

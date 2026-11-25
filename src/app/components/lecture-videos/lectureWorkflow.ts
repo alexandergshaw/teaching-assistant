@@ -5,20 +5,25 @@ import { materialContext, partName, type LectureCue, type LecturePart, type Lect
 
 export async function draftPartCues(part: LecturePart, index: number, project: LectureProject, signal: AbortSignal): Promise<LectureCue[]> {
   signal.throwIfAborted();
-  const { frames, durationSec } = await withBlobUrl(part.source, (url) => extractVideoFrames(url, 18));
+  const goal = project.goal?.trim().slice(0, 4000);
+  const focus = part.focus.trim().slice(0, 5000);
+  const guidance = project.guidance.trim().slice(0, 5000);
+  const timestampNotes = [focus, goal, guidance].filter(Boolean).join("\n");
+  const { frames, durationSec } = await withBlobUrl(part.source, (url) => extractVideoFrames(url, 18, { timestampNotes, signal }));
   signal.throwIfAborted();
   const materials = materialContext(project);
   const context = [
-    `Lecture: ${project.title || "Untitled lecture"}`,
-    `Video ${index + 1} of ${project.parts.length}: ${partName(part, index)}`,
-    `Lecture sequence:\n${project.parts.map((item, i) => `${i + 1}. ${partName(item, i)}`).join("\n")}`,
-    part.focus && `Focus for this video: ${part.focus}`,
-    project.guidance.trim() && `Instructor's speaking guidance: ${project.guidance.trim().slice(0, 5000)}`,
-    project.sample.trim() && `Sample of the instructor's speaking style:\n${project.sample.trim().slice(0, 10000)}`,
-    materials && `Shared lecture materials for factual context:\n${materials.slice(0, 24000)}`,
-    "Draft only this video's voice-over. Match each cue to what is visible, use a natural speaking pace, and leave room for pauses. Match the sample's cadence and style.",
+    project.title.trim() && `Project title: ${project.title.trim().slice(0, 300)}`,
+    `Video ${index + 1} of ${project.parts.length}: ${partName(part, index).slice(0, 300)}`,
+    project.parts.length > 1 && `Project sequence:\n${project.parts.map((item, i) => `${i + 1}. ${partName(item, i).slice(0, 180)}`).join("\n").slice(0, 5000)}`,
+    goal && `Narration goal and audience: ${goal}`,
+    focus && `Focus and timestamp notes for this video: ${focus}`,
+    guidance && `Speaking guidance: ${guidance}`,
+    project.sample.trim() && `Writing sample for style and cadence:\n${project.sample.trim().slice(0, 10000)}`,
+    materials && `Reference material for factual context:\n${materials.slice(0, 24000)}`,
+    "Draft narration only for the current video. Use the sequence for orientation and keep details about other videos out of this script.",
   ].filter(Boolean).join("\n\n");
-  const result = await generateVideoNarrationAction(frames, durationSec, context, "gemini");
+  const result = await generateVideoNarrationAction(frames, durationSec, context, "gemini", "general");
   signal.throwIfAborted();
   if ("error" in result) throw new Error(result.error);
   return result.segments.map(({ start, end, text }) => ({

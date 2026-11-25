@@ -4,7 +4,7 @@ export const REC_VIEWS = [
   ["messages", "Message replies"], ["moduledeck", "Module walkthrough deck"],
   ["speed", "Change speed"], ["captions", "Caption a video"],
   ["slides", "Narrate a deck"], ["avatar", "Avatar"],
-  ["lecturevideos", "Lecture Videos"],
+  ["lecturevideos", "Narrated Videos"],
 ] as const;
 export type RecView = (typeof REC_VIEWS)[number][0];
 const REC_VIEW_VALUES: ReadonlySet<string> = new Set(REC_VIEWS.map(([key]) => key));

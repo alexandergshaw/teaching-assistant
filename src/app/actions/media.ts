@@ -519,29 +519,49 @@ export async function describeScreenRecordingAction(
 }
 
 /**
- * Generate timed narration segments for a video: returns a script that an
- * instructor would speak over each part, synchronized to the video timeline.
+ * Generate timed voice-over segments synchronized to an existing video.
  */
 export async function generateVideoNarrationAction(
   frames: Array<{ timeSec: number; base64: string }>,
   durationSec: number,
   context: string,
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  mode?: "general"
 ): Promise<{ segments: Array<{ start: number; end: number; text: string }> } | { error: string }> {
   try {
     await requireUser();
+    if (mode === "general" && (!Number.isFinite(durationSec) || durationSec <= 0 || !Array.isArray(frames))) {
+      return { error: "The video duration or frames could not be read." };
+    }
     if (!frames.length) return { error: "No frames were extracted from the video." };
     if (frames.length > 30) return { error: "Too many frames; sample the video more sparsely." };
-    const sizeCheck = checkWireBudget(sumBase64WireBytes(frames.map((f) => f.base64)), "These video frames");
+    if (mode === "general" && frames.some((frame, index) => (
+      !Number.isFinite(frame?.timeSec) || frame.timeSec < 0 || frame.timeSec > durationSec
+      || (index > 0 && frame.timeSec <= frames[index - 1].timeSec)
+      || typeof frame.base64 !== "string" || !frame.base64
+    ))) {
+      return { error: "Video frames must have distinct, ordered times within the video." };
+    }
+    const textBytes = mode === "general" ? new TextEncoder().encode(JSON.stringify(context)).byteLength + 2048 : 0;
+    const sizeCheck = checkWireBudget(sumBase64WireBytes(frames.map((f) => f.base64)) + textBytes, "These video frames");
     if (!sizeCheck.ok) return { error: sizeCheck.error ?? "These video frames are too large to upload in one request." };
     const parts: LlmPart[] = [
       {
         text: [
-          "The images are keyframes sampled from a video (classroom recording, screen capture, or lecture footage), in order, with their timestamps in seconds:",
-          frames.map((f, i) => `Frame ${i + 1}: t=${Math.round(f.timeSec)}s`).join("\n"),
+          mode === "general"
+            ? "These are selected frames from an existing video, ordered by their exact times in seconds. Some frames are close together to show a change; some spans are unsampled."
+            : "The images are keyframes sampled from a video (classroom recording, screen capture, or lecture footage), in order, with their timestamps in seconds:",
+          frames.map((f, i) => `Frame ${i + 1}: t=${mode === "general" ? Number(f.timeSec.toFixed(3)) : Math.round(f.timeSec)}s`).join("\n"),
           context.trim() ? `Context from the author: ${context.trim()}` : "",
-          `The full video is ${Math.round(durationSec)} seconds long.`,
-          'Write a spoken narration script for a voice-over of this video. Return ONLY a JSON array like [{"start": 0, "end": 12, "text": "..."}] - seconds as numbers, segments in order covering 0 to the full duration with no overlaps, each segment 5-25 seconds, each text 1-3 conversational first-person-plural sentences an instructor would SAY over that part of the video (not captions - flowing spoken narration that explains what is happening and why). No markdown, no code fences.',
+          `The full video is ${mode === "general" ? Number(durationSec.toFixed(3)) : Math.round(durationSec)} seconds long.`,
+          mode === "general"
+            ? [
+                "Write a natural spoken voice-over that fits the video's content, audience, and narration goal if supplied. Match the author’s speaking guidance and sample style where relevant.",
+                "Use visible events and timestamped notes to synchronize cues with meaningful changes. Do not narrate a reveal before it happens. Treat sampled frames and supplied reference materials as evidence; do not invent actions, speech, exact event times between samples, or unsupported details.",
+                "Leave quiet gaps for the visuals when helpful. Keep each cue brief enough for its allotted time at a comfortable speaking pace. Use only words meant to be spoken, without headings or stage directions.",
+                'Return only a JSON array such as [{"start": 0.5, "end": 8, "text": "..."}]. Use numeric seconds, keep all cues within the video, and order them without overlap. No Markdown or code fences.',
+              ].join("\n")
+            : 'Write a spoken narration script for a voice-over of this video. Return ONLY a JSON array like [{"start": 0, "end": 12, "text": "..."}] - seconds as numbers, segments in order covering 0 to the full duration with no overlaps, each segment 5-25 seconds, each text 1-3 conversational first-person-plural sentences an instructor would SAY over that part of the video (not captions - flowing spoken narration that explains what is happening and why). No markdown, no code fences.',
         ].filter(Boolean).join("\n\n"),
       },
       ...frames.map((f) => ({ inlineData: { mimeType: "image/jpeg", data: f.base64 } })),

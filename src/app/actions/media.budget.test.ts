@@ -201,6 +201,46 @@ describe("describeScreenRecordingAction - combined wire-size budget across frame
     expect(callLlm).toHaveBeenCalledTimes(1);
     expect("error" in result).toBe(false);
   });
+
+  it("adds context to the narration wire budget before invoking the provider", async () => {
+    const frames = [{ timeSec: 0, base64: base64OfWireBytes(UPLOAD_WIRE_BUDGET_BYTES - 3_000) }];
+    const result = await generateVideoNarrationAction(frames, 2, "A".repeat(4_000), "gemini", "general");
+    expect(result).toHaveProperty("error", expect.stringContaining("too large to upload in one request"));
+    expect(callLlm).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { duration: 0, times: [0] },
+    { duration: Number.POSITIVE_INFINITY, times: [0] },
+    { duration: 3, times: [Number.NaN] },
+    { duration: 3, times: [-0.1] },
+    { duration: 3, times: [3.1] },
+    { duration: 3, times: [2, 1] },
+    { duration: 3, times: [1, 1] },
+  ])("refuses invalid generic timestamps before invoking the provider (%j)", async ({ duration, times }) => {
+    const frames = times.map((timeSec) => ({ timeSec, base64: base64OfWireBytes(1_000) }));
+    expect(await generateVideoNarrationAction(frames, duration, "", "gemini", "general")).toHaveProperty("error");
+    expect(callLlm).not.toHaveBeenCalled();
+  });
+
+  it("uses exact frame times and a content-neutral voice-over prompt for Narrated Videos", async () => {
+    vi.mocked(callLlm).mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: '[{"start":0.5,"end":2.1,"text":"Watch the reveal."}]',
+      body: "",
+    } as never);
+    const frames = [{ timeSec: 1.432, base64: base64OfWireBytes(1_000) }];
+    const result = await generateVideoNarrationAction(frames, 2.3, "Audience: first-time users", "gemini", "general");
+    expect(result).toEqual({ segments: [{ start: 0.5, end: 2.1, text: "Watch the reveal." }] });
+    const payload = JSON.stringify(vi.mocked(callLlm).mock.lastCall?.[0]);
+    expect(payload).toContain("t=1.432s");
+    expect(payload).toContain("2.3 seconds long");
+    expect(payload).toContain("Audience: first-time users");
+    expect(payload).toContain("Do not narrate a reveal before it happens");
+    expect(payload).not.toMatch(/classroom|lecture footage|first-person-plural|instructor would SAY/);
+    expect(vi.mocked(callLlm).mock.lastCall?.[1]).toBe("gemini");
+  });
 });
 
 describe("generateVideoNarrationAction - combined wire-size budget across frames", () => {

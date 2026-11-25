@@ -27,7 +27,7 @@ export function useLectureProject(account: string) {
           setProject(saved.project);
         }
       } catch {
-        if (!cancelled) setLoadError("The saved lecture could not be opened. Reload the page to try again.");
+        if (!cancelled) setLoadError("The saved video project could not be opened. Reload the page to try again.");
       } finally {
         if (!cancelled) setLoading(false);
       }

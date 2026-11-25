@@ -79,11 +79,13 @@ export const SCREEN_SHARE_CONSTRAINTS = {
   audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
 };
 
-export async function requestScreenShareStream(): Promise<MediaStream> {
+export async function requestScreenShareStream(shareSystemAudio = true): Promise<MediaStream> {
   const displayMediaDevices = navigator.mediaDevices as unknown as {
     getDisplayMedia: (constraints: { video: unknown; audio: unknown }) => Promise<MediaStream>;
   };
-  return displayMediaDevices.getDisplayMedia(SCREEN_SHARE_CONSTRAINTS);
+  return displayMediaDevices.getDisplayMedia(shareSystemAudio
+    ? SCREEN_SHARE_CONSTRAINTS
+    : { video: SCREEN_SHARE_CONSTRAINTS.video, audio: false });
 }
 
 export interface MicDspOptions {

@@ -11,7 +11,7 @@ import {
   parseFilesView, REC_VIEW_CHANGE_EVENT, type UrlNavState,
 } from "./url-state";
 
-const expected = [["record", "Record"], ["discussions", "Discussion replies"], ["messages", "Message replies"], ["moduledeck", "Module walkthrough deck"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"], ["lecturevideos", "Lecture Videos"]] as const;
+const expected = [["record", "Record"], ["discussions", "Discussion replies"], ["messages", "Message replies"], ["moduledeck", "Module walkthrough deck"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"], ["lecturevideos", "Narrated Videos"]] as const;
 const base: UrlNavState = {
   tab: "manual", coursesSection: "courses", toolsSection: "manual", librarySection: "files",
   manualView: "recording", automateView: "templates", buildView: "prebuilt", contentView: "modules",

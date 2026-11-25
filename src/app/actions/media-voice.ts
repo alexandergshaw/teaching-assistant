@@ -5,7 +5,7 @@ import { saveRecordingFile, getRecordingFileUrl } from "@/lib/recording-files";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/supabase/auth";
 import type { AppUserRole } from "@/lib/supabase/app-users";
-import { getUserStyle, saveUserStyle, clearVoiceClone } from "@/lib/user-style";
+import { getUserStyle, saveUserStyle } from "@/lib/user-style";
 import { checkWireBudget, sumBase64WireBytes } from "@/lib/upload-budget";
 
 // ── Voice / writing style (ElevenLabs + user_style) ─────────────────────────
@@ -38,10 +38,13 @@ export async function listElevenVoicesAction(): Promise<
       const detail = await res.text().catch(() => "");
       return { error: `Voice service error (HTTP ${res.status})${detail ? `: ${detail.slice(0, 200)}` : ""}` };
     }
-    const data = (await res.json().catch(() => null)) as { voices?: Array<{ voice_id?: string; name?: string; category?: string }> } | null;
+    const data = (await res.json().catch(() => null)) as { voices?: Array<{
+      voice_id?: string; name?: string; category?: string;
+      voice_verification?: { requires_verification?: boolean; is_verified?: boolean } | null;
+    }> } | null;
     if (!data?.voices) return { error: "Could not fetch voice list." };
     const voices = data.voices
-      .filter((v) => v.voice_id && v.name)
+      .filter((v) => v.voice_id && v.name && !(v.voice_verification?.requires_verification && !v.voice_verification.is_verified))
       .map((v) => ({
         voiceId: v.voice_id!,
         name: v.name!,
@@ -93,9 +96,9 @@ export async function saveWritingSampleAction(text: string): Promise<{ ok: true 
 }
 
 /**
- * Create or replace the user's cloned voice from audio samples.
+ * Create a cloned voice from audio samples and select it for narration.
  * Uploads the first sample file and stores voice_id and sample metadata.
- * Best-effort deletes the old ElevenLabs voice if a different one exists.
+ * Existing provider voices stay in the ElevenLabs library.
  */
 export async function setVoiceCloneAction(
   name: string,
@@ -130,10 +133,6 @@ export async function setVoiceCloneAction(
       source: "voice-sample",
     });
 
-    // Get the old voice ID to delete later
-    const oldStyle = await getUserStyle(supabase, user.id);
-    const oldVoiceId = oldStyle?.voiceId;
-
     // Save the new voice settings
     await saveUserStyle(supabase, user.id, {
       voiceId: newVoiceId,
@@ -141,66 +140,34 @@ export async function setVoiceCloneAction(
       voiceSampleName: recordingFile.name,
     });
 
-    // Best-effort delete old ElevenLabs voice
-    if (oldVoiceId && oldVoiceId !== newVoiceId) {
-      const key = process.env.ELEVENLABS_API_KEY?.trim();
-      if (key) {
-        try {
-          await fetch(`https://api.elevenlabs.io/v1/voices/${oldVoiceId}`, {
-            method: "DELETE",
-            headers: { "xi-api-key": key },
-          });
-        } catch {
-          // Ignore deletion failures
-        }
-      }
-    }
-
     return { voiceId: newVoiceId };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not set up your cloned voice." };
   }
 }
 
-/** Remove the cloned voice and clear the sample. */
+/** Clear the saved clone selection and its sample without deleting the provider voice. */
 export async function removeVoiceCloneAction(): Promise<{ ok: true } | { error: string }> {
   try {
     const user = await requireUser();
     const supabase = createServiceClient();
 
     const style = await getUserStyle(supabase, user.id);
-    if (!style) {
+    if (!style?.voiceSamplePath) {
       return { ok: true };
     }
 
-    const voiceId = style.voiceId;
+    const { data, error } = await supabase.from("user_style")
+      .update({ voice_id: null, voice_sample_path: null, voice_sample_name: null, updated_at: new Date().toISOString() })
+      .eq("user_id", user.id).eq("voice_sample_path", style.voiceSamplePath).select("user_id").maybeSingle();
+    if (error) return { error: "Could not clear the saved clone." };
+    if (!data) return { error: "The account voice changed. Refresh before clearing it." };
 
-    // Best-effort delete ElevenLabs voice
-    if (voiceId) {
-      const key = process.env.ELEVENLABS_API_KEY?.trim();
-      if (key) {
-        try {
-          await fetch(`https://api.elevenlabs.io/v1/voices/${voiceId}`, {
-            method: "DELETE",
-            headers: { "xi-api-key": key },
-          });
-        } catch {
-          // Ignore deletion failures
-        }
-      }
+    try {
+      await supabase.storage.from("recordings").remove([style.voiceSamplePath]);
+    } catch {
+      // The signed account selection has already been cleared.
     }
-
-    // Remove sample file best-effort
-    if (style.voiceSamplePath) {
-      try {
-        await supabase.storage.from("recordings").remove([style.voiceSamplePath]);
-      } catch {
-        // Ignore deletion failures
-      }
-    }
-
-    // Clear all voice settings
-    await clearVoiceClone(supabase, user.id);
 
     return { ok: true };
   } catch (err) {

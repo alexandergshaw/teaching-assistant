@@ -5,10 +5,13 @@
 
 import { awaitVideoFrameData, awaitVideoMetadata, ensureFiniteDuration, seekVideoTo } from "./caption-burn";
 import { startFrameTicker } from "./frame-ticker";
+import { narrationFrameChange, narrationNoteTimes, narrationProbeTimes, selectNarrationFrameTimes } from "./narration-frame-selection";
+import { UPLOAD_WIRE_BUDGET_BYTES } from "./upload-budget";
 
 export async function extractVideoFrames(
   url: string,
-  maxFrames = 24
+  maxFrames = 24,
+  narration?: { timestampNotes: string; signal: AbortSignal },
 ): Promise<{ frames: Array<{ timeSec: number; base64: string }>; durationSec: number }> {
   const v = document.createElement("video");
   v.playsInline = true;
@@ -24,23 +27,53 @@ export async function extractVideoFrames(
 
   try {
     await awaitVideoMetadata(v);
-    const dur = await ensureFiniteDuration(v);
+    const dur = await ensureFiniteDuration(v, narration?.signal);
 
-    // Set canvas dimensions
-    canvas.width = 640;
-    canvas.height = v.videoHeight && v.videoWidth ? Math.round((640 * v.videoHeight) / v.videoWidth) : 360;
-
-    const step = Math.max(5, dur / maxFrames);
-    const frames: Array<{ timeSec: number; base64: string }> = [];
-
-    for (let t = 0; t < dur; t += step) {
-      const target = Math.min(t, Math.max(0, dur - 0.1));
-      if (await seekVideoTo(v, target) === "stalled") {
+    const seekFrame = async (time: number) => {
+      narration?.signal.throwIfAborted();
+      if (await seekVideoTo(v, time) === "stalled") {
         throw new Error("The browser could not seek through the recording.");
       }
       await awaitVideoFrameData(v);
+      narration?.signal.throwIfAborted();
+    };
+
+    let times: number[];
+    if (narration) {
+      canvas.width = 112;
+      canvas.height = 64;
+      const probes = [];
+      let previous: Uint8ClampedArray | undefined;
+      for (const time of narrationProbeTimes(dur)) {
+        await seekFrame(time);
+        ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+        const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        probes.push({ timeSec: v.currentTime, change: previous ? narrationFrameChange(previous, pixels, canvas.width) : 0 });
+        previous = pixels;
+      }
+      times = selectNarrationFrameTimes(dur, maxFrames, probes, narrationNoteTimes(narration.timestampNotes, dur));
+    } else {
+      times = [];
+      const step = Math.max(5, dur / maxFrames);
+      for (let time = 0; time < dur; time += step) times.push(Math.min(time, Math.max(0, dur - 0.1)));
+    }
+
+    const scale = 640 / (narration ? Math.max(v.videoWidth, v.videoHeight, 1) : Math.max(v.videoWidth, 1));
+    canvas.width = v.videoWidth ? Math.max(1, Math.round(v.videoWidth * scale)) : 640;
+    canvas.height = v.videoHeight && v.videoWidth ? Math.max(1, Math.round(v.videoHeight * scale)) : 360;
+
+    const frames: Array<{ timeSec: number; base64: string }> = [];
+    // Leave room for context and the action envelope in the existing request cap.
+    const frameBudget = Math.floor((UPLOAD_WIRE_BUDGET_BYTES - 384 * 1024) / maxFrames);
+
+    for (const time of times) {
+      await seekFrame(time);
       ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-      const b64 = canvas.toDataURL("image/jpeg", 0.6).split(",")[1];
+      let b64 = canvas.toDataURL("image/jpeg", 0.6).split(",")[1];
+      if (narration && b64 && b64.length > frameBudget) {
+        b64 = canvas.toDataURL("image/jpeg", 0.35).split(",")[1];
+        if (b64 && b64.length > frameBudget) throw new Error("A video frame is too large to draft narration.");
+      }
       if (b64) {
         frames.push({ timeSec: v.currentTime, base64: b64 });
       }
@@ -191,7 +224,7 @@ export async function renderNarratedVideo(
     }
     options?.signal?.throwIfAborted();
 
-    // Use one clock origin for all cues in the strict lecture export.
+    // Use one clock origin for all cues in the strict narration export.
     const playbackStart = ac.currentTime - v.currentTime;
 
     // Start narration clips at their scheduled times

@@ -357,8 +357,9 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // ModalShell from birth rather than needing a name on one of the three
     // allowlists.
     // The baseline has 12 more MUI-managed sites (11 Dialogs and the quota
-    // Popover). Lecture Videos adds one shared confirmation for destructive edits.
-    expect(DIALOG_SITES.length).toBe(67);
+    // Popover). Narrated Videos uses shared modals for project confirmations
+    // and the ElevenLabs voice manager.
+    expect(DIALOG_SITES.length).toBe(68);
   });
 
   it("splits into the adopting sites and all three non-adopting allowlists' combined length", () => {
@@ -429,14 +430,15 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // 39 as of the LIVE-LMS-STUDENT-MESSAGING W3 chunk - the thirty-eight
     // described above plus live-messaging/MessagingModal.tsx, which likewise
     // adopts ModalShell from birth.
-    expect(ADOPTING_PATHS.size).toBe(40);
+    expect(ADOPTING_PATHS.size).toBe(41);
     expect(DIALOG_SITES.length - ADOPTING_PATHS.size).toBe(
       PERMANENT_EXCLUSIONS.length + DEFERRED_CLASS_MISMATCH.length + PENDING_ADOPTION.length,
     );
   });
 
-  it("routes Lecture Videos confirmations through the shared modal", () => {
+  it("routes Narrated Videos confirmations and voice management through the shared modal", () => {
     expect(ADOPTING_PATHS.has("src/app/components/lecture-videos/LectureVideos.tsx")).toBe(true);
+    expect(ADOPTING_PATHS.has("src/app/components/lecture-videos/LectureVoiceManager.tsx")).toBe(true);
   });
 });
 

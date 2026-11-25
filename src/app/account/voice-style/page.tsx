@@ -230,7 +230,7 @@ export default function VoiceStylePage() {
       if ("error" in result) {
         setError(result.error);
       } else {
-        setNotice("Voice clone removed.");
+        setNotice("Saved clone cleared from your account. It is still available in ElevenLabs.");
         clearVoiceId();
         setSampleUrl(null);
         setVoiceName("");
@@ -241,7 +241,7 @@ export default function VoiceStylePage() {
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not remove voice clone.");
+      setError(err instanceof Error ? err.message : "Could not clear the saved clone.");
     } finally {
       setBusy(false);
       setRemoveVoiceArmed(false);
@@ -335,7 +335,7 @@ export default function VoiceStylePage() {
                 <div className={styles.empty}>
                   {userStyle?.voiceId ? (
                     <>
-                      <strong>Voice clone:</strong> {userStyle.voiceSampleName || userStyle.voiceId}
+                      <strong>Selected voice:</strong> {userStyle.voiceSampleName || userStyle.voiceId}
                     </>
                   ) : (
                     <>Using the default voice</>
@@ -351,7 +351,7 @@ export default function VoiceStylePage() {
 
                 <div className={styles.stack}>
                   <label className={styles.label} htmlFor="voice-upload">
-                    {userStyle?.voiceId ? "Replace your voice" : "Upload a voice sample"}
+                    Upload a voice sample
                   </label>
                   <p className={styles.help}>
                     Audio file (30 seconds to 3 minutes of clear speech); max 7 MB total.
@@ -389,7 +389,7 @@ export default function VoiceStylePage() {
                       onClick={handleCreateVoiceClone}
                       disabled={busy}
                     >
-                      {busy ? "Creating…" : userStyle?.voiceId ? "Replace voice" : "Create voice"}
+                      {busy ? "Creating…" : "Create and select clone"}
                     </button>
                   ) : null}
 
@@ -404,14 +404,14 @@ export default function VoiceStylePage() {
                         {testingVoice ? "Testing…" : "Test my voice"}
                       </button>
 
-                      <button
+                      {userStyle.hasVoiceSample && <button
                         type="button"
                         className={styles.remove}
                         onClick={handleRemoveVoice}
                         disabled={busy}
                       >
-                        {removeVoiceArmed ? "Click again to confirm" : "Remove"}
-                      </button>
+                        {removeVoiceArmed ? "Confirm clear" : "Clear saved clone"}
+                      </button>}
                     </>
                   )}
                 </div>

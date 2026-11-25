@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { Alert, Box, Button, Divider, LinearProgress, MenuItem, Paper, Stack, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Divider, FormControlLabel, LinearProgress, MenuItem, Paper, Stack, Switch, TextField, Typography } from "@mui/material";
 import { renderNarratedVideo, type NarrationClip } from "@/lib/narrate-video";
 import { buildVttContent } from "../caption-studio/utils/captions";
 import { AudioPlayer, Section, UploadButton, useBlobUrl } from "./lectureControls";
@@ -59,6 +59,7 @@ export default function LecturePartEditor({ part, project, index, disabled, upda
   }
 
   function generate(cues: LectureCue[]) {
+    if (project.voiceSelectionRequired) return;
     run(`Generating ElevenLabs audio for ${name}`, async (signal) => {
       for (const cue of cues) {
         const audio = await synthesizeCue(cue, project.voice?.id, signal);
@@ -91,7 +92,8 @@ export default function LecturePartEditor({ part, project, index, disabled, upda
           clips.push({ startSec: start, base64: await readBase64(audio.blob), mimeType: audio.blob.type });
           signal.throwIfAborted();
         }
-        const output = await renderNarratedVideo(part.source, clips, "replace", setProgress, { audioContext, strict: true, signal });
+        const mode = part.mixSourceAudio ? "mix" : "replace";
+        const output = await renderNarratedVideo(part.source, clips, mode, setProgress, { audioContext, strict: true, signal });
         signal.throwIfAborted();
         if (!output.size) throw new Error("The browser did not produce a video.");
         update((previous) => ({ ...previous, output }));
@@ -129,12 +131,12 @@ export default function LecturePartEditor({ part, project, index, disabled, upda
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField fullWidth label="Part title" value={part.title} disabled={disabled}
                 onChange={(event) => update((previous) => ({ ...previous, title: event.target.value }))} />
-              <TextField fullWidth label="Part focus" placeholder="What's covered in this recording?" value={part.focus} disabled={disabled}
+              <TextField fullWidth multiline label="Recording focus and timestamp notes" placeholder="For example, 1:23 — explain the menu that opens." value={part.focus} disabled={disabled}
                 onChange={(event) => update((previous) => ({ ...previous, focus: event.target.value }))} />
             </Stack>
             <Typography variant="body2" color="text.secondary">{part.source.name} · {part.duration.toFixed(1)} s</Typography>
             <Box component="video" ref={videoRef} src={sourceUrl} controls muted playsInline preload="metadata"
-              aria-label={`Silent recording for ${name}`} sx={{ width: "100%", maxHeight: 380, bgcolor: "common.black", borderRadius: 1 }} />
+              aria-label={`Source recording for ${name}`} sx={{ width: "100%", maxHeight: 380, bgcolor: "common.black", borderRadius: 1 }} />
           </Section>
         </Box>
 
@@ -147,7 +149,7 @@ export default function LecturePartEditor({ part, project, index, disabled, upda
             <Button disabled={disabled || !part.cues.some((cue) => cue.text.trim())} onClick={() => run("Copying cue script", async () => {
               await navigator.clipboard.writeText(part.cues.map((cue) => `[${cue.start}–${cue.end} s] ${cue.text.trim()}`).join("\n\n"));
             })}>Copy cue script</Button>
-            <Button variant="outlined" disabled={disabled || !missingVoices.length} onClick={() => generate(missingVoices)}>
+            <Button variant="outlined" disabled={disabled || project.voiceSelectionRequired || !missingVoices.length} onClick={() => generate(missingVoices)}>
               Generate missing voices
             </Button>
           </Stack>
@@ -176,7 +178,7 @@ export default function LecturePartEditor({ part, project, index, disabled, upda
                     onChange={(event) => changeCue(cue.id, (previous) => ({ ...previous, text: event.target.value, audio: undefined }))} />
                   {cue.audio && <AudioPlayer blob={cue.audio.blob} label={`Voice for cue ${cueIndex + 1}`} />}
                   <Stack direction="row" spacing={1}>
-                    <Button disabled={disabled || !cue.text.trim()} onClick={() => generate([cue])}>
+                    <Button disabled={disabled || project.voiceSelectionRequired || !cue.text.trim()} onClick={() => generate([cue])}>
                       {cue.audio ? "Regenerate voice" : "Generate voice"}
                     </Button>
                     <Button color="error" disabled={disabled} onClick={(event) => {
@@ -197,6 +199,9 @@ export default function LecturePartEditor({ part, project, index, disabled, upda
       </Box>
 
       <Section title="Voice track and export">
+        <FormControlLabel label="Mix recording audio with narration"
+          control={<Switch checked={part.mixSourceAudio ?? false} disabled={disabled}
+            onChange={(_, checked) => update((previous) => ({ ...previous, mixSourceAudio: checked, output: undefined }))} />} />
         <TextField select label="Voice track" value={part.audioMode} disabled={disabled} sx={{ maxWidth: 280 }}
           onChange={(event) => update((previous) => ({ ...previous, audioMode: event.target.value === "take" ? "take" : "cues", output: undefined }))}>
           <MenuItem value="cues">Generated cue voices</MenuItem>

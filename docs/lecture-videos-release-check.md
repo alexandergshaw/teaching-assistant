@@ -18,6 +18,12 @@ the exact dependency, the last verified commit, and which checks are pending.
 
 ## Required evidence
 
+A release that targets `main` stays open until the full gates pass for the
+reviewed candidate, GitHub confirms that candidate reached `main`, and the
+production deployment reports the same revision. Carry the authorized target
+through follow-up implementation turns. A successful validation-branch run
+is the signal to continue the release when publication is authorized.
+
 Before publication, run the repo's standing gates and include the Recording
 URL, launch, tab-panel, lecture-project, file-size, and modal-adoption tests in
 the focused check. Verify keyboard dismissal and focus return for the shared
@@ -28,7 +34,7 @@ from failures introduced by the candidate.
    production URL, Ready deployment ID, and deployment Git SHA. Confirm the
    production deployment includes the reviewed change before starting the
    browser run.
-2. Open Tools > Recording > Lecture Videos in an authenticated instructor or
+2. Open Tools > Recording > Narrated Videos in an authenticated instructor or
    owner session. Add both Lecture 15 recordings and the lecture deck. Record
    source filenames and durations. If a source copy already has narration,
    strip the audio in a temporary copy without re-encoding the picture.

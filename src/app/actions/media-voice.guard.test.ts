@@ -45,7 +45,7 @@ vi.mock("@/lib/supabase/app-users", async (importOriginal) => {
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { getAppUser, ensureAppUser, type AppUserRow } from "@/lib/supabase/app-users";
 import { requireAppOwner } from "@/lib/supabase/auth";
-import { synthesizeNarrationAction, synthesizeLongNarrationAction } from "./media-voice";
+import { listElevenVoicesAction, removeVoiceCloneAction, synthesizeNarrationAction, synthesizeLongNarrationAction } from "./media-voice";
 
 const STOCK_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
 const OWNER_ENV_VOICE_ID = "owner-cloned-voice-id";
@@ -210,5 +210,45 @@ describe("RULING 125 - resolveNarrationVoiceId's env fallback is owner-only", ()
   it("PC3-equivalent non-vacuity check: the same non-owner session the tests above admit into requireUser() is refused by requireAppOwner() - proves this suite exercises a real active/instructor identity, not a mis-built fake", async () => {
     mockSession("instructor", null);
     await expect(requireAppOwner()).rejects.toThrow();
+  });
+});
+
+describe("shared voice picker and legacy stored clones", () => {
+  it("omits pending provider verification from lightweight voice selection", async () => {
+    mockSession("owner", null);
+    fetchMock.mockResolvedValueOnce(Response.json({ voices: [
+      { voice_id: "pending", name: "Pending", voice_verification: { requires_verification: true, is_verified: false } },
+      { voice_id: "verified", name: "Verified", voice_verification: { requires_verification: true, is_verified: true } },
+      { voice_id: "stock", name: "Stock", category: "premade" },
+    ] }));
+    expect(await listElevenVoicesAction()).toEqual({ voices: [
+      { voiceId: "verified", name: "Verified", category: "" },
+      { voiceId: "stock", name: "Stock", category: "premade" },
+    ] });
+  });
+
+  it("does not clear a selected account voice with no legacy sample", async () => {
+    mockSession("owner", "selected-library-voice");
+    expect(await removeVoiceCloneAction()).toEqual({ ok: true });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("compare-clears the legacy sample and leaves its provider voice in the library", async () => {
+    mockSession("owner", "legacy-voice");
+    const remove = vi.fn(async () => ({ error: null }));
+    const matchSample = vi.fn(() => ({ select: () => ({ maybeSingle: async () => ({ data: { user_id: "u1" }, error: null }) }) }));
+    const update = vi.fn(() => ({ eq: () => ({ eq: matchSample }) }));
+    vi.mocked(createServiceClient).mockReturnValue({
+      from: () => ({
+        select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { voice_id: "legacy-voice", voice_sample_path: "u1/voice.mp3" }, error: null }) }) }),
+        update,
+      }),
+      storage: { from: () => ({ remove }) },
+    } as never);
+    expect(await removeVoiceCloneAction()).toEqual({ ok: true });
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ voice_id: null, voice_sample_path: null }));
+    expect(matchSample).toHaveBeenCalledWith("voice_sample_path", "u1/voice.mp3");
+    expect(remove).toHaveBeenCalledWith(["u1/voice.mp3"]);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

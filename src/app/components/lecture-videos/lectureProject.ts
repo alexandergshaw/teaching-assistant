@@ -23,6 +23,7 @@ export type LecturePart = {
   take?: LectureAudio;
   output?: Blob;
   watchUrl: string;
+  mixSourceAudio?: boolean;
 };
 
 export type LectureMaterial = {
@@ -34,11 +35,13 @@ export type LectureMaterial = {
 
 export type LectureProject = {
   title: string;
+  goal?: string;
   materials: string;
   materialFiles: LectureMaterial[];
   guidance: string;
   sample: string;
   voice?: { id: string; name: string };
+  voiceSelectionRequired?: boolean;
   parts: LecturePart[];
   selectedId: string | null;
   announcementTitle: string;
@@ -106,7 +109,7 @@ export async function saveLectureProject(account: string, project: LectureProjec
       const next = revision + 1;
       request.onsuccess = () => {
         if (decodeProject(request.result).revision !== revision) {
-          reject(new LectureSaveConflict("Another tab has saved changes to this lecture."));
+          reject(new LectureSaveConflict("Another tab has saved changes to this project."));
           transaction.abort();
           return;
         }
@@ -123,6 +126,11 @@ export async function saveLectureProject(account: string, project: LectureProjec
 
 export function partName(part: LecturePart, index: number): string {
   return part.title.trim() || `Part ${index + 1}`;
+}
+
+export function removeProjectVoiceReference(project: LectureProject, id: string, wasDefault: boolean): LectureProject {
+  if (project.voice ? project.voice.id !== id : !wasDefault) return project;
+  return { ...project, voice: undefined, voiceSelectionRequired: true };
 }
 
 export function materialContext(project: LectureProject): string {

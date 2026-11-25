@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { changePartCue, missingCueVoices, renderBlocker, type LectureAudio, type LecturePart } from "./lectureProject";
+import { describe, expect, it, vi } from "vitest";
+import { changePartCue, emptyProject, loadLectureProject, missingCueVoices, removeProjectVoiceReference, renderBlocker, type LectureAudio, type LecturePart } from "./lectureProject";
 
 const clip: LectureAudio = { blob: new Blob(), duration: 2, name: "Narration" };
 const part: LecturePart = {
@@ -39,4 +39,50 @@ describe("lecture export readiness", () => {
     expect(changePartCue(imported, "first", (cue) => ({ ...cue, text: "Notes only." })).output).toBe(part.output);
     expect(renderBlocker({ ...imported, take: { ...clip, duration: 11 } })).toMatch(/longer/i);
   });
+
+  it("preserves saved audio and exports when an active voice is deleted", () => {
+    const project = { ...emptyProject(), parts: [part], voice: { id: "voice-1", name: "Narrator" } };
+    expect(removeProjectVoiceReference(project, "voice-2", true)).toBe(project);
+    const changed = removeProjectVoiceReference(project, "voice-1", false);
+    expect(changed.voice).toBeUndefined();
+    expect(changed.voiceSelectionRequired).toBe(true);
+    expect(changed.parts).toBe(project.parts);
+    expect(renderBlocker(changed.parts[0])).toBeUndefined();
+    const followsDefault = { ...project, voice: undefined };
+    expect(removeProjectVoiceReference(followsDefault, "voice-1", true).voiceSelectionRequired).toBe(true);
+  });
+});
+
+it("opens an existing lecture under the same account and storage key", async () => {
+  const project = {
+    title: "Lecture 15",
+    parts: [part],
+    selectedId: part.id,
+    voice: { id: "saved-voice", name: "Saved voice" },
+    announcementBody: "Watch both recordings.",
+  };
+  const request = { result: { revision: 8, project }, onsuccess: () => {} };
+  const get = vi.fn(() => {
+    queueMicrotask(() => request.onsuccess());
+    return request;
+  });
+  const database = { transaction: () => ({ objectStore: () => ({ get }) }), close: vi.fn() };
+  const open = vi.fn(() => {
+    const pending = { result: database, onsuccess: () => {} };
+    queueMicrotask(() => pending.onsuccess());
+    return pending;
+  });
+  vi.stubGlobal("indexedDB", { open });
+  try {
+    const saved = await loadLectureProject("instructor");
+    expect(open).toHaveBeenCalledWith("teaching-assistant-lecture-videos", 1);
+    expect(get).toHaveBeenCalledWith("instructor");
+    expect(saved.revision).toBe(8);
+    expect(saved.project).toMatchObject(project);
+    expect(saved.project.parts[0].cues).toBe(part.cues);
+    expect(saved.project.parts[0].output).toBe(part.output);
+    expect(saved.project.goal ?? "").toBe("");
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

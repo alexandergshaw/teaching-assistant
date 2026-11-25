@@ -2,19 +2,22 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import {
-  Alert, Box, Button, CircularProgress, List, ListItemButton, ListItemText, MenuItem, Stack, TextField, Typography,
+  Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, CircularProgress, List, ListItemButton, ListItemText, MenuItem, Stack, TextField, Typography,
 } from "@mui/material";
 import { draftAnnouncementAction } from "@/app/actions";
 import { extractDeckSourceFileAction } from "@/app/actions/deck-source";
 import { transcribeLiveAudioAction } from "@/app/actions/live-class";
 import { listElevenVoicesAction } from "@/app/actions/media-voice";
 import { useSupabase } from "@/context/SupabaseProvider";
+import { isOwnerDecision } from "@/lib/access";
 import { checkWireBudget } from "@/lib/upload-budget";
 import { ModalShell } from "../ui/ModalShell";
 import LecturePartEditor, { type RunLectureTask } from "./LecturePartEditor";
+import LectureScreenCapture from "./LectureScreenCapture";
+import LectureVoiceManager from "./LectureVoiceManager";
 import { Section, UploadButton } from "./lectureControls";
 import { partFromVideo, readBase64 } from "./lectureMedia";
-import { assignCues, changePartCue, materialContext, missingCueVoices, partName, type LecturePart, type LectureProject } from "./lectureProject";
+import { assignCues, changePartCue, materialContext, missingCueVoices, partName, removeProjectVoiceReference, type LecturePart, type LectureProject } from "./lectureProject";
 import { draftPartCues, synthesizeCue } from "./lectureWorkflow";
 import { useLectureProject } from "./useLectureProject";
 
@@ -31,15 +34,16 @@ function watchLink(value: string) {
 }
 
 export default function LectureVideos({ active = true }: { active?: boolean }) {
-  const { user, loading } = useSupabase();
-  if (loading) return <Typography role="status">Opening lecture videos…</Typography>;
-  if (!user) return <Alert severity="info">Sign in to open your saved lecture project.</Alert>;
-  return <LectureWorkspace key={user.id} account={user.id} active={active} />;
+  const { user, loading, accessDecision } = useSupabase();
+  if (loading) return <Typography role="status">Opening Narrated Videos…</Typography>;
+  if (!user) return <Alert severity="info">Sign in to open your saved video project.</Alert>;
+  return <LectureWorkspace key={user.id} account={user.id} active={active} canManageVoices={isOwnerDecision(accessDecision)} />;
 }
 
-function LectureWorkspace({ account, active }: { account: string; active: boolean }) {
+function LectureWorkspace({ account, active, canManageVoices }: { account: string; active: boolean; canManageVoices: boolean }) {
   const { project, loading, loadError, saveStatus, update, updatePart, retrySave } = useLectureProject(account);
   const [busy, setBusy] = useState("");
+  const [capturing, setCapturing] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [voices, setVoices] = useState<Voice[] | null>(null);
@@ -54,7 +58,7 @@ function LectureWorkspace({ account, active }: { account: string; active: boolea
   }, [active]);
   const index = project.parts.findIndex((part) => part.id === project.selectedId);
   const selected = project.parts[index];
-  const disabled = Boolean(busy);
+  const disabled = Boolean(busy) || capturing;
 
   const run: RunLectureTask = (label, task) => {
     if (work.current) return;
@@ -67,7 +71,7 @@ function LectureWorkspace({ account, active }: { account: string; active: boolea
       try {
         await task(controller.signal);
       } catch (cause) {
-        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "The lecture task failed. Try again.");
+        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "The video task failed. Try again.");
       } finally {
         work.current = null;
         if (!controller.signal.aborted) setBusy("");
@@ -84,14 +88,15 @@ function LectureWorkspace({ account, active }: { account: string; active: boolea
     update((previous) => ({ ...previous, [key]: value }));
   }
 
-  function addVideos(files: File[]) {
-    run("Reading silent recordings", async (signal) => {
+  function addVideos(files: File[], mixSourceAudio = false) {
+    run("Reading recordings", async (signal) => {
       const accepted: LecturePart[] = [];
       const failures: string[] = [];
       for (const file of files) {
         signal.throwIfAborted();
         try {
-          accepted.push(await partFromVideo(file));
+          const part = await partFromVideo(file);
+          accepted.push(mixSourceAudio ? { ...part, mixSourceAudio: true } : part);
         } catch (cause) {
           failures.push(`${file.name}: ${cause instanceof Error ? cause.message : "Could not read the file."}`);
         }
@@ -105,13 +110,13 @@ function LectureWorkspace({ account, active }: { account: string; active: boolea
   }
 
   function addMaterials(files: File[]) {
-    run("Reading lecture materials", async (signal) => {
+    run("Reading reference files", async (signal) => {
       const failures: string[] = [];
       for (const file of files) {
         signal.throwIfAborted();
         try {
-          const size = checkWireBudget(Math.ceil(file.size / 3) * 4, "This lecture material");
-          if (!size.ok) throw new Error(size.error ?? "This lecture material is too large.");
+          const size = checkWireBudget(Math.ceil(file.size / 3) * 4, "This reference file");
+          if (!size.ok) throw new Error(size.error ?? "This reference file is too large.");
           const base64 = await readBase64(file);
           signal.throwIfAborted();
           const result = await extractDeckSourceFileAction(file.name, base64);
@@ -157,18 +162,45 @@ function LectureWorkspace({ account, active }: { account: string; active: boolea
   }
 
   function chooseVoice(id: string) {
-    const selectedVoice = voices?.find((voice) => voice.voiceId === id);
-    const voice = selectedVoice ? { id: selectedVoice.voiceId, name: selectedVoice.name } : undefined;
+    const selected = voices?.find((voice) => voice.voiceId === id);
+    if (id && !selected) return;
+    selectProjectVoice(selected ? { id: selected.voiceId, name: selected.name } : undefined);
+  }
+
+  function selectProjectVoice(voice: LectureProject["voice"]) {
+    if (!project.voiceSelectionRequired && voice?.id === project.voice?.id) return;
     const change = () => update((previous) => ({
       ...previous,
       voice,
-      parts: previous.parts.map((part) => part.cues.some((cue) => cue.audio)
+      voiceSelectionRequired: false,
+      parts: previous.voiceSelectionRequired ? previous.parts : previous.parts.map((part) => part.cues.some((cue) => cue.audio)
         ? assignCues(part, part.cues.map((cue) => ({ ...cue, audio: undefined }))) : part),
     }));
-    if (project.parts.some((part) => part.cues.some((cue) => cue.audio))) {
-      confirm("Change the lecture voice?", "Changing the voice clears the generated cue audio so you can regenerate it with this voice.", change,
-        voiceSelect.current?.querySelector<HTMLElement>('[role="combobox"]') ?? null);
+    if (!project.voiceSelectionRequired && project.parts.some((part) => part.cues.some((cue) => cue.audio))) {
+      confirm("Change the narration voice?", "Changing the voice clears the generated cue audio so you can regenerate it with this voice.", change,
+        voiceSelect.current?.querySelector<HTMLElement>('[role="combobox"]') ??
+        workspace.current?.querySelector<HTMLElement>('#manage-elevenlabs-voices') ?? null);
     } else change();
+  }
+
+  function voiceSaved({ id, name, category, available = true }: { id: string; name: string; category: string; available?: boolean }) {
+    setVoices((previous) => previous && [
+      ...previous.filter((voice) => voice.voiceId !== id),
+      ...(available ? [{ voiceId: id, name, category }] : []),
+    ]);
+    if (project.voice?.id === id && project.voice.name !== name) {
+      update((previous) => ({
+        ...previous,
+        voice: previous.voice?.id === id ? { id, name } : previous.voice,
+      }));
+    }
+  }
+
+  function voiceDeleted(id: string, wasDefault: boolean) {
+    setVoices((previous) => previous?.filter((voice) => voice.voiceId !== id) ?? null);
+    if (project.voice?.id === id || (!project.voice && wasDefault)) {
+      update((previous) => removeProjectVoiceReference(previous, id, wasDefault));
+    }
   }
 
   function draftMissingCues() {
@@ -182,6 +214,7 @@ function LectureWorkspace({ account, active }: { account: string; active: boolea
   }
 
   function generateMissingVoices() {
+    if (project.voiceSelectionRequired) return;
     run("Generating missing cue voices", async (signal) => {
       for (const part of project.parts) {
         if (part.audioMode !== "cues") continue;
@@ -206,7 +239,7 @@ function LectureWorkspace({ account, active }: { account: string; active: boolea
 
   function removePart(trigger: HTMLElement) {
     if (!selected) return;
-    confirm("Remove this lecture part?", `Remove ${partName(selected, index)}, including its recording, cues, audio, and preview?`, () => {
+    confirm("Remove this recording?", `Remove ${partName(selected, index)}, including its recording, cues, audio, and preview?`, () => {
       update((previous) => {
         const parts = previous.parts.filter((part) => part.id !== selected.id);
         return { ...previous, parts, selectedId: parts[Math.min(index, parts.length - 1)]?.id ?? null };
@@ -253,43 +286,44 @@ function LectureWorkspace({ account, active }: { account: string; active: boolea
     });
   }
 
-  if (loading) return <Typography role="status">Opening your saved lecture…</Typography>;
+  if (loading) return <Typography role="status">Opening your saved project…</Typography>;
   if (loadError) return <Alert severity="error">{loadError}</Alert>;
 
   return (
     <Stack ref={workspace} spacing={3} sx={{ p: { xs: 1, md: 2 }, minWidth: 0 }}>
       <Box>
-        <Typography component="h2" variant="h5">Lecture videos</Typography>
+        <Typography component="h2" variant="h5">Narrated Videos</Typography>
         <Typography variant="body2" color="text.secondary" role="status" sx={{ mt: 0.5 }}>
-          {saveStatus === "saving" ? "Saving lecture on this device…" : saveStatus === "saved" ? "Lecture saved on this device" : "Lecture changes are unsaved"}
+          {saveStatus === "saving" ? "Saving project on this device…" : saveStatus === "saved" ? "Project saved on this device" : "Project changes are unsaved"}
         </Typography>
       </Box>
       {saveStatus === "failed" && (
         <Alert severity="error" action={<Button color="inherit" onClick={retrySave}>Retry save</Button>}>
-          Could not save the lecture on this device. Keep the page open until it saves.
+          Could not save the project on this device. Keep the page open until it saves.
         </Alert>
       )}
       {saveStatus === "conflict" && (
-        <Alert severity="error" action={<Button color="inherit" onClick={(event) => confirm("Load the saved lecture?", "Reloading will discard the unsaved changes in this tab.", () => window.location.reload(), event.currentTarget)}>Reload</Button>}>
-          Another tab saved changes to the lecture. Your edits in this tab are unsaved.
+        <Alert severity="error" action={<Button color="inherit" disabled={disabled} onClick={(event) => confirm("Load the saved project?", "Reloading will discard the unsaved changes in this tab.", () => window.location.reload(), event.currentTarget)}>Reload</Button>}>
+          Another tab saved changes to the project. Your edits in this tab are unsaved.
         </Alert>
       )}
       {busy && <Alert severity="info" role="status" icon={<CircularProgress size={20} />} sx={{ position: "sticky", top: 0, zIndex: 1 }}>{busy}…</Alert>}
       {error && <Alert severity="error" onClose={() => setError("")} sx={{ whiteSpace: "pre-line" }}>{error}</Alert>}
       {notice && <Alert severity="success" onClose={() => setNotice("")}>{notice}</Alert>}
 
-      <Section title="Shared lecture materials">
-        <Typography variant="body2" color="text.secondary">Cue drafting, sample transcription, and announcement drafting use Gemini.</Typography>
-        <TextField label="Lecture title" value={project.title} disabled={disabled} onChange={(event) => field("title", event.target.value)} />
-        <TextField fullWidth multiline minRows={3} label="Lecture materials and notes" value={project.materials} disabled={disabled}
-          placeholder="Paste your outline, topics to cover, or assignment instructions."
+      <Section title="Video context">
+        <TextField label="Project title" value={project.title} disabled={disabled} onChange={(event) => field("title", event.target.value)} />
+        <TextField label="What should viewers learn or do?" value={project.goal ?? ""} disabled={disabled}
+          onChange={(event) => field("goal", event.target.value)} />
+        <TextField fullWidth multiline minRows={3} label="Context and notes" value={project.materials} disabled={disabled}
+          placeholder="Describe the audience, workflow, or details to cover."
           onChange={(event) => field("materials", event.target.value)} />
-        <UploadButton label="Add materials" accept=".pptx,.pdf,.docx,.txt,.md,.csv,.html" multiple disabled={disabled} onFiles={addMaterials} />
+        <UploadButton label="Add reference files" accept=".pptx,.pdf,.docx,.txt,.md,.csv,.html" multiple disabled={disabled} onFiles={addMaterials} />
         {project.materialFiles.map((file) => (
           <Stack key={file.id} direction="row" spacing={1} sx={{ alignItems: "center", justifyContent: "space-between" }}>
             <Typography variant="body2">{file.name}{file.truncated ? " (long file, text shortened)" : ""}</Typography>
             <Button size="small" disabled={disabled} aria-label={`Remove ${file.name}`} onClick={(event) => confirm(
-              "Remove lecture material?", `Remove the extracted text from ${file.name}?`,
+              "Remove reference file?", `Remove the extracted text from ${file.name}?`,
               () => update((previous) => ({ ...previous, materialFiles: previous.materialFiles.filter((material) => material.id !== file.id) })),
               event.currentTarget,
             )}>Remove</Button>
@@ -303,8 +337,9 @@ function LectureWorkspace({ account, active }: { account: string; active: boolea
         <UploadButton label="Transcribe a short WAV sample" accept=".wav,audio/wav,audio/x-wav" disabled={disabled}
           onFiles={([file], input) => addSample(file, input)} />
         {voices ? (
-          <TextField ref={voiceSelect} select label="Lecture voice" value={project.voice?.id ?? ""} disabled={disabled}
+          <TextField ref={voiceSelect} select label="Narration voice" value={project.voiceSelectionRequired ? "__choose__" : project.voice?.id ?? ""} disabled={disabled}
             onChange={(event) => chooseVoice(event.target.value)} slotProps={{ select: { displayEmpty: true }, inputLabel: { shrink: true } }}>
+            {project.voiceSelectionRequired && <MenuItem disabled value="__choose__">Choose a replacement voice</MenuItem>}
             <MenuItem value="">Account default</MenuItem>
             {project.voice && !voices.some((voice) => voice.voiceId === project.voice?.id) && (
               <MenuItem value={project.voice.id}>{project.voice.name} (unavailable)</MenuItem>
@@ -314,12 +349,20 @@ function LectureWorkspace({ account, active }: { account: string; active: boolea
         ) : <Button variant="outlined" onClick={loadVoices} disabled={disabled} sx={{ alignSelf: "flex-start" }}>
           Choose ElevenLabs voice{project.voice ? ` (${project.voice.name})` : ""}
         </Button>}
+        {canManageVoices && <LectureVoiceManager active={active} disabled={disabled || Boolean(confirmation)} selectedVoice={project.voice}
+          selectionRequired={project.voiceSelectionRequired}
+          onSelectVoice={selectProjectVoice} onVoiceSaved={voiceSaved} onVoiceDeleted={voiceDeleted} />}
+        {project.voiceSelectionRequired && <Alert severity="info">
+          Choose a replacement voice before generating more narration. Your existing audio and exports are available.
+        </Alert>}
       </Section>
 
-      <Section title="Lecture parts">
-        <UploadButton label="Add silent recordings" accept=".mp4,.webm,.mov,.m4v,.ogg,.ogv" multiple disabled={disabled} onFiles={addVideos} />
+      <Section title="Recordings">
+        <LectureScreenCapture active={active} disabled={Boolean(busy) || Boolean(confirmation)}
+          onCapturingChange={setCapturing} onCaptured={(file, hasSystemAudio) => addVideos([file], hasSystemAudio)} />
+        <UploadButton label="Add recordings" accept=".mp4,.webm,.mov,.m4v,.ogg,.ogv" multiple disabled={disabled} onFiles={(files) => addVideos(files)} />
         {project.parts.length > 0 && <>
-          <List disablePadding aria-label="Lecture parts">
+          <List disablePadding aria-label="Recordings">
             {project.parts.map((part, partIndex) => (
               <ListItemButton key={part.id} selected={part.id === project.selectedId} disabled={disabled}
                 aria-current={part.id === project.selectedId ? "true" : undefined} onClick={() => field("selectedId", part.id)}>
@@ -337,7 +380,7 @@ function LectureWorkspace({ account, active }: { account: string; active: boolea
             <Button variant="outlined" disabled={disabled || !project.parts.some((part) => !part.cues.length)} onClick={draftMissingCues}>
               Draft cues for remaining parts
             </Button>
-            <Button variant="outlined" disabled={disabled || !project.parts.some((part) => part.audioMode === "cues" && missingCueVoices(part).length)} onClick={generateMissingVoices}>
+            <Button variant="outlined" disabled={disabled || project.voiceSelectionRequired || !project.parts.some((part) => part.audioMode === "cues" && missingCueVoices(part).length)} onClick={generateMissingVoices}>
               Generate missing voices across parts
             </Button>
           </Stack>}
@@ -347,23 +390,30 @@ function LectureWorkspace({ account, active }: { account: string; active: boolea
       {selected && <LecturePartEditor key={selected.id} part={selected} project={project} index={index} disabled={disabled}
         update={(change) => updatePart(selected.id, change)} run={run} confirm={confirm} />}
 
-      <Section title="Student announcement">
-        <Button variant="outlined" disabled={disabled || !project.parts.length} onClick={(event) => draftAnnouncement(event.currentTarget)} sx={{ alignSelf: "flex-start" }}>Draft announcement</Button>
-        <TextField label="Announcement subject" value={project.announcementTitle} disabled={disabled}
-          onChange={(event) => field("announcementTitle", event.target.value)} />
-        <TextField fullWidth multiline minRows={4} label="Announcement message" value={project.announcementBody} disabled={disabled}
-          onChange={(event) => field("announcementBody", event.target.value)} />
-        <TextField fullWidth label="Module or lecture resource URL" type="url" value={project.resourceUrl} disabled={disabled}
-          error={Boolean(project.resourceUrl.trim() && !watchLink(project.resourceUrl))}
-          onChange={(event) => field("resourceUrl", event.target.value)} />
-        <TextField fullWidth label="GitHub starter URL" type="url" value={project.starterUrl} disabled={disabled}
-          error={Boolean(project.starterUrl.trim() && !watchLink(project.starterUrl))}
-          onChange={(event) => field("starterUrl", event.target.value)} />
-        {!!project.parts.length && <Typography variant="body2" color="text.secondary">
-          The copied announcement includes the videos in order. {project.parts.filter((part) => watchLink(part.watchUrl)).length} of {project.parts.length} watch links added.
-        </Typography>}
-        <Button variant="contained" disabled={disabled || !project.announcementBody.trim()} onClick={copyAnnouncement} sx={{ alignSelf: "flex-start" }}>Copy announcement</Button>
-      </Section>
+      <Accordion disableGutters>
+        <AccordionSummary expandIcon={<span aria-hidden="true">+</span>} id="video-announcement-header" aria-controls="video-announcement">
+          <Typography component="span">Student announcement (optional)</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Stack spacing={2}>
+            <Button variant="outlined" disabled={disabled || !project.parts.length} onClick={(event) => draftAnnouncement(event.currentTarget)} sx={{ alignSelf: "flex-start" }}>Draft announcement</Button>
+            <TextField label="Announcement subject" value={project.announcementTitle} disabled={disabled}
+              onChange={(event) => field("announcementTitle", event.target.value)} />
+            <TextField fullWidth multiline minRows={4} label="Announcement message" value={project.announcementBody} disabled={disabled}
+              onChange={(event) => field("announcementBody", event.target.value)} />
+            <TextField fullWidth label="Module or lecture resource URL" type="url" value={project.resourceUrl} disabled={disabled}
+              error={Boolean(project.resourceUrl.trim() && !watchLink(project.resourceUrl))}
+              onChange={(event) => field("resourceUrl", event.target.value)} />
+            <TextField fullWidth label="GitHub starter URL" type="url" value={project.starterUrl} disabled={disabled}
+              error={Boolean(project.starterUrl.trim() && !watchLink(project.starterUrl))}
+              onChange={(event) => field("starterUrl", event.target.value)} />
+            {!!project.parts.length && <Typography variant="body2" color="text.secondary">
+              The copied announcement includes the videos in order. {project.parts.filter((part) => watchLink(part.watchUrl)).length} of {project.parts.length} watch links added.
+            </Typography>}
+            <Button variant="contained" disabled={disabled || !project.announcementBody.trim()} onClick={copyAnnouncement} sx={{ alignSelf: "flex-start" }}>Copy announcement</Button>
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
 
       {confirmation && (
         <ModalShell label={confirmation.title} onDismiss={() => setConfirmation(null)}

@@ -90,7 +90,10 @@ describe("pinned grading archive transport", () => {
     const file=blob('lab/app.exe',contents);
     const fetcher=vi.fn(async()=>new Response(contents));vi.stubGlobal('fetch',fetcher);
     const read=makePinnedArchiveBytesReader({accountId:'binary-test',owner:'school',repo:'student',sha});
-    expect((await read([file],signal())).get(file.path)).toEqual(contents);expect(fetcher).toHaveBeenCalledOnce();
+    const result = (await read([file],signal())).get(file.path);
+    expect(result).toBeDefined();
+    expect(Buffer.compare(result!, contents)).toBe(0);
+    expect(fetcher).toHaveBeenCalledOnce();
     fetcher.mockResolvedValueOnce(new Response(Buffer.alloc(contents.length)));
     await expect(read([file],signal())).rejects.toThrow();
   });

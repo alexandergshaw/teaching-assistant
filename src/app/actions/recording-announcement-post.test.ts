@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/supabase/auth", () => ({ requireUser: vi.fn() }));
-vi.mock("@/lib/canvas", () => ({ resolveAnnouncementImage: vi.fn() }));
+vi.mock("@/lib/canvas/announcement-image-upload", () => ({ resolveAnnouncementImage: vi.fn() }));
 vi.mock("@/lib/canvas/announcements", () => ({ createAnnouncementFromSafeHtml: vi.fn(), RecordingAnnouncementRefusal: class RecordingAnnouncementRefusal extends Error {} }));
 import { requireUser } from "@/lib/supabase/auth";
-import { resolveAnnouncementImage } from "@/lib/canvas";
+import { resolveAnnouncementImage } from "@/lib/canvas/announcement-image-upload";
 import { createAnnouncementFromSafeHtml, RecordingAnnouncementRefusal } from "@/lib/canvas/announcements";
 import { postRecordingAnnouncementAction } from "./recording-announcement-post";
 

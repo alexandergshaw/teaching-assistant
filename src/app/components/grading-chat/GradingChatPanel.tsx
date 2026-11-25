@@ -294,7 +294,9 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
   const [applyLengthDeduction, setApplyLengthDeduction] = useState(false);
   const [lengthThresholdText, setLengthThresholdText] = useState(String(LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT));
   const recoveryFieldsRef = useRef({ instructions, rubric, harshness, feedbackLengthText, applyNamingDeduction, applyLengthDeduction, lengthThresholdText });
-  recoveryFieldsRef.current = { instructions, rubric, harshness, feedbackLengthText, applyNamingDeduction, applyLengthDeduction, lengthThresholdText };
+  useLayoutEffect(() => {
+    recoveryFieldsRef.current = { instructions, rubric, harshness, feedbackLengthText, applyNamingDeduction, applyLengthDeduction, lengthThresholdText };
+  }, [instructions, rubric, harshness, feedbackLengthText, applyNamingDeduction, applyLengthDeduction, lengthThresholdText]);
   const directIntake = useRef(createDirectFileIntake()), reviewSequence = useRef(0), archiveReviewQueue = useRef(createArchiveReviewQueue());
   const panelDropRef = useRef<((files: File[]) => void) | null>(null);
   const [waitingArchiveNames, setWaitingArchiveNames] = useState<string[]>([]);

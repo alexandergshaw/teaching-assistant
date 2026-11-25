@@ -4,17 +4,18 @@
  * getDbClient and the Supabase Database type; importing it into
  * src/lib/grade/engine.ts (which now stamps a run's rubricFingerprint at
  * every return site) would widen the engine's runtime import closure to
- * include a database client. This leaf depends on nothing but node:crypto
- * and the text-cleaning helper, so engine.ts can import it directly.
+ * include a database client. This leaf keeps fingerprinting synchronous and
+ * works in both browser uploads and server-side grading.
  *
  * rubric-bank.ts re-exports this function so every existing caller -
  * including its own upsert and rubric-bank.test.ts - is unchanged.
  */
 
-import { createHash } from "node:crypto";
+import hash from "hash.js";
 import { cleanText } from "@/lib/embedded/scaffold";
 
 /** Stable content id for a rubric: hash of its whitespace-normalized text. */
 export function rubricFingerprint(rubricText: string): string {
-  return createHash("sha256").update(cleanText(rubricText).toLowerCase()).digest("hex");
+  const bytes = new TextEncoder().encode(cleanText(rubricText).toLowerCase());
+  return hash.sha256().update(bytes).digest("hex");
 }

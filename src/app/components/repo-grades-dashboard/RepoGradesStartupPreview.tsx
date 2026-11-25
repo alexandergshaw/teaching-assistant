@@ -5,7 +5,6 @@ import { Accordion, AccordionDetails, AccordionSummary, Button, Table, TableBody
 import { loadRepoGradesStartupPreview } from "./startup-preview-client";
 import { StartupStatusChip } from "./StartupStatusChip";
 import { RepoGradesLoadingStatus } from "../repo-grades/RepoGradesLoadingStatus";
-import styles from "../repo-grades/repo-grades-dashboard.module.css";
 
 type Result = Awaited<ReturnType<typeof loadRepoGradesStartupPreview>>;
 type Preview = Extract<Result, { status: "preview" }>;
@@ -70,8 +69,8 @@ export function RepoGradesStartupPreview({ accountId, courseId }: { accountId: s
         <RepoGradesLoadingStatus label={pending ? "Checking GitHub discovery and grading history…" : null}
           settledLabel={result ? previewMessage(result) : undefined} />
         {!pending && result?.status === "preview" && result.targets.length > 0 && (
-          <TableContainer className={styles.scroll} role="region" aria-label="Startup plan targets" tabIndex={0}>
-            <Table className={styles.table} size="small" aria-label="Discovered repository folders and grading history">
+          <TableContainer role="region" aria-label="Startup plan targets" tabIndex={0}>
+            <Table size="small" aria-label="Discovered repository folders and grading history">
               <TableHead>
                 <TableRow>
                   <TableCell scope="col">Repository</TableCell>

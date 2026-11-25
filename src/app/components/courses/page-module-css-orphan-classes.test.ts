@@ -284,6 +284,7 @@ const totalGlobalSelectorOrphanCount = orphanReports.reduce((sum, r) => sum + r.
 
 const totalDefinedCount = orphanReports.reduce((sum, r) => sum + r.definedCount, 0);
 const totalOrphanCount = orphanReports.reduce((sum, r) => sum + r.orphans.length, 0);
+const totalLocalOrphanCount = totalOrphanCount - totalGlobalSelectorOrphanCount;
 
 // ---------------------------------------------------------------------------
 // PINNED RATCHET. Measured directly against this tree by running this file -
@@ -313,7 +314,9 @@ const totalOrphanCount = orphanReports.reduce((sum, r) => sum + r.orphans.length
 // recovering exactly those two from the orphan list - measured via the
 // EXPECTED_RECOVERED oracle below, which is the carve-out that distinguishes
 // this INTENDED recovery from an unintended loss.
-const PINNED_ORPHAN_CEILING = 118;
+// docs/css-orphans.md identifies two of those 118 as global-only selectors.
+// The local-class ceiling preserves the same budget with those two removed.
+const PINNED_ORPHAN_CEILING = 116;
 
 // A42 R4: the frozen, measured delta this conversion is expected to produce -
 // distinguishes an intended reference recovery (this) from an unintended
@@ -377,9 +380,10 @@ function orphansUnder(referenced: Map<string, Set<string>>): Map<string, Set<str
 function formatOrphanReport(): string {
   const lines: string[] = [];
   for (const r of orphanReports) {
-    if (r.orphans.length === 0) continue;
-    lines.push(`  ${r.sheet.label} (${r.orphans.length} orphan(s) of ${r.definedCount} defined):`);
-    for (const name of r.orphans) lines.push(`    .${name}`);
+    const localOrphans = r.orphans.filter((name) => !r.globalSelectorOrphans.includes(name));
+    if (localOrphans.length === 0) continue;
+    lines.push(`  ${r.sheet.label} (${localOrphans.length} local orphan(s) of ${r.definedCount} defined):`);
+    for (const name of localOrphans) lines.push(`    .${name}`);
   }
   return lines.join("\n");
 }
@@ -416,33 +420,36 @@ describe("CSS Module orphan-class ratchet (every *.module.css under src/)", () =
     expect(pageSheet!.orphans).not.toContain("thisClassNameHasNeverExistedAnywhere");
   });
 
-  it(`orphan count stays at or below the pinned ratchet of ${PINNED_ORPHAN_CEILING} (measured ${totalOrphanCount} of ${totalDefinedCount} defined classes across ${STYLESHEETS.length} stylesheets)`, () => {
+  it(`local orphan count stays at or below the pinned ratchet of ${PINNED_ORPHAN_CEILING} (measured ${totalLocalOrphanCount} across ${STYLESHEETS.length} stylesheets)`, () => {
     const message =
-      totalOrphanCount > PINNED_ORPHAN_CEILING
-        ? `Orphan count ROSE from the pinned ceiling of ${PINNED_ORPHAN_CEILING} to ${totalOrphanCount}. ` +
+      totalLocalOrphanCount > PINNED_ORPHAN_CEILING
+        ? `Local orphan count rose from the pinned ceiling of ${PINNED_ORPHAN_CEILING} to ${totalLocalOrphanCount}. ` +
           `This ratchet only tightens - either restore the missing className reference(s) below, or (if the ` +
           `class is genuinely dead) delete it from its stylesheet and lower PINNED_ORPHAN_CEILING in the same ` +
           `change. Do NOT raise PINNED_ORPHAN_CEILING to make this pass; that defeats the point of a ratchet.\n` +
           formatOrphanReport()
-        : totalOrphanCount < PINNED_ORPHAN_CEILING
-          ? `Orphan count FELL from the pinned ceiling of ${PINNED_ORPHAN_CEILING} to ${totalOrphanCount} - ` +
-            `lower PINNED_ORPHAN_CEILING to ${totalOrphanCount} in this same change so the ratchet actually tightens.`
+        : totalLocalOrphanCount < PINNED_ORPHAN_CEILING
+          ? `Local orphan count fell from the pinned ceiling of ${PINNED_ORPHAN_CEILING} to ${totalLocalOrphanCount} - ` +
+            `lower PINNED_ORPHAN_CEILING to ${totalLocalOrphanCount} in this same change so the ratchet actually tightens.`
           : "";
-    expect(totalOrphanCount, message).toBeLessThanOrEqual(PINNED_ORPHAN_CEILING);
+    expect(totalLocalOrphanCount, message).toBeLessThanOrEqual(PINNED_ORPHAN_CEILING);
     // A regression in the other direction - the pinned literal drifting stale
     // above the true count without anyone noticing - is exactly as much of a
     // silent failure as a rise. Fail loudly on drift too, with the same
     // "lower it" message, rather than only warning.
-    expect(totalOrphanCount, message).toBe(PINNED_ORPHAN_CEILING);
+    expect(totalLocalOrphanCount, message).toBe(PINNED_ORPHAN_CEILING);
   });
 
   it("A42 R4: the orphan delta from the stripSourceComments fix is EXACTLY the expected recovery - no sheet gains a newly-orphaned member, and no more than the expected set is recovered", () => {
     const oldOrphans = orphansUnder(referencedClassesUnder(preA42BuggyStripSourceComments));
     const newOrphans = orphansUnder(referencedClassesUnder(tokenizerStripComments));
+    let totalOldLocalOrphanCount = 0;
 
     for (const sheet of STYLESHEETS) {
       const before = oldOrphans.get(sheet.cssPath)!;
       const after = newOrphans.get(sheet.cssPath)!;
+      const globalOnly = globalOnlyClassesByStylesheet.get(sheet.cssPath)!;
+      totalOldLocalOrphanCount += [...before].filter((name) => !globalOnly.has(name)).length;
       const gained = [...after].filter((c) => !before.has(c));
       expect(gained, `${sheet.label} gained a newly-orphaned class after the stripper fix - an unintended loss`).toEqual([]);
 
@@ -452,8 +459,8 @@ describe("CSS Module orphan-class ratchet (every *.module.css under src/)", () =
     }
 
     const totalRecoveredCount = Object.values(EXPECTED_RECOVERED).reduce((sum, names) => sum + names.length, 0);
-    expect(totalOrphanCount).toBe(PINNED_ORPHAN_CEILING);
-    expect(PINNED_ORPHAN_CEILING).toBe(120 - totalRecoveredCount);
+    expect(totalLocalOrphanCount).toBe(PINNED_ORPHAN_CEILING);
+    expect(totalOldLocalOrphanCount - totalLocalOrphanCount).toBe(totalRecoveredCount);
   });
 
   it("writes the categorised orphan candidate list to docs/css-orphans.md, with an honest caveat about dynamic access", () => {

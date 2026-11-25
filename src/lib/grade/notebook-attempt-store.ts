@@ -36,7 +36,7 @@ export async function bindNotebookAttempt(session: ExpectedOwnerSession, attempt
 export async function loadNotebookAttempt(session: ExpectedOwnerSession, attempt: string): Promise<unknown> {
   if (!UUID.test(attempt)) throw new Error("Invalid notebook attempt.");
   await authenticate(session);
-  const { data, error } = await (createServiceClient() as any).from("notebook_execution_attempts")
+  const { data, error } = await createServiceClient().from("notebook_execution_attempts")
     .select("input_sha256,grade_binding_sha256,source_url,notebook_path,commit_sha,expected_cells,status,sandbox_id,sandbox_name,command_id,result,expires_at")
     .eq("owner_id", session.accountId).eq("session_id", session.sessionId).eq("attempt_id", attempt).maybeSingle();
   if (error) throw new Error("Notebook attempt storage is unavailable.");
@@ -78,7 +78,7 @@ export async function finishUnboundNotebookRecovery(session: ExpectedOwnerSessio
 /** Recovery metadata only; sandbox handles and student output stay server-side. */
 export async function listNotebookAttempts(session: ExpectedOwnerSession): Promise<unknown> {
   await authenticate(session);
-  const { data, error } = await (createServiceClient() as any).from("notebook_execution_attempts")
+  const { data, error } = await createServiceClient().from("notebook_execution_attempts")
     .select("attempt_id,grade_binding_sha256,source_url,notebook_path,commit_sha,status,expires_at")
     .eq("owner_id", session.accountId).eq("session_id", session.sessionId)
     .gt("expires_at", new Date().toISOString()).order("created_at", { ascending: false }).limit(100);
@@ -89,7 +89,7 @@ export async function listNotebookAttempts(session: ExpectedOwnerSession): Promi
 export async function restoreNotebookGradeRequest(session: ExpectedOwnerSession, attempt: string): Promise<unknown> {
   if (!UUID.test(attempt)) throw new Error("Invalid notebook attempt.");
   await authenticate(session);
-  const { data, error } = await (createServiceClient() as any).from("notebook_execution_attempts")
+  const { data, error } = await createServiceClient().from("notebook_execution_attempts")
     .select("grade_request,expires_at").eq("owner_id", session.accountId).eq("session_id", session.sessionId).eq("attempt_id", attempt).maybeSingle();
   if (error) throw new Error("Notebook attempt storage is unavailable.");
   const expiry = typeof data?.expires_at === "string" ? Date.parse(data.expires_at) : NaN;

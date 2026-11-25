@@ -87,7 +87,9 @@ beforeEach(() => {
   }));
   vi.mocked(createServiceClient).mockReturnValue({
     from,
-    rpc: (name: string, args: unknown) => name.includes("startup") && name !== "repo_grade_claim_startup_target"
+    rpc: (name: string, args: unknown) => name === "repo_grade_artifact_recovery_candidates"
+      ? { abortSignal: () => ({ retry: async () => ({ data: [], error: null }) }) }
+      : name.includes("startup") && name !== "repo_grade_claim_startup_target"
       ? batchRpc(name, args) : rpc(name, args),
   } as never);
   from.mockReturnValue(receiptQuery);

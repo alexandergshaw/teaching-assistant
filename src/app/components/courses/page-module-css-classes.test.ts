@@ -148,6 +148,8 @@ interface StylesheetImport {
   stylesheet: StylesheetTarget;
 }
 
+const CSS_MODULE_IMPORT = /import\s+(\w+)\s+from\s+["']([^"']+\.module\.css)["']/g;
+
 // Parses every `import <localName> from "<specifier>"` in a file that targets
 // a *.module.css file, resolves the specifier relative to the importing
 // file's own directory (robust regardless of how deep the importer lives),
@@ -155,11 +157,8 @@ interface StylesheetImport {
 // STYLESHEETS. This is the piece that must key off the actual import target,
 // not the local binding name - see the block comment above.
 function findStylesheetImports(filePath: string, fileContent: string): StylesheetImport[] {
-  const importRe = /import\s+(\w+)\s+from\s+["']([^"']+\.module\.css)["']/g;
   const found: StylesheetImport[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = importRe.exec(fileContent)) !== null) {
-    const [, localName, specifier] = match;
+  for (const [, localName, specifier] of fileContent.matchAll(CSS_MODULE_IMPORT)) {
     const resolved = path.resolve(path.dirname(filePath), specifier);
     const stylesheet = STYLESHEETS.find(
       (sheet) => sheet.cssPath.toLowerCase() === resolved.toLowerCase()
@@ -222,7 +221,8 @@ function stripSourceComments(fileContent: string): string {
 // cannot be matched inside a longer identifier like "tableStyles" or
 // "myStyles" - only an exact, standalone identifier followed by "." counts.
 function extractReferences(rawFileContent: string, localName: string): string[] {
-  const fileContent = stripSourceComments(rawFileContent);
+  // A path such as results-layout.module.css can spell `layout.module`.
+  const fileContent = stripSourceComments(rawFileContent).replace(CSS_MODULE_IMPORT, " ");
   const refRe = new RegExp(`(?<![\\w$])${localName}\\.([a-zA-Z_$][\\w$]*)`, "g");
   const classNames: string[] = [];
   let match: RegExpExecArray | null;
@@ -243,6 +243,11 @@ describe("CSS Module class usage guard (every *.module.css under src/)", () => {
     if (!found) throw new Error(`discovery did not find ${label}`);
     return found;
   };
+
+  it("ignores a CSS import path containing the binding name, while scanning code on the same line", () => {
+    const source = 'import layout from "./results-layout.module.css"; const className = layout.row;';
+    expect(extractReferences(source, "layout")).toEqual(["row"]);
+  });
 
   it("canary: discovery finds every module stylesheet, including the four this guard originally hard-coded (an empty or truncated list would report clean without checking anything)", () => {
     // A generalized scan of the tree on 2026-09-01 found 20-plus module

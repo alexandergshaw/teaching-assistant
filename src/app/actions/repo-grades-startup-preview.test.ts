@@ -71,6 +71,10 @@ beforeEach(() => {
   vi.mocked(getAppUser).mockResolvedValue(ownerRow);
   vi.mocked(readCurrentRepoGradeProfilesForOwner).mockResolvedValue(new Map());
   vi.mocked(createServiceClient).mockReturnValue({ from, rpc } as never);
+  rpc.mockImplementation((name: string) => {
+    if (name !== "repo_grade_artifact_recovery_candidates") throw new Error(`Unexpected preview RPC ${name}`);
+    return { abortSignal: () => ({ retry: async () => ({ data: [], error: null }) }) };
+  });
   from.mockReturnValue(receiptQuery);
   for (const method of ["select", "eq", "neq", "in", "order", "limit", "abortSignal"] as const) {
     receiptQuery[method].mockReturnValue(receiptQuery);
@@ -156,7 +160,9 @@ it("returns a bounded pinned plan and read-only history even when automatic star
   expect(eq.mock.calls).toEqual([["user_id", account.id], ["id", courseId]]);
   expect(await readRepoGradeStartupReadinessAction(account.id)).toEqual({ status: "unavailable" });
   expect(await runRepoGradeStartupTargetAction(account.id, courseId, "School/Repo", "assignment", "Main", currentSha, batchId)).toEqual({ status: "runtime-unavailable" });
-  expect(rpc).not.toHaveBeenCalled();
+  expect(rpc).toHaveBeenCalledExactlyOnceWith("repo_grade_artifact_recovery_candidates", {
+    p_user_id: account.id, p_course_id: courseId, p_shas: [currentSha],
+  });
   expect(claimRepoGrade).not.toHaveBeenCalled();
   expect(readPinnedRepoGradeReadme).not.toHaveBeenCalled();
   expect(evaluateRepoGrade).not.toHaveBeenCalled();

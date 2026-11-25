@@ -56,6 +56,7 @@ const MARKER_RUBRIC = [
   "Engagement (10 pts): replies engage classmates",
 ].join("\n");
 const PLAIN_RUBRIC = "Thesis (20 pts): clear\nStyle (10 pts): readable";
+const EVALUATOR_ACCESS_INSTRUCTIONS = "Do not deduct points for unavailable evaluator access, missing sandbox dependencies, or other grading-environment limitations. A file listed in the repository inventory is present even if its content cannot be inspected.";
 
 const INITIAL_SENTINEL = "INITIALPOSTSENTINEL";
 const REPLY_SENTINEL = "ZQXREPLYONLYSENTINEL";
@@ -128,11 +129,11 @@ describe("AC-R2b - a non-discussion entry scores ALL criteria even against a rep
   });
 });
 
-describe("AC-R2c - the single-axis prompt is byte-identical to the pre-feature call", () => {
+describe("AC-R2c - the scoring request preserves the whole single-axis prompt", () => {
   it("matches buildSystemPrompt over ALL criteria for commentSplit false", async () => {
     await gradeEntries([zipEntry()], INSTRUCTIONS, MARKER_RUBRIC, "gemini");
     const expected = buildSystemPrompt(INSTRUCTIONS, MARKER_RUBRIC, extractRubricCriteria(MARKER_RUBRIC));
-    expect(requestText(0).startsWith(`${expected}\n\nStudent: Zip Student`)).toBe(true);
+    expect(requestText(0).split("\n\nStudent: Zip Student", 1)[0]).toBe(`${expected}\n\n${EVALUATOR_ACCESS_INSTRUCTIONS}`);
   });
 
   it("matches the separate-strengths call for commentSplit true", async () => {
@@ -144,7 +145,7 @@ describe("AC-R2c - the single-axis prompt is byte-identical to the pre-feature c
       "some",
       "separate-strengths"
     );
-    expect(requestText(0).startsWith(`${expected}\n\nStudent: Zip Student`)).toBe(true);
+    expect(requestText(0).split("\n\nStudent: Zip Student", 1)[0]).toBe(`${expected}\n\n${EVALUATOR_ACCESS_INSTRUCTIONS}`);
   });
 
   it("axisScope 'all' is byte-identical to omitting it, and non-'all' appends a directive", () => {

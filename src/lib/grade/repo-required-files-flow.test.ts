@@ -12,15 +12,19 @@ import { callLlm } from "../llm";
 import { canvasWorkToEntry, ingestZipEntries } from "./extraction";
 import type { StudentSubmissionEntry } from "./types";
 const url = "https://github.com/org/student";
+const treeEntries = [{ path: "src/Main.py", type: "blob", size: 5, sha: "a" }, { path: "tests/Main.py", type: "blob", size: 5, sha: "b" }, { path: "REQUIRED", type: "blob", size: 0, sha: "c" }, { path: "proof.png", type: "blob", size: 2, sha: "d" }];
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(getRepoTreeWithMeta).mockResolvedValue({ entries: [{ path: "src/Main.py", type: "blob", size: 5, sha: "a" }, { path: "tests/Main.py", type: "blob", size: 5, sha: "b" }, { path: "REQUIRED", type: "blob", size: 0, sha: "c" }, { path: "proof.png", type: "blob", size: 2, sha: "d" }], truncated: true });
-  vi.mocked(getFileText).mockImplementation(async (_owner, _repo, path) => { if (path === "tests/Main.py") throw new Error("unreadable"); return "print('real source')"; });
+  vi.mocked(getRepoTreeWithMeta).mockResolvedValue({ entries: treeEntries, truncated: false });
+  vi.mocked(getFileText).mockResolvedValue("print('real source')");
   vi.mocked(callLlm).mockResolvedValue({ ok: true, text: JSON.stringify({ overallComment: "Reviewed.", rubricResults: [{ area: "Correctness", score: "8/10" }], totalScore: "8/10" }), finishReason: "STOP" });
 });
-async function modelPrompt(entry: StudentSubmissionEntry): Promise<string> {
+async function grade(entry: StudentSubmissionEntry) {
   const request = new Request("http://localhost/api/grade-run-item", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sourceIndex: 0, entry, assignmentInstructions: "Require src/Main.py, REQUIRED and proof.png.", rubric: "Correctness (10 pts): Meets the instructions.", provider: "gemini", pointsPossible: null }) });
-  const response = await POST(request as Parameters<typeof POST>[0]);
+  return POST(request as Parameters<typeof POST>[0]);
+}
+async function modelPrompt(entry: StudentSubmissionEntry): Promise<string> {
+  const response = await grade(entry);
   expect(response.status).toBe(200);
   const body = await response.json();
   expect(body.result?.ungraded, JSON.stringify(body)).toBeUndefined();
@@ -29,8 +33,8 @@ async function modelPrompt(entry: StudentSubmissionEntry): Promise<string> {
 }
 function check(prompt: string) {
   expect(prompt).toContain("REPOSITORY FILE INVENTORY"); expect(prompt).toContain('"path":"REQUIRED","content":"unsupported"');
-  expect(prompt).toContain('"path":"proof.png","content":"unsupported"'); expect(prompt).toContain('"path":"tests/Main.py","content":"unreadable"');
-  expect(prompt).toContain('"enumerationComplete":false'); expect(prompt).toContain("an unlisted file is unknown");
+  expect(prompt).toContain('"path":"proof.png","content":"unsupported"'); expect(prompt).toContain('"path":"tests/Main.py","content":"read"');
+  expect(prompt).toContain('"enumerationComplete":true'); expect(prompt).toContain("an unlisted file is unknown");
   expect(prompt).not.toContain("exact, complete list"); expect(prompt).not.toContain("File: proof.png");
 }
 it("chat URL intake survives the actual POST validator and reaches the model with independent presence evidence", async () => {
@@ -39,15 +43,31 @@ it("chat URL intake survives the actual POST validator and reaches the model wit
   if (outcome.kind !== "entries") throw new Error("Intake refused: " + JSON.stringify(outcome));
   check(await modelPrompt(outcome.entries[0]));
 });
-it("Canvas URL and inline/deferred ZIP links retain the same independent inventory", async () => {
+it("Canvas URL and deferred ZIP links retain the same independent inventory at grading", async () => {
   const canvas = await canvasWorkToEntry({ student: "Student", userId: 1, text: "", files: [], submissionUrl: url, contributionCount: 1 });
   check(await modelPrompt(canvas));
   const zip = new JSZip(); zip.file("student_123_456_link.html", '<html><head><meta http-equiv="Refresh" content="0; url=' + url + '" /></head><body><a href="' + url + '">Click Here to go to the submission</a><p>This submission was a url.</p></body></html>');
   const bytes = await zip.generateAsync({ type: "arraybuffer" });
-  for (const deferLinks of [false, true]) {
-    const { entries } = await ingestZipEntries(bytes, { deferLinks });
-    expect(entries).toHaveLength(1); check(await modelPrompt(entries[0]));
-  }
+  const { entries } = await ingestZipEntries(bytes, { deferLinks: true });
+  expect(entries).toHaveLength(1); check(await modelPrompt(entries[0]));
+});
+
+it("holds the score when a GitHub link's inventory and content are incomplete", async () => {
+  vi.mocked(getRepoTreeWithMeta).mockResolvedValue({ entries: treeEntries, truncated: true });
+  vi.mocked(getFileText).mockImplementation(async (_owner, _repo, path) => {
+    if (path === "tests/Main.py") throw new Error("unreadable");
+    return "print('real source')";
+  });
+  const canvas = await canvasWorkToEntry({ student: "Student", userId: 1, text: "", files: [], submissionUrl: url, contributionCount: 1 });
+  expect(canvas.repositoryInventories).toMatchObject([{ enumerationComplete: false, files: expect.arrayContaining([
+    { path: "tests/Main.py", content: "unreadable" }, { path: "proof.png", content: "unsupported" },
+  ]) }]);
+  const response = await grade(canvas);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ result: { totalScore: "", ungraded: {
+    kind: "grading-failed", message: expect.stringContaining("Submission evidence could not be fully inspected"),
+  } } });
+  expect(callLlm).not.toHaveBeenCalled();
 });
 
 it("the actual POST rejects JSON enum coercions before any model call", async () => {
@@ -64,7 +84,7 @@ it("the actual POST rejects JSON enum coercions before any model call", async ()
   const prompt = await modelPrompt({ student: "Student", content: "code", mergedFileCount: 1, submittedFiles: [], repositoryInventories: [valid as NonNullable<StudentSubmissionEntry["repositoryInventories"]>[number]] });
   expect(prompt).toContain('"kind":"blob","path":"src/Main.py"');
 });
-it("two inline ZIP links for one student preserve both scoped inventories through the actual model prompt", async () => {
+it("two inline ZIP links preserve both scoped inventories but cannot authorize grading as a single link", async () => {
   vi.mocked(getFileText).mockImplementation(async (_owner, _repo, path) => "source from " + path);
   const zip = new JSZip();
   zip.file("student_123_456_link.html", '<meta http-equiv="Refresh" content="0; url=https://github.com/org/student/tree/main/src" /><p>This submission was a url.</p>');
@@ -75,9 +95,13 @@ it("two inline ZIP links for one student preserve both scoped inventories throug
   expect(entries[0].gradedRepo).toBeUndefined(); expect(entries[0].gradedRef).toBeUndefined();
   expect(entries[0].submittedFiles.filter((file) => file.name === "src/Main.py")).toHaveLength(1);
   expect(entries[0].submittedFiles.filter((file) => file.name === "tests/Main.py")).toHaveLength(1);
-  const prompt = await modelPrompt(entries[0]);
-  expect(prompt).toContain('"scope":{"kind":"tree","path":"src"}'); expect(prompt).toContain('"scope":{"kind":"tree","path":"tests"}');
-  expect(prompt).toContain('"path":"src/Main.py","content":"read"'); expect(prompt).toContain('"path":"tests/Main.py","content":"read"');
+  expect(entries[0].repositoryInventories?.map((inventory) => inventory.files)).toEqual([
+    [{ path: "src/Main.py", content: "read" }], [{ path: "tests/Main.py", content: "read" }],
+  ]);
+  const response = await grade(entries[0]);
+  expect(response.status).toBe(422);
+  expect(await response.json()).toMatchObject({ error: expect.stringContaining("no grade was produced") });
+  expect(callLlm).not.toHaveBeenCalled();
 });
 it("refuses an inline ZIP inventory aggregate beyond the existing sixteen-source wire limit", async () => {
   const zip = new JSZip();

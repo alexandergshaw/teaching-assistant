@@ -121,7 +121,7 @@ function isComment(line: string): boolean {
 
 /** Parses the subset serializeBacklogYaml writes. Throws on anything else, deliberately - a hand-edit that breaks the grammar must fail loudly, not be guessed at. */
 export function parseBacklogYaml(text: string): BacklogItem[] {
-  const rawLines = text.split("\n");
+  const rawLines = text.split(/\r?\n/);
   const lines = rawLines.filter((l) => !isBlank(l) && !isComment(l));
 
   const items: BacklogItem[] = [];

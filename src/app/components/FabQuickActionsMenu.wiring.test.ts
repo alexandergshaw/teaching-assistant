@@ -11,7 +11,7 @@ import { describe, it, expect } from "vitest";
 // use for this class of "silently regresses, every other test stays green"
 // defect.
 const SOURCE_PATH = path.join(__dirname, "FabQuickActionsMenu.tsx");
-const source = readFileSync(SOURCE_PATH, "utf8");
+const source = readFileSync(SOURCE_PATH, "utf8").replace(/\r\n/g, "\n");
 
 function extractMenuOpenTag(src: string): string {
   const start = src.indexOf("<Menu\n");

@@ -255,9 +255,9 @@ describe("BLOCKER R2-1: commitPost forwards through postArgsFor/postResultFor, n
   });
 
   it("postDraft's 3rd argument is postArgsFor(decision), and the dispatched result is postResultFor(decision, result) - never decision.delayedPostAt/scheduledLabel inlined", () => {
-    expect(slice).toMatch(/postDraft\([^)]*,\s*postArgsFor\(decision\)\)/);
+    expect(slice).toMatch(/postDraft\(slot\.draft\.draft\.title,\s*slot\.draft\.draft\.message,\s*postArgsFor\(decision\)(?:\s*,|\s*\))/);
     expect(slice).toMatch(/result:\s*postResultFor\(decision,\s*result\)/);
-    expect(slice).not.toMatch(/postDraft\([^)]*,\s*decision\.delayedPostAt\)/);
+    expect(slice).not.toMatch(/postDraft\([^)]*,\s*decision\.delayedPostAt(?:\s*,|\s*\))/);
     expect(slice).not.toMatch(/scheduledLabel:\s*decision\.scheduledLabel/);
   });
 });

@@ -110,22 +110,6 @@
   opacity: 0.55;
 }
 
-.checkField {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--text-primary);
-  font-size: var(--font-size-md);
-  line-height: var(--line-snug);
-}
-
-.checkField input {
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  accent-color: var(--accent);
-}
-
 .primaryButton,
 .secondaryButton {
   display: inline-flex;

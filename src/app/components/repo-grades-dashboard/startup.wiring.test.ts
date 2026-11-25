@@ -54,7 +54,7 @@ describe("Repo Grades startup wiring", () => {
   it("keeps owner-scoped profile controls without the startup preview", () => {
     const dashboard = source("../repo-grades/RepoGradesDashboard.tsx");
     expect(dashboard).toContain("if (!ownerId) return null");
-    expect(dashboard).toContain("<RepoGradeProfileSettings courseId={courseId} columns={gradeColumns} />");
+    expect(dashboard).toContain("<RepoGradeProfileSettings courseId={courseId} organization={organization} columns={gradeColumns} />");
     expect(dashboard).not.toContain("RepoGradesStartupPreview");
   });
 

@@ -133,7 +133,7 @@ export default function DocumentTemplates(props: Props) {
       </div>
 
       <aside className={styles.libraryColumn}>
-        <section className={`${styles.panel} ${styles.libraryPanel}`} aria-labelledby="document-library-heading">
+        <section className={styles.panel} aria-labelledby="document-library-heading">
           <header className={styles.panelHeader}><div><h2 id="document-library-heading" className={styles.panelTitle}>Saved document templates</h2><p className={styles.panelDescription}>Open a saved template to fill it again.</p></div><button className={styles.secondaryButton} type="button" disabled={busy} aria-describedby={busy ? "document-template-status" : undefined} onClick={() => void run(async (token) => { const result = await documentOperation("load", listDocumentTemplatesAction); if (!gate.current.current(token)) return; if ("error" in result) setError(result.error); else setTemplates(result.templates); })}>Refresh library</button></header>
           {templates.length === 0 && <p className={styles.emptyState}>No document templates loaded. Upload and abstract a document to create one.</p>}
           {!!templates.length && <ul className={styles.libraryList}>{templates.map((t) => <li key={t.id}><button className={styles.libraryButton} type="button" disabled={busy} aria-describedby={busy ? "document-template-status" : undefined} onClick={() => void open(t.id)}>{t.name}<span>{t.sourceKind.toUpperCase()}</span></button></li>)}</ul>}

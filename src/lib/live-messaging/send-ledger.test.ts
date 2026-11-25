@@ -129,9 +129,11 @@ describe("DL-10 constants", () => {
 // ---------------------------------------------------------------------------
 
 function allowedPairs(): Set<string> {
-  const sql = fs.readFileSync(MIGRATION, "utf8").split("\n").map((l) => l.replace(/--.*$/, "")).join("\n");
+  const sql = fs.readFileSync(MIGRATION, "utf8").split(/\r?\n/).map((l) => l.replace(/--.*$/, "")).join("\n");
   const start = sql.indexOf("live_message_sends_state_shape check (");
-  const block = sql.slice(start, sql.indexOf("\n  )\n);", start));
+  const end = sql.indexOf("\n  )\n);", start);
+  if (start < 0 || end < 0) throw new Error("Could not isolate the live_message_sends_state_shape check constraint");
+  const block = sql.slice(start, end);
   const pairs = new Set<string>();
   for (const arm of block.split(/\n\s*or /)) {
     const status = /status = '(\w+)'/.exec(arm)?.[1];

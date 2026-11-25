@@ -40,7 +40,7 @@ const ownerRow: AppUserRow = {
 };
 const getUser = vi.fn();
 
-function fakeGitHub(options: { truncated?: boolean; failReadme?: boolean; files?: typeof readme[]; solutionText?: string } = {}) {
+function fakeGitHub(options: { truncated?: boolean; failSubmission?: boolean; files?: typeof readme[]; solutionText?: string } = {}) {
   let head = commit;
   const fetcher = vi.fn(async (url: string) => {
     switch (url) {
@@ -52,10 +52,8 @@ function fakeGitHub(options: { truncated?: boolean; failReadme?: boolean; files?
         return Response.json({ sha: commit, tree: { sha: tree } });
       case `${root}/git/trees/${tree}?recursive=1`:
         return Response.json({ sha: tree, truncated: options.truncated ?? false, tree: options.files ?? [readme, solution, otherFolder] });
-      case `${root}/contents/lab/README.md?ref=${commit}`:
-        return new Response("Write a loop", { status: options.failReadme ? 503 : 200 });
       case `${root}/contents/lab/main.py?ref=${commit}`:
-        return new Response(options.solutionText ?? "print('old')");
+        return new Response(options.solutionText ?? "print('old')", { status: options.failSubmission ? 503 : 200 });
       case `${root}/contents/lab/security.sql?ref=${commit}`:
         return new Response(options.solutionText ?? "CREATE POLICY own_row ON employees;");
       default:
@@ -68,7 +66,7 @@ function fakeGitHub(options: { truncated?: boolean; failReadme?: boolean; files?
 }
 
 const gradePinned = (sha = commit) =>
-  gradeRepoAction("org/student", "Fallback", "", "gemini", "merge-target", "lab", true, undefined, true, { sourceCommit: sha });
+  gradeRepoAction("org/student", "Write a loop", "", "gemini", "merge-target", "lab", false, undefined, true, { sourceCommit: sha });
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -98,7 +96,7 @@ afterEach(() => {
 });
 
 describe("gradeRepoAction pinned source", () => {
-  it("reads the captured Git tree and exact-case files, and derives instructions and rubric from those bytes", async () => {
+  it("builds the rubric from supplied instructions and exact-case source on the captured commit", async () => {
     const { fetcher, advance } = fakeGitHub();
     const discovery = await discoverRepoGradeSources({ organization: "org" });
     expect(discovery).toMatchObject({ status: "scanned", repos: [{ status: "ready", sourceRef: "source", sourceCommit: commit }] });
@@ -106,12 +104,11 @@ describe("gradeRepoAction pinned source", () => {
     advance();
     fetcher.mockClear();
     expect(await gradePinned(discovery.repos[0].sourceCommit)).toMatchObject({
-      sourceCommit: commit, rubric: "Loop rubric", readmePath: readme.path, run: { results: [{ totalScore: "8/10" }] },
+      sourceCommit: commit, rubric: "Loop rubric", run: { results: [{ totalScore: "8/10" }] },
     });
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
       `${root}/git/commits/${commit}`,
       `${root}/git/trees/${tree}?recursive=1`,
-      `${root}/contents/lab/README.md?ref=${commit}`,
       `${root}/contents/lab/main.py?ref=${commit}`,
     ]);
     expect(generateRubric).toHaveBeenCalledWith(expect.stringMatching(/^Write a loop\n\n[\s\S]*print\('old'\)$/), "gemini");
@@ -123,9 +120,18 @@ describe("gradeRepoAction pinned source", () => {
     })], "Write a loop", "Loop rubric", "gemini", null, { applyNamingDeduction: true, autoRunCode: false });
   });
 
+  it("redirects manual grading that requests student README instructions to the course template workflow", async () => {
+    const { fetcher } = fakeGitHub();
+    const result = await gradeRepoAction("org/student", "Fallback", "", "gemini", "merge-target", "lab", true, undefined, true, { sourceCommit: commit });
+    expect(result).toEqual({ error: "Template instructions are required. Use the repository gradebook to grade with the course template." });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(generateRubric).not.toHaveBeenCalled();
+    expect(gradeEntries).not.toHaveBeenCalled();
+  });
+
   it.each([
     [{ truncated: true, files: [] }, "tree-truncated"],
-    [{ failReadme: true }, "file-fetch-failed"],
+    [{ failSubmission: true }, "file-fetch-failed"],
   ] as const)("refuses incomplete inputs before running a grader (%j)", async (options, reason) => {
     const { fetcher } = fakeGitHub("files" in options ? { ...options, files: [...options.files] } : options);
     expect(await gradePinned()).toMatchObject({ partial: true, sourceCommit: commit, reason });

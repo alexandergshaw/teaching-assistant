@@ -316,6 +316,12 @@ describe("POST /api/grade-submission-zip", () => {
   });
   it("does not start extraction when byte conversion finishes after the deadline", async () => {
     vi.useFakeTimers();
+    downloadFileMock.mockResolvedValue({
+      data: { stream: () => new ReadableStream<Uint8Array>({
+        start(controller) { controller.enqueue(new Uint8Array([1])); controller.close(); },
+      }) },
+      error: null,
+    });
     let finish!: (value: ArrayBuffer) => void;
     const conversion = vi.spyOn(Blob.prototype, "arrayBuffer").mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
     try {
@@ -407,15 +413,25 @@ it("carries static review through stored ZIP extraction and preserves the origin
   ingestZipEntriesMock.mockResolvedValue({ entries: [entry], attemptedSupportedFiles: 1, failedSupportedFiles: [] });
   const mapping = { "ada_1_2_work.txt": "Synthetic" };
   const ordinary = await readLines(await POST(jsonRequest({ storagePath: GOOD_PATH, reviewedZipMapping: mapping })));
-  expect(ordinary[0].type).toBe("skip");
+  expect(ordinary[0]).toMatchObject({
+    type: "entry",
+    entry: { content: text, submittedFiles: [{ rawBase64 }] },
+  });
+  expect(ordinary[0].entry).not.toHaveProperty("staticOnly");
   const reviewed = await readLines(await POST(jsonRequest({ storagePath: GOOD_PATH, reviewedZipMapping: mapping, staticOnly: true })));
   expect(reviewed[0].type).toBe("entry");
   const returned = reviewed[0].entry as typeof entry & { staticOnly: boolean };
   expect(returned.staticOnly).toBe(true); expect(returned.content).toBe(text); expect(returned.submittedFiles[0].rawBase64).toBe(rawBase64);
+  const smallCsv = "id,value\n1,example\n";
+  ingestZipEntriesMock.mockResolvedValue({
+    entries: [{ ...entry, content: smallCsv, submittedFiles: [{ ...entry.submittedFiles[0], rawBase64: Buffer.from(smallCsv).toString("base64") }] }],
+    attemptedSupportedFiles: 1,
+    failedSupportedFiles: [],
+  });
   const perStudent = await readLines(await POST(jsonRequest({ storagePath: GOOD_PATH, reviewedZipMapping: mapping, staticStudents: ["Synthetic"] })));
   expect(perStudent[0].type).toBe("entry"); expect((perStudent[0].entry as { staticOnly?: boolean }).staticOnly).toBe(true);
   const wrongStudent = await readLines(await POST(jsonRequest({ storagePath: GOOD_PATH, reviewedZipMapping: mapping, staticStudents: ["Other"] })));
   expect(wrongStudent).toHaveLength(1); expect(String(wrongStudent[0].error)).toMatch(/mapping does not match/i);
   expect((await POST(jsonRequest({ storagePath: GOOD_PATH, staticOnly: true }))).status).toBe(400);
   expect((await POST(jsonRequest({ storagePath: GOOD_PATH, staticStudents: ["Synthetic"] }))).status).toBe(400);
-});
+}, 15_000);

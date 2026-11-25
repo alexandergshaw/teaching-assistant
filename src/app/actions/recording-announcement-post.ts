@@ -1,8 +1,8 @@
 "use server";
 
 import { requireUser } from "@/lib/supabase/auth";
-import { resolveAnnouncementImage } from "@/lib/canvas";
 import { createAnnouncementFromSafeHtml, RecordingAnnouncementRefusal, type CanvasAnnouncement } from "@/lib/canvas/announcements";
+import { resolveAnnouncementImage } from "@/lib/canvas/announcement-image-upload";
 
 export async function postRecordingAnnouncementAction(
   courseUrl: string,

@@ -39,7 +39,7 @@ async function request(): Promise<RepositoryProposeRequest> {
 describe("actual route -> immutable refetch -> strict engine -> isolated review", () => {
   it("preserves original input, rubric, citations and instructor values without executing or returning duplicate source bytes", async () => {
     const input = await request(); fetcher.mockClear();
-    const response = await send(input); expect(response.status).toBe(200);
+    const response = await send(input); expect(response.status, await response.clone().text()).toBe(200);
     const result: RepositoryProposeResponse = await response.json();
     expect(result.proposal.proposed.rubricAreas).toEqual([
       { area: "Algorithm", score: "5/6", comment: `One branch remains incomplete. [evidence:${fileId}]` },

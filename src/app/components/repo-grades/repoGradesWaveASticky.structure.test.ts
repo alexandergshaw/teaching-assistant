@@ -156,12 +156,12 @@ describe("REPO-HEADER-VISUAL VH-10 pins", () => {
     expect(typeaheadInput, "typeahead input must carry styles.headerInput").toMatch(/styles\.headerInput\b/);
   });
 
-  it("VH-10(c): .gradeSetList hangs below the header, above the thead, and is bounded", () => {
-    const block = ruleBlock(CSS, ".gradeSetList");
-    expect(block).toMatch(/position\s*:\s*absolute/);
-    expect(block).toMatch(/top\s*:\s*100%/);
-    expect(block).toMatch(/z-index\s*:\s*5\b/);
-    expect(block).toMatch(/(^|[\s;{])max-height\s*:/);
+  it("VH-10(c): delegates the bounded grade-set popup to MUI's portalled Autocomplete", () => {
+    expect(TYPEAHEAD).toContain('import Autocomplete from "@mui/material/Autocomplete"');
+    expect(TYPEAHEAD).toContain("<Autocomplete");
+    expect(TYPEAHEAD).toContain(".slice(0, MAX_OPTIONS)");
+    expect(TYPEAHEAD).toMatch(/const MAX_OPTIONS = 50;/);
+    expect(TYPEAHEAD).not.toContain("disablePortal");
   });
 
   it("VH-10(d): the chip remove button keeps its grade-set remove aria-label", () => {

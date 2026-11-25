@@ -164,6 +164,7 @@ import type { SiteInfo } from "./modalAdoptionSourceScan";
 export interface ListedSite {
   readonly path: string;
   readonly reason: string;
+  readonly muiSurface?: "Dialog" | "Popover";
 }
 
 /** AC7's exclusions - must NEVER adopt. Removing an entry here is meant to be
@@ -186,39 +187,36 @@ export const PERMANENT_EXCLUSIONS: readonly ListedSite[] = [
     path: "src/app/components/courses/WeeklyChecklistOverviewModal.tsx",
     reason: "family D floating window, non-modal by entry 6781's decision - must not gain a trap or Escape",
   },
-  // Family E (entry 273 check 1 - measured as SEVEN sites, correcting AC7's
-  // own prose which still says "four"; the tree is what this test trusts,
-  // per this task's own instruction to report rather than silently
-  // reconcile a disagreement). Real MUI `Dialog`s already register with
-  // MUI's `ModalManager` and get trap/restore/Escape from it; a second,
-  // independent mechanism on top would fight that manager rather than help.
+  // Family E. MUI Dialog uses MUI's Modal to trap and restore focus and
+  // handle Escape. Each file is named so a new site still needs explicit review.
+  ...[
+    "courses/CoursesTable.tsx",
+    "courses/RecommendTextbooksModal.tsx",
+    "courses/TextbookPhotoModal.tsx",
+    "discussions/DiscussionsTool.tsx",
+    "grading-chat/ChatEditRecovery.tsx",
+    "grading-chat/LargeZipRecovery.tsx",
+    "grading-chat/SubmissionDrop.tsx",
+    "grading-chat/useZipDuplicateReview.tsx",
+    "institution-directory/InstitutionDirectoryTab.tsx",
+    "powerpoint-templates/index.tsx",
+    "presentations/TemplateFillReview.tsx",
+    "repo-grades/RepoGradeInstructorReview.tsx",
+    "tasks/ManageTasksDialog.tsx",
+    "tasks/TaskAttachmentsDialog.tsx",
+    "TasksTab.tsx",
+    "walkthrough-announcement/AnnouncementLibrary.tsx",
+    "walkthrough-announcement/useWalkthroughPromptReview.tsx",
+    "workflows/FolderActionsMenu.tsx",
+  ].map((file) => ({
+    path: `src/app/components/${file}`,
+    reason: "family E - MUI Dialog supplies focus trapping, focus restoration and Escape through MUI Modal",
+    muiSurface: "Dialog" as const,
+  })),
   {
-    path: "src/app/components/courses/TextbookPhotoModal.tsx",
-    reason: "family E - real MUI Dialog, already has trap/restore/Escape via ModalManager; a second mechanism would fight it",
-  },
-  {
-    path: "src/app/components/TasksTab.tsx",
-    reason: "family E - real MUI Dialog, already has trap/restore/Escape via ModalManager; a second mechanism would fight it",
-  },
-  {
-    path: "src/app/components/courses/RecommendTextbooksModal.tsx",
-    reason: "family E - real MUI Dialog, already has trap/restore/Escape via ModalManager; a second mechanism would fight it",
-  },
-  {
-    path: "src/app/components/courses/CoursesTable.tsx",
-    reason: "family E - real MUI Dialog, already has trap/restore/Escape via ModalManager; a second mechanism would fight it",
-  },
-  {
-    path: "src/app/components/tasks/ManageTasksDialog.tsx",
-    reason: "family E - real MUI Dialog, already has trap/restore/Escape via ModalManager; a second mechanism would fight it",
-  },
-  {
-    path: "src/app/components/tasks/TaskAttachmentsDialog.tsx",
-    reason: "family E - real MUI Dialog, already has trap/restore/Escape via ModalManager; a second mechanism would fight it",
-  },
-  {
-    path: "src/app/components/workflows/FolderActionsMenu.tsx",
-    reason: "family E - real MUI Dialog, already has trap/restore/Escape via ModalManager; a second mechanism would fight it",
+    path: "src/app/components/repo-grades/RepoGradesGithubQuota.tsx",
+    reason: "the quota details use an anchored MUI Popover, whose Modal root handles focus and Escape",
+    muiSurface: "Popover",
   },
   // TaskCell's Popper - AC7: keeps its own Escape and roving-tabindex
   // restore for reasons entry 230-era work records; not a ModalShell/

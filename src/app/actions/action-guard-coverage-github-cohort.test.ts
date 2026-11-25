@@ -384,6 +384,8 @@ const GITHUB_NOT_OWNER_ONLY: Record<string, string> = {
     "deletes only the caller's own Supabase row (announcement-exemplars.ts, scoped on user.id) - no GitHub or Canvas import",
   gatherWalkthroughResourcesAction:
     "calls deriveResourceConcepts (./learning-resources-generator) and findResourceLinksForConceptsAction (./learning-resource-links) - both walk to zero violations against either target",
+  prepareWalkthroughAnnouncementPromptAction:
+    "reads only the authenticated caller's writing style and composes and signs their prompt locally; calls neither a Canvas operation nor a GitHub operation",
   draftWalkthroughAnnouncementAction:
     "calls only callLlm/prompt builders - never calls createAnnouncementFromMarkdown, the file's one Canvas call site",
   draftWalkthroughVideoScriptAction:
@@ -673,7 +675,7 @@ describe("R2 wave 0: GitHub-PAT cohort defaults to owner-only (RULING 83)", () =
   it(
     "GITHUB_NOT_OWNER_ONLY has exactly the reviewed-permissive entries we expect - a deletion must be deliberate",
     () => {
-      expect(Object.keys(GITHUB_NOT_OWNER_ONLY).length).toBe(74);
+      expect(Object.keys(GITHUB_NOT_OWNER_ONLY).length).toBe(75);
     }
   );
 

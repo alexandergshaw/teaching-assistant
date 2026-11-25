@@ -182,10 +182,10 @@ const FROZEN_PRIMARY_SITES: Record<string, number> = {
   // 5: Mute left the primary fill for the pressed treatment, and the
   // paused-state pair no longer double-counts (fix wave).
   "src/app/components/recording/StagePanel.tsx": 5,
-  // 7: Post (idleVariant contained), Play it back, and one contained
-  // recovery action in each of the five mutually exclusive failure
-  // branches (fix wave, CC1 "zero primaries in a failed state").
-  "src/app/components/recording/TakeAnnouncementPanel.tsx": 7,
+  // Draft announcement is the idle setup primary (331f3c76). Its
+  // setup-only branch adds one spelling alongside the existing review,
+  // extraction confirmation and recovery controls.
+  "src/app/components/recording/TakeAnnouncementPanel.tsx": 8,
   // 4: the paused-state Resume/Stop pair resolved to real predicates.
   "src/app/components/recording/WalkthroughPanel.tsx": 4,
   // 3: Choose PowerPoint joined Draft narration and Generate audio as a

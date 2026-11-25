@@ -541,40 +541,33 @@ describe.each(FIXTURES.map((fx) => [`${fx.id} ${fx.label}`, fx] as const))(
 );
 
 // ---------------------------------------------------------------------------
-// P5: zero-entry outcomes (engine D2 policy) and the extraction counterpart.
+// P5: archive refusals and empty-archive outcomes at both entry points.
 // ---------------------------------------------------------------------------
 
 describe("attribution oracle - P5 zero-entry outcomes", () => {
-  it("Z1 broken.docx: the engine throws the could-not-extract message naming the file, extraction returns [], no model call", async () => {
+  it("Z1 broken.docx: both entry points refuse the unreadable file before any model call", async () => {
     const make = async () => {
       const zip = new JSZip();
       zip.file("broken.docx", "this is not a real docx");
       return zip.generateAsync({ type: "arraybuffer" });
     };
 
-    let message = "";
-    try {
-      await gradeSubmissions(await make(), "Write an essay.", RUBRIC, "gemini");
-    } catch (error) {
-      message = error instanceof Error ? error.message : String(error);
-    }
-    expect(message.startsWith("Found supported files, but could not extract text from them.")).toBe(true);
-    expect(message).toContain("broken.docx");
-
-    expect(await extractStudentEntries(await make())).toEqual([]);
+    const refusal = "Some files in the archive could not be read: broken.docx. Nothing was queued. Fix the archive and try again.";
+    await expect(gradeSubmissions(await make(), "Write an essay.", RUBRIC, "gemini")).rejects.toThrow(refusal);
+    await expect(extractStudentEntries(await make())).rejects.toThrow(refusal);
     expect(mockCallLlm).not.toHaveBeenCalled();
   });
 
-  it("Z2 notes.bin only: the engine resolves an empty run, extraction returns [], no model call", async () => {
+  it("Z2 notes.bin only: both entry points refuse the unsupported file before any model call", async () => {
     const make = async () => {
       const zip = new JSZip();
       zip.file("notes.bin", "unsupported extension");
       return zip.generateAsync({ type: "arraybuffer" });
     };
 
-    const run = await gradeSubmissions(await make(), "Write an essay.", RUBRIC, "gemini");
-    expect(run.results).toEqual([]);
-    expect(await extractStudentEntries(await make())).toEqual([]);
+    const refusal = "Some files in the archive are not supported for grading: notes.bin. Nothing was queued. Remove or convert those files and try again.";
+    await expect(gradeSubmissions(await make(), "Write an essay.", RUBRIC, "gemini")).rejects.toThrow(refusal);
+    await expect(extractStudentEntries(await make())).rejects.toThrow(refusal);
     expect(mockCallLlm).not.toHaveBeenCalled();
   });
 

@@ -102,70 +102,6 @@
   min-width: 0;
 }
 
-.gradeSetChip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: 2px var(--space-2);
-  border: 1px solid var(--accent-border-soft);
-  border-radius: var(--radius-pill);
-  background: var(--accent-surface);
-  color: var(--text-primary);
-  font-size: var(--font-size-xs);
-  font-weight: 500;
-}
-
-.gradeSetChipRemove {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.gradeSetChipRemove:hover {
-  background: var(--accent-border-soft);
-}
-
-.gradeSetList {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 5;
-  max-height: 240px;
-  overflow-y: auto;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  min-width: 260px;
-  border: 1px solid var(--field-border);
-  border-radius: var(--radius-sm);
-  background: var(--field-background);
-  color: var(--text-primary);
-  box-shadow: var(--shadow-md);
-}
-
-.gradeSetOption {
-  padding: var(--space-2) var(--space-3);
-  cursor: pointer;
-}
-
-.gradeSetOption:hover {
-  background: var(--accent-surface);
-}
-
-.gradeSetOption[aria-selected="true"] {
-  font-weight: 600;
-}
-
 .gradeSetStatus {
   display: inline-flex;
   align-items: center;
@@ -288,47 +224,6 @@
   font-size: var(--font-size-md);
 }
 
-.bindingBadgeConfirmed,
-.bindingBadgeSuggested,
-.bindingBadgeAmbiguous,
-.bindingBadgeUnbound {
-  display: inline-flex;
-  align-items: center;
-  width: fit-content;
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-pill);
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  border: 1px solid transparent;
-}
-
-.bindingBadgeConfirmed {
-  background: var(--success-surface);
-  border-color: var(--success);
-  color: var(--success-ink);
-}
-
-.bindingBadgeSuggested {
-  background: var(--accent-surface);
-  border-color: var(--accent-border-soft);
-  color: var(--accent-ink);
-}
-
-.bindingBadgeAmbiguous {
-  background: var(--warning-surface);
-  border-color: var(--warning-border);
-  color: var(--warning-ink);
-}
-
-.bindingBadgeUnbound {
-  background: var(--danger-surface);
-  border-color: var(--danger-border);
-  color: var(--danger);
-}
-
-/* Per-cell "Not merged to target branch" badge: worded (never colour alone),
-   same warning surface as .bindingBadgeAmbiguous but kept a separate class so
-   the binding styles can change without touching the merge badge. */
 .mergeBadgeNotMerged {
   display: inline-flex;
   align-items: center;
@@ -372,22 +267,6 @@
   border-radius: var(--radius-xs);
   background: var(--field-background);
   color: var(--text-primary);
-}
-
-/* Cell status text (AC3 item 15) - three distinct states, never merged: a
-   folder this repo genuinely lacks, a folder present but not yet graded, and
-   "we don't know" because this repo's own tree fetch failed. */
-.cellMissing {
-  color: var(--text-muted);
-  font-style: italic;
-}
-
-.cellScanError {
-  color: var(--danger);
-}
-
-.cellUngraded {
-  color: var(--text-secondary);
 }
 
 .banner {
@@ -726,68 +605,6 @@
    a secondary control below the grid rather than the grid itself - reuses
    .logTitle and pageStyles.fieldHint/pageStyles.error/pageStyles.linkButton
    rather than duplicating those rules. */
-/* W4: the parent "Run setup" disclosure that wraps the controls and the link
-   panel; same subtle-surface language as .linkPanel. */
-.setupRegion:global(.MuiAccordion-root) {
-  margin-top: var(--space-4);
-  padding: var(--space-2) var(--space-4);
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-md);
-  background: var(--surface-subtle);
-}
-
-.setupRegion .disclosureSummary:global(.Mui-expanded) {
-  margin-bottom: var(--space-3);
-  padding-bottom: var(--space-2);
-  border-bottom: 1px solid var(--border-soft);
-}
-
-/* Shared disclosure header (parent "Run setup" and nested "Grading settings"):
-   label, CSS-only chevron, optional right-aligned collapsed-state summary. */
-.disclosureSummary {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-1) 0;
-  cursor: pointer;
-  font-weight: 600;
-  color: var(--text-primary);
-  list-style: none;
-}
-
-.disclosureSummary::-webkit-details-marker { display: none; }
-
-.disclosureSummary::before {
-  content: "";
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-right: 2px solid var(--text-muted);
-  border-bottom: 2px solid var(--text-muted);
-  transform: rotate(-45deg);
-  transition: transform 0.15s ease;
-}
-
-.disclosureSummary:global(.Mui-expanded)::before, details[open] > .disclosureSummary::before { transform: rotate(45deg); }
-
-.disclosureSummary:hover {
-  color: var(--text-secondary);
-}
-
-.disclosureSummary:focus-visible {
-  outline: 2px solid var(--focus-ring-color);
-  outline-offset: 2px;
-}
-
-.setupSummaryMeta {
-  margin-left: auto;
-  font-size: var(--font-size-xs);
-  font-weight: 400;
-  color: var(--text-muted);
-}
-
-.disclosureSummary:global(.Mui-expanded) .setupSummaryMeta { display: none; }
-
 .linkPanel {
   margin-top: var(--space-5);
   padding: var(--space-3) var(--space-4);
@@ -816,12 +633,6 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
-}
-
-.linkPanelLabel {
-  color: var(--text-secondary);
-  font-size: var(--font-size-md);
-  font-weight: 600;
 }
 
 .linkPanelRow select {
@@ -873,45 +684,6 @@
   }
 }
 
-/* Source control (this wave) - two mutually exclusive ways to populate
-   suggested bindings: usernames already saved in the course table, or a
-   fresh read of a Canvas assignment's submissions. Same button-group
-   radiogroup pattern as ProviderToggle.tsx, translated into this module's
-   own class-based styling (this file uses CSS module classes throughout, not
-   inline styles) so the visual language matches the rest of this panel
-   rather than introducing a second styling idiom. */
-.linkSourceToggle {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-  padding: var(--space-1);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--field-border);
-  width: fit-content;
-}
-
-.linkSourceButton,
-.linkSourceButtonActive {
-  font: inherit;
-  font-size: var(--font-size-md);
-  padding: var(--space-1) var(--space-3);
-  border-radius: var(--radius-xs);
-  border: none;
-  cursor: pointer;
-}
-
-.linkSourceButton {
-  font-weight: 500;
-  color: var(--text-secondary);
-  background: transparent;
-}
-
-.linkSourceButtonActive {
-  font-weight: 600;
-  color: var(--accent-ink);
-  background: var(--accent-surface);
-}
-
 /* The body of whichever source is currently chosen above - same vertical
    rhythm as .linkResult, since both are "everything about one thing" blocks
    stacked below a control. */
@@ -926,8 +698,7 @@
    the rest of the app (page.module.css:234-235's .textInput:focus is the
    idiom matched here). Covers every native interactive control this view's
    own stylesheet governs - table buttons/selects, the binding pickers, the
-   per-column assignment controls, the score/comment inputs, and the
-   source-toggle radiogroup buttons - so tabbing through this view always
+   per-column assignment controls, the score/comment inputs - so tabbing through this view always
    shows where focus is. */
 .grid button:focus-visible,
 .grid select:focus-visible,
@@ -936,9 +707,7 @@
 .columnHeader select:focus-visible,
 .columnHeader button:focus-visible,
 .linkPanelRow select:focus-visible,
-.linkPanelRow button:focus-visible,
-.linkSourceButton:focus-visible,
-.linkSourceButtonActive:focus-visible {
+.linkPanelRow button:focus-visible {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
 }

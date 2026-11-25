@@ -490,7 +490,9 @@ describe("GradingChatPanel - composite W2: tray wiring", () => {
     const mount = source.slice(start, source.indexOf("/>", start));
     expect(mount).toMatch(/onSubmitComposite=\{handleSubmitComposite\}/);
     expect(mount).toMatch(/onSubmitText=\{handleSubmitText\}/);
-    expect(mount).toMatch(/onSubmitFiles=\{handleSubmitFiles\}/);
+    expect(mount).toMatch(
+      /onSubmitFiles=\{\(files, label, mode\) => handleSubmitFiles\(files, label, undefined, undefined, undefined, false, mode\)\}/
+    );
     expect(mount).toMatch(/onSubmitUrl=\{handleSubmitUrl\}/);
   });
 
@@ -536,9 +538,11 @@ describe("ChatComposer - composite W2: tray controls and the preserved single-pa
 });
 
 describe("submission labels: file and url modes carry the optional label", () => {
-  it("the composer declares a label field in file mode and in url mode, and threads it into the callbacks", () => {
+  it("the composer forwards the optional label for one file group and for URL submissions", () => {
     const source = withoutLineComments(read(COMPOSER));
-    expect(source).toMatch(/onSubmitFiles:\s*\(files: File\[\], label\?: string\) => Promise<DirectFileOutcome\[\]>/);
+    expect(source).toMatch(/onSubmitFiles:\s*\(files: File\[\], label\?: string, mode\?: "single" \| "multiple"\) => Promise<DirectFileOutcome\[\]>/);
+    expect(source).toContain('onOne={(name, files) => submitOneFileGroup(name, files, (items, label) => onSubmitFiles(items, label, "single"), onSubmitComposite)}');
+    expect(source).toContain('onMany={(files) => onSubmitFiles(files, undefined, "multiple")}');
     expect(source).toMatch(/onSubmitUrl:\s*\(url: string, label\?: string\) => Promise<SubmitOutcome>/);
     const urlBlock = source.slice(source.indexOf('mode === "url" && ('));
     expect(urlBlock).toContain("chatStyles.composerLabel");
@@ -884,12 +888,14 @@ describe("GradingChatPanel - recording analyzing indicator", () => {
 // AC-16/AC-18). Source-text pins only: nothing renders under vitest, so the
 // rendered panel is an OWNER walk.
 describe("GradingChatPanel - WD run-diagnostics panel (reachability and copy safety)", () => {
-  const source = () => withoutLineComments(read(PANEL));
+  const source = () => withoutLineComments(read(PANEL)).replace(/\r\n/g, "\n");
   const fn = (name: string) => {
     const src = source();
-    const start = src.indexOf(`function ${name}`);
+    const start = src.indexOf(`function ${name}(`);
     expect(start, name).toBeGreaterThan(-1);
-    return src.slice(start, src.indexOf("\n}\n", start));
+    const end = src.indexOf("\n}\n", start);
+    expect(end, name).toBeGreaterThan(start);
+    return src.slice(start, end);
   };
 
   it("mounts RunDiagnostics with driver.diagnostics inside the results stream, after GradingResults", () => {

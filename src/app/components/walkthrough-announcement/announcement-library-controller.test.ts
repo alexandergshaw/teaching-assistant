@@ -145,7 +145,8 @@ it("restores labeled examples into actual draft adapter calls and frozen slot re
     const result = await dispatchResolvedAnnouncementDraft(ctx, resolveChoice(slots.find(s => s.id === id)!.choice, live()), draftOne);
     slots = [...slotsReducer(slots, { type: "result", id, result })];
   }
-  expect(draftOne.mock.calls[0]).toEqual([ctx, promptSafeAnnouncementOutline(a.outline)]); expect(draftOne.mock.calls[1]).toEqual([ctx, promptSafeAnnouncementOutline(b.outline)]);
+  const matchedContext = { ...ctx, matchExample: true };
+  expect(draftOne.mock.calls[0]).toEqual([matchedContext, promptSafeAnnouncementOutline(a.outline)]); expect(draftOne.mock.calls[1]).toEqual([matchedContext, promptSafeAnnouncementOutline(b.outline)]);
   const frozenOther = slots[1].draft;
   expect(slots[0].draft).toMatchObject({ phase: "drafted", draft: { builtFrom: { kind: "saved", exemplarId: "a", label: "Beginning" } } });
   c.edit("a", "exemplarText", "## Revised\n1. Read\n2. Submit"); c.edit("a", "label", "Revised format");
@@ -156,7 +157,7 @@ it("restores labeled examples into actual draft adapter calls and frozen slot re
   await vi.advanceTimersByTimeAsync(10); slots = [...slotsReducer(slots, { type: "regenerate-started", id: "s1" })];
   const result = await dispatchResolvedAnnouncementDraft(ctx, resolveChoice(slots[0].choice, live()), draftOne);
   slots = [...slotsReducer(slots, { type: "result", id: "s1", result })];
-  expect(draftOne.mock.calls[2]).toEqual([ctx, promptSafeAnnouncementOutline(c.getState().cards[0].acknowledged!.outline)]);
+  expect(draftOne.mock.calls[2]).toEqual([matchedContext, promptSafeAnnouncementOutline(c.getState().cards[0].acknowledged!.outline)]);
   expect(slots[0].draft).toMatchObject({ phase: "drafted", draft: { builtFrom: { exemplarId: "a", label: "Revised format" } } });
   expect(slots[1].draft).toBe(frozenOther); expect(JSON.stringify(draftOne.mock.calls)).not.toContain(a.exemplarText); c.dispose();
 });

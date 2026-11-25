@@ -210,7 +210,7 @@ export async function settleRepoGrade(
   if (continuation && (settlement.outcome !== "partial" || result || claim.mode === "manual" || artifactManifestDigest(general.inputManifest) !== continuation.manifestSha256 || continuation.sources?.some(source => source.planSha256 !== sourcePlanDigest({language:source.language,entryPoint:source.entryPoint,selection:"heuristic"})))) throw new Error("Invalid artifact continuation");
   const { continuation: _continuation, ...baseGeneral } = general ?? {};
   void _continuation;
-  let response = continuation && general ? await ledgerRpc("repo_grade_settle_artifact_continuation", {
+  const response = continuation && general ? await ledgerRpc("repo_grade_settle_artifact_continuation", {
     p_user_id:owner.id,p_generation:claim.generation,p_token:claim.token,p_source_sha:general.repoCommit,
     p_evidence:baseGeneral,p_review_feedback:sourceReview ?? null,p_manifest_sha256:continuation.manifestSha256,p_remaining_paths:continuation.paths,p_remaining_sources:continuation.sources ?? [],
   }, true) : sourceReview && general ? await ledgerRpc("repo_grade_settle_general_partial_review", {

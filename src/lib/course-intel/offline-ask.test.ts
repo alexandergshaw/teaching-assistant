@@ -253,7 +253,7 @@ describe("the offline chain is actually reachable from the ask route", () => {
     // still asserted "route.ts mentions prepareOfflineAsk" would fail on a
     // correct split and, worse, would have passed for a route that imported
     // the builder and never called it.
-    const route = read("src/app/api/course-intel/ask/route.ts");
+    const route = read("src/app/api/course-intel/ask/route.ts").replace(/\r\n/g, "\n");
     expect(route).toContain('from "@/lib/course-intel/offline-answer"');
     expect(route).toMatch(/answerOfflineAsk\(\{/);
 
@@ -284,7 +284,7 @@ describe("the offline chain is actually reachable from the ask route", () => {
   });
 
   it("a failed live read degrades and is CLASSIFIED, not reported as one state", () => {
-    const route = read("src/app/api/course-intel/ask/route.ts");
+    const route = read("src/app/api/course-intel/ask/route.ts").replace(/\r\n/g, "\n");
     // THE WHOLE CATCH BLOCK IS EXTRACTED AND CHECKED, not searched. A
     // "contains classifyLmsFailure" test passes with an early `return
     // NextResponse.json(..., 502)` sitting above it, which is precisely the

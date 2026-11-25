@@ -341,7 +341,16 @@ describe("announcement library storage", () => {
     const saved = await saveAnnouncementLibraryEntry(db.client, "u1", { ...libraryInput, exemplarText: body });
     expect(saved.ok).toBe(true);
     expect(db.rows[0].exemplar_text).toBe(body);
-    expect(db.rows[0].outline).toEqual(deriveAnnouncementOutline(previousAnnouncementText(body)));
+    const unstyledEntry = { style: "", runs: [{ before: false, after: false, style: "" }] };
+    expect(db.rows[0].outline).toEqual({
+      ...deriveAnnouncementOutline(previousAnnouncementText(body)),
+      richTemplate: {
+        blocks: [
+          { tag: "h2", style: "color:red;font-size:18px", entries: [unstyledEntry] },
+          { tag: "p", style: "", entries: [unstyledEntry] },
+        ],
+      },
+    });
     const entries = await listAnnouncementLibraryEntries(db.client, "u1", "c1");
     expect(entries[0].exemplarText).toBe(body);
   });

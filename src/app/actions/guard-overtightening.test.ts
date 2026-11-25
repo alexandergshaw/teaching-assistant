@@ -275,6 +275,10 @@ const REVIEWED_PERMISSIVE: Record<string, ReviewedPermissive> = {
     file: "actions/walkthrough-announcement.ts",
     capability: "an instructor gathers learning-resource links for a walkthrough announcement",
   },
+  prepareWalkthroughAnnouncementPromptAction: {
+    file: "actions/walkthrough-announcement.ts",
+    capability: "an instructor reviews the prompt prepared from their own writing style and walkthrough inputs",
+  },
   draftWalkthroughAnnouncementAction: {
     file: "actions/walkthrough-announcement.ts",
     capability: "an instructor drafts a walkthrough announcement",

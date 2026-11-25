@@ -84,11 +84,12 @@ it("clears pending script state when a fresh capture invalidates its epoch", asy
   const pending = script();
   expect(generating).toHaveBeenLastCalledWith(true);
   const start = callback("handleStartStop", {
-    capturing: false, extracting: false, pendingFrames: 0, batchInFlightRef: { current: false }, inputKind: "live", upload: { busy: false }, pushNotice: vi.fn(),
+    capturing: false, recordingFinalizing: false, recordingUrl: null, extracting: false, pendingFrames: 0, batchInFlightRef: { current: false }, inputKind: "live", upload: { busy: false }, pushNotice: vi.fn(),
     stop: vi.fn(), setInputKind: vi.fn(), setStartError: vi.fn(), setAutoDrafted: vi.fn(),
     start: async ({ onStarted }: { onStarted: () => void }) => onStarted(),
     resetCompletedRun: (_slots: unknown, reset: () => void) => reset(), currentSlotsRef: { current: [] },
     extractionEpoch: epoch, setScriptGenerating: generating, batchBlocksRef: { current: [] }, setLegibleBlockCount: vi.fn(), reset: vi.fn(),
+    scriptCopy: { current: { invalidate: vi.fn() } }, setScriptCopyStatus: vi.fn(),
   });
   start();
   await Promise.resolve();
@@ -149,6 +150,7 @@ it("applies a successful script response", async () => {
     capturing: false, extracting: false, pendingFrames: 0, batchInFlightRef: { current: false }, upload: { busy: false, result: null }, uploadSnapshot: { current: null }, hasMaterial: true, extractionEpoch: { current: 1 }, uploadedVideoMaterialText: () => "captured", setScriptGenerating: setGenerating, setScriptError: vi.fn(), setScriptText: setText, scriptRevisionRef: { current: 0 },
     reduceCaptureToMaterials: () => ({ text: "captured" }), batchBlocksRef: { current: [] }, WALKTHROUGH_SCRIPT_MATERIALS_CAP: 100,
     draftWalkthroughVideoScriptAction: action, selectedCourse: { name: "Course" }, moduleLabel: " module ", notesText: "notes", provider: "gemini",
+    scriptCopy: { current: { invalidate: vi.fn() } }, setScriptCopyStatus: vi.fn(),
   });
   await run();
   expect(action).toHaveBeenCalledWith({ courseName: "Course", moduleLabel: "module", materialsText: "captured", notes: "notes", provider: "gemini" });

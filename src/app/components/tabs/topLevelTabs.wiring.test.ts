@@ -348,14 +348,29 @@ describe("the merged tabs are one navigation level deep", () => {
   it("gives every Manual chip in the Tools rail its own render branch in page.tsx", () => {
     // The blank-pane failure, one level down from the tab: a chip that
     // highlights, restores from the URL, and paints nothing.
-    const slice = branchSlice(read(PAGE), "manual");
+    const slice = branchSlice(readWithoutComments(PAGE), "manual");
     for (const view of MANUAL_VIEW_ORDER) {
+      // Discussions uses a retained mount with a dedicated visibility guard.
+      if (view === "discussions") continue;
       expect(
         slice,
         `the Tools branch has no 'manualView === "${view}"' render branch, so that rail ` +
           "chip leads to an empty pane while every other gate stays green."
       ).toContain(`manualView === "${view}"`);
     }
+  });
+
+  it("reveals Discussions on its Tools chip and retains it after the first visit", () => {
+    const source = readWithoutComments(PAGE);
+    expect(source).toMatch(
+      /const discussionsVisible = activeTab === "manual" && toolsSection === "manual" && manualView === "discussions";/
+    );
+    expect(source).toMatch(/const \[discussionsVisited, setDiscussionsVisited\] = useState\(false\);/);
+    expect(source).toMatch(/if \(discussionsVisible && !discussionsVisited\) setDiscussionsVisited\(true\);/);
+    expect(branchSlice(source, "manual")).toMatch(
+      /\{discussionsVisited && \(\s*<div style=\{\{ display: discussionsVisible \? undefined : "none" \}\}>\s*<TabShell><DiscussionsTool\s*\/>/
+    );
+    expect(source.match(/<DiscussionsTool[\s/>]/g)).toHaveLength(1);
   });
 
   it("gives every Automate sub-view its own render branch in page.tsx (AC-W2-2, no orphan view)", () => {
@@ -393,11 +408,9 @@ describe("the merged tabs are one navigation level deep", () => {
     const source = read(PAGE);
     expect(source).toContain("COURSES_RAIL_ITEMS.map(");
     expect(source).toContain("TOOLS_RAIL_ITEMS.map(");
-    // A hand-written list is how a chip goes missing. Eight Manual views, no
-    // Workflows family (PPT-DESIGN-INTO-PRESENTATIONS re-parented "ppt-design"
-    // under Presentations; WORKFLOWS-COLLAPSE W1 moved Drafts to Library, 11 ->
-    // 10; W2 folded Workflows + Automations into the Automate container, 10 -> 8).
-    expect(TOOLS_RAIL_ITEMS).toHaveLength(8);
+    // Discussions joined the eight views that remained after Workflows and
+    // Automations moved into the Automate container.
+    expect(TOOLS_RAIL_ITEMS).toHaveLength(9);
   });
 });
 

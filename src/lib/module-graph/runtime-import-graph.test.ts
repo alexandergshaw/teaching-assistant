@@ -4,7 +4,7 @@
 // this file imports nothing from another *.test.ts (traps-tests.md:46-50).
 import { describe, expect, it, vi } from "vitest";
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, normalize, relative, sep } from "node:path";
 import {
   classifySpecifier,
@@ -459,13 +459,13 @@ describe("R-11: no file under src/ - test or non-test - imports this leaf except
     () => {
       const files: string[] = [];
       const walk = (dir: string) => {
-        for (const name of readdirSync(dir)) {
-          const full = join(dir, name);
-          if (statSync(full).isDirectory()) {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) {
             walk(full);
             continue;
           }
-          if (/\.(ts|tsx)$/.test(name)) files.push(full);
+          if (/\.(ts|tsx)$/.test(entry.name)) files.push(full);
         }
       };
       walk(SRC);
@@ -473,6 +473,8 @@ describe("R-11: no file under src/ - test or non-test - imports this leaf except
       const leafAbs = join(SRC, "lib", "module-graph", "runtime-import-graph.ts");
       const importers = files.filter((file) => {
         const source = readFileSync(file, "utf8");
+        // An import of this leaf must spell the basename or escape at least one character.
+        if (!source.includes("runtime-import-graph") && !source.includes("\\")) return false;
         const scan = scanRuntimeEdges(source, file);
         return [...scan.edges.map((e) => e.specifier)].some((spec) => {
           if (!(spec.startsWith("@/") || spec.startsWith("."))) return false;
@@ -668,15 +670,20 @@ describe("R-16: engine.ts's own runtime closure is pinned per direct edge, by ex
   // confirming each direct edge's walk finds the shortest path to a given
   // violated node in edge-scan order, and a node already visited within that
   // walk is not re-recorded under a different trail.
+  // Verified GitHub tree loading contributes two further trails. Both end
+  // at the same module's explicit server-only marker through the existing
+  // Canvas and extraction edges.
   const FROZEN_TRAILS = [
     "lib/grade/engine.ts -> lib/canvas.ts -> lib/canvas/discussions.ts -> lib/canvas-core.ts -> lib/canvas-credentials.ts",
     "lib/grade/engine.ts -> lib/canvas.ts -> lib/canvas/discussions.ts -> lib/canvas-core.ts -> lib/canvas-credentials.ts -> lib/lms-credentials.ts",
     "lib/grade/engine.ts -> lib/canvas.ts -> lib/canvas/inbox.ts",
+    "lib/grade/engine.ts -> lib/canvas.ts -> lib/canvas/listings.ts -> lib/canvas/auto-zero.ts -> lib/grade-zeros.ts -> lib/grade.ts -> lib/grade/extraction.ts -> lib/grade/repo-content.ts -> lib/github.ts -> lib/github.repos.ts -> lib/github-verified-tree.ts",
     "lib/grade/engine.ts -> lib/canvas.ts -> lib/canvas/listings.ts -> lib/canvas/auto-zero.ts -> lib/grade-zeros.ts -> lib/grade.ts -> lib/grade/rubric.ts -> lib/research/rubric-bank.ts -> lib/research/db.ts",
     "lib/grade/engine.ts -> lib/grade/extraction.ts -> lib/canvas.ts -> lib/canvas/discussions.ts -> lib/canvas-core.ts -> lib/canvas-credentials.ts",
     "lib/grade/engine.ts -> lib/grade/extraction.ts -> lib/canvas.ts -> lib/canvas/discussions.ts -> lib/canvas-core.ts -> lib/canvas-credentials.ts -> lib/lms-credentials.ts",
     "lib/grade/engine.ts -> lib/grade/extraction.ts -> lib/canvas.ts -> lib/canvas/inbox.ts",
     "lib/grade/engine.ts -> lib/grade/extraction.ts -> lib/canvas.ts -> lib/canvas/listings.ts -> lib/canvas/auto-zero.ts -> lib/grade-zeros.ts -> lib/grade.ts -> lib/grade/rubric.ts -> lib/research/rubric-bank.ts -> lib/research/db.ts",
+    "lib/grade/engine.ts -> lib/grade/extraction.ts -> lib/grade/repo-content.ts -> lib/github.ts -> lib/github.repos.ts -> lib/github-verified-tree.ts",
     "lib/grade/engine.ts -> lib/grade/rubric.ts -> lib/research/rubric-bank.ts -> lib/research/db.ts",
   ];
 
@@ -708,7 +715,7 @@ describe("R-16: engine.ts's own runtime closure is pinned per direct edge, by ex
     expect(trails).toEqual(FROZEN_TRAILS);
   });
 
-  it("every frozen trail resolves to a lib/supabase module - the class this guards against", () => {
+  it("every frozen trail ends at a Supabase boundary or the verified-tree server-only marker", () => {
     const source = readFileSync(ENGINE_ABS, "utf8");
     const scan = scanRuntimeEdges(source, ENGINE_ABS);
     let total = 0;
@@ -718,8 +725,12 @@ describe("R-16: engine.ts's own runtime closure is pinned per direct edge, by ex
       const childResult = walkRuntimeGraph([disposition.resolved], walkOptions);
       for (const v of childResult.violations) {
         total += 1;
-        expect(v.resolved).not.toBeNull();
-        expect(v.resolved?.startsWith("lib/supabase")).toBe(true);
+        if (v.resolved === null) {
+          expect(v.specifier).toBe("server-only");
+          expect(v.trail.at(-1)).toBe("lib/github-verified-tree.ts");
+        } else {
+          expect(v.resolved.startsWith("lib/supabase")).toBe(true);
+        }
       }
     }
     expect(total).toBeGreaterThan(0);

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("./db", () => ({
@@ -6,6 +7,7 @@ vi.mock("./db", () => ({
 
 import { rubricFingerprint, pickBankedRubric, rememberRubric, findRubricForTopic } from "./rubric-bank";
 import { getDbClient } from "./db";
+import { cleanText } from "@/lib/embedded/scaffold";
 import type { Database } from "@/lib/supabase/types";
 
 type RubricRow = Database["public"]["Tables"]["rubric_bank"]["Row"];
@@ -36,6 +38,14 @@ describe("rubricFingerprint", () => {
     );
     expect(rubricFingerprint("a")).not.toBe(rubricFingerprint("b"));
   });
+
+  it.each(["", "  Résumé\r\nΣ review  ", "Characters \u{1F4D6} and \uD800", "Criterion ".repeat(250)])(
+    "matches persisted SHA-256 identifiers for %j",
+    (text) => {
+      const persistedId = createHash("sha256").update(cleanText(text).toLowerCase()).digest("hex");
+      expect(rubricFingerprint(text)).toBe(persistedId);
+    },
+  );
 });
 
 describe("pickBankedRubric", () => {

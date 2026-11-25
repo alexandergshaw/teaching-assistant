@@ -356,8 +356,9 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // same terms as SnapshotRubricCaptureReview.tsx before it - it adopts
     // ModalShell from birth rather than needing a name on one of the three
     // allowlists.
-    // Lecture Videos adds one shared confirmation for destructive edits.
-    expect(DIALOG_SITES.length).toBe(55);
+    // The baseline has 12 more MUI-managed sites (11 Dialogs and the quota
+    // Popover). Lecture Videos adds one shared confirmation for destructive edits.
+    expect(DIALOG_SITES.length).toBe(67);
   });
 
   it("splits into the adopting sites and all three non-adopting allowlists' combined length", () => {
@@ -485,6 +486,20 @@ describe("AC7 - PERMANENT_EXCLUSIONS stays honest in both directions", () => {
   it("gives every entry a reason a future reader can act on", () => {
     const weak = PERMANENT_EXCLUSIONS.filter((e) => !isSubstantiveReason(e.reason)).map((e) => e.path);
     expect(weak, '"excluded" is not a reason - every entry needs one a future reader can act on').toEqual([]);
+  });
+
+  it("keeps the library-managed exclusions wired to their MUI surface", () => {
+    for (const { path, muiSurface } of PERMANENT_EXCLUSIONS) {
+      if (!muiSurface) continue;
+      const source = stripComments(readFileSync(join(process.cwd(), path), "utf8"));
+      if (muiSurface === "Dialog") {
+        expect(importsMuiDialog(source), path).toBe(true);
+        expect(source, path).toMatch(/<Dialog[\s>]/);
+      } else {
+        expect(source, path).toMatch(/import\s*\{[^}]*\bPopover\b[^}]*\}\s*from\s*["']@mui\/material["']/);
+        expect(source, path).toMatch(/<Popover[\s\S]*?role="dialog"[\s\S]*?<\/Popover>/);
+      }
+    }
   });
 });
 

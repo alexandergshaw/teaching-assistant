@@ -616,6 +616,31 @@ export interface Database {
         Update: Expand<WorkflowDefsUpdate>;
         Relationships: [];
       };
+      notebook_execution_attempts: {
+        Row: {
+          owner_id: string;
+          session_id: string;
+          attempt_id: string;
+          input_sha256: string;
+          grade_binding_sha256: string;
+          source_url: string;
+          notebook_path: string;
+          commit_sha: string;
+          expected_cells: number[];
+          status: string;
+          sandbox_id: string | null;
+          sandbox_name: string | null;
+          command_id: string | null;
+          result: Json | null;
+          grade_request: Json | null;
+          created_at: string;
+          dispatch_started_at: string | null;
+          expires_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       repo_grade_attempts: {
         Row: RepoGradeAttemptReceiptRow;
         Insert: never;

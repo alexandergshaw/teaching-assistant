@@ -16,14 +16,14 @@ function sqlComments(source: string): { blocks: string[]; uncertain: boolean } {
       else comments.push(text);
       i = end < 0 ? source.length : end + 1;
       previousLineEnd = i;
-    } else if (source.startsWith("/*", i)) {
+    } else if (source[i] === "/" && source[i + 1] === "*") {
       const executable = source[i + 2] === "!" || source[i + 2] === "+";
       i += 2;
       let depth = 1;
       const from = i;
       while (i < source.length && depth) {
-        if (source.startsWith("/*", i)) { depth++; i += 2; }
-        else if (source.startsWith("*/", i)) { depth--; i += 2; }
+        if (source[i] === "/" && source[i + 1] === "*") { depth++; i += 2; }
+        else if (source[i] === "*" && source[i + 1] === "/") { depth--; i += 2; }
         else i++;
       }
       if (depth) return { blocks: comments, uncertain: true };

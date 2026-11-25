@@ -16,6 +16,7 @@ import { readPinnedRepoGradeReadme } from "@/lib/repo-grades-dashboard/preparati
 import { captureRepoGradeProfile } from "@/lib/repo-grades-dashboard/profile";
 import { readCurrentRepoGradeProfilesForOwner } from "@/lib/repo-grades-dashboard/profile-store";
 import { evaluateRepoGrade } from "@/lib/repo-grade-evaluator";
+import { pinnedTemplate, templateRepo, templateSha } from "./repo-grades-dashboard.fixtures";
 import {
   closeRepoGradeStartupBatchAction, planRepoGradeCourseAction, readRepoGradeHistoryAction, readRepoGradeStartupBatchAction, readRepoGradeStartupCoursesAction,
   readRepoGradeStartupReadinessAction, retryRepoGradePreparationAction, runRepoGradeStartupTargetAction,
@@ -30,6 +31,10 @@ vi.mock("@/lib/supabase/app-users", async (original) => ({
 }));
 vi.mock("@/lib/supabase/courses.row", () => ({ table: () => ({ select }) }));
 vi.mock("@/lib/repo-grades-dashboard/discovery", () => ({ discoverRepoGradeSources: vi.fn() }));
+vi.mock("@/lib/github.repos", async (original) => ({
+  ...await original<typeof import("@/lib/github.repos")>(),
+  ghJson: vi.fn(),
+}));
 vi.mock("@/lib/repo-grades-dashboard/preparation-readme", () => ({ readPinnedRepoGradeReadme: vi.fn() }));
 vi.mock("@/lib/repo-grade-evaluator", () => ({ evaluateRepoGrade: vi.fn() }));
 vi.mock("@/lib/llm", async (original) => ({
@@ -88,14 +93,16 @@ beforeEach(() => {
   batchRpc.mockImplementation((name: string) => ({
     retry: () => ({
       abortSignal: async () => ({ data: name === "repo_grade_stage_startup" ? []
-        : name === "repo_grade_automatic_read_pinned_inventory" ? { snapshot: null } : true, error: null }),
+        : name === "repo_grade_automatic_read_pinned_inventory" ? { snapshot: null }
+        : name === "repo_grade_refresh_for_lease" ? null
+        : name === "repo_grade_automatic_is_targeted" ? false : true, error: null }),
     }),
   }));
   vi.mocked(createServiceClient).mockReturnValue({
     from,
-    rpc: (name: string, args: unknown) => name === "repo_grade_artifact_recovery_candidates"
+    rpc: (name: string, args: unknown) => name === "repo_grade_artifact_recovery_candidates" || name === "repo_grade_text_recovery_candidates"
       ? { abortSignal: () => ({ retry: async () => ({ data: [], error: null }) }) }
-      : name === "repo_grade_automatic_read_pinned_inventory"
+      : name === "repo_grade_automatic_read_pinned_inventory" || name === "repo_grade_automatic_is_targeted" || name === "repo_grade_refresh_for_lease"
       || (name.includes("startup") && name !== "repo_grade_claim_startup_target")
       ? batchRpc(name, args) : rpc(name, args),
   } as never);
@@ -484,19 +491,14 @@ async function paidPreparationFixture({
   vi.stubEnv("GEMINI_THINKING_LEVEL", "minimal");
   discover(source(), { ...source(), repo: "School/Other", sourceCommit: sha });
   const courseConfig = {
-    github_org: "school", repos: [], rubric_name: courseRubric, rubric_data: null, repo_module_pairing: null, student_repos: [],
+    github_org: "school", repos: [templateRepo], rubric_name: courseRubric, rubric_data: null, repo_module_pairing: null, student_repos: [],
   };
   maybeSingle.mockResolvedValue({ data: { ...courseConfig, name: courseName, course_kind: rawKind }, error: null });
   readReceipts.mockResolvedValue({ data: [], count: 0, error: null });
   const profile = savedStartupProfile("", { provider: "gemini", useReadmeInstructions: true });
   const generator = captureRepoGradeRubricGenerator(profile.model, "applied")!;
   const parserVersion = `${generator.promptParserVersion}:${generator.generationConfigFingerprint}`;
-  const path = "assignment/README.md";
-  const instructions = "Describe your method and show the findings.";
-  const context = { instructions, source: { kind: "pinned-readme", path } };
-  vi.mocked(readPinnedRepoGradeReadme).mockImplementation(async (target) => ({
-    status: "present", target, path, text: instructions, blobSha: sha,
-  }));
+  const context = pinnedTemplate("Describe your method and show the findings.");
 
   const ledger = await vi.importActual<typeof import("@/lib/repo-grades-dashboard/ledger")>("@/lib/repo-grades-dashboard/ledger");
   vi.mocked(claimRepoGrade).mockImplementation(ledger.claimRepoGrade);
@@ -572,7 +574,7 @@ async function paidPreparationFixture({
     await args[10]?.modelExecution?.beforeDispatch?.(new AbortController().signal);
     return {
       noSubmission: true, fullName: `${args[0].owner}/${args[0].repo}`, sourceCommit: args[9], digestTruncated: false,
-      reason: "No submission", readmePath: path,
+      reason: "No submission", readmePath: context.source.path,
     };
   });
   return { profile, context, events, fetchModel, noRetry, parserVersion, courseConfig };
@@ -623,7 +625,7 @@ it.each(["saved", "lost"] as const)("grades only after a durably frozen Gemini r
   expect(evaluateRepoGrade).toHaveBeenCalledExactlyOnceWith(
     { owner: "School", repo: "Repo" }, profile.instructions, finishArgs.p_receipt.rubric, "gemini", undefined,
     "assignment", true, false, true, currentSha,
-    expect.objectContaining({ preparedReadme: { path: context.source.path, instructions: context.instructions } }),
+    expect.objectContaining({ preparedReadme: { path: null, instructions: context.instructions, template: true } }),
   );
   const [, request] = fetchModel.mock.calls[0];
   expect(JSON.parse(String(request.body))).toMatchObject({
@@ -804,16 +806,14 @@ it("excludes proven unrelated override failures and blocks unresolved eligible d
   expect(fetchModel).toHaveBeenCalledTimes(1);
 });
 
-it.each(["", "Correctness (100%): Check the loop."])("prepares one folder rubric from pinned READMEs with saved rubric %j", async (rubric) => {
+it.each(["", "Correctness (100%): Check the loop."])("prepares one folder rubric from the pinned course template with saved rubric %j", async (rubric) => {
   vi.spyOn(admissionMode, "repoGradeAdmissionMode").mockReturnValue("coordinated");
   discover(source(), { ...source(), repo: "School/Other", sourceCommit: sha });
+  maybeSingle.mockResolvedValue({ data: { github_org: "school", repos: [templateRepo] }, error: null });
   readReceipts.mockResolvedValue({ data: [], count: 0, error: null });
   const profile = savedStartupProfile(rubric, { useReadmeInstructions: true });
-  const path = "assignment/README.md";
   const instructions = "Create a file named solution.py and include a loop.";
-  vi.mocked(readPinnedRepoGradeReadme).mockImplementation(async (target) => ({
-    status: "present", target, path, text: instructions, blobSha: sha,
-  }));
+  const { source: template } = pinnedTemplate(instructions);
   rpc.mockImplementation(async (name, args) => {
     if (name === "repo_grade_read_profile") return { data: { profile, receipt: null }, error: null };
     if (name === "repo_grade_freeze_rubric") return { data: args.p_receipt, error: null };
@@ -823,24 +823,25 @@ it.each(["", "Correctness (100%): Check the loop."])("prepares one folder rubric
   vi.mocked(settleRepoGrade).mockResolvedValue(true);
   vi.mocked(evaluateRepoGrade).mockResolvedValue({
     noSubmission: true, fullName: "School/Repo", sourceCommit: currentSha, digestTruncated: false,
-    reason: "No submission", readmePath: path,
+    reason: "No submission", readmePath: template.path,
   });
 
   await expect(runStartupTarget()).resolves.toEqual({ status: "no-submission" });
-  expect(vi.mocked(readPinnedRepoGradeReadme).mock.calls.map(([target, folder]) => [target.repo, target.sourceCommit, folder]))
-    .toEqual([["Repo", currentSha, "assignment"], ["Other", sha, "assignment"]]);
+  expect(readPinnedRepoGradeReadme).toHaveBeenCalledExactlyOnceWith(
+    { owner: "School", repo: "Template", sourceCommit: templateSha, sourceRef: "Main" }, "assignment", undefined, account.id,
+  );
   const frozen = rpc.mock.calls[1][1];
   if (rubric) expect(frozen.p_receipt.rubric).toBe(rubric);
   else expect(frozen.p_receipt.rubric).toContain("Submitted a .py file");
   expect(rpc.mock.invocationCallOrder[1]).toBeLessThan(vi.mocked(claimRepoGrade).mock.invocationCallOrder[0]);
   expect(evaluateRepoGrade).toHaveBeenCalledExactlyOnceWith(
     { owner: "School", repo: "Repo" }, profile.instructions, frozen.p_receipt.rubric, "embedded", undefined,
-    "assignment", true, false, true, currentSha, expect.objectContaining({ preparedReadme: { path, instructions } }),
+    "assignment", true, false, true, currentSha, expect.objectContaining({ preparedReadme: { path: null, instructions, template: true } }),
   );
   expect(callLlm).not.toHaveBeenCalled();
 
-  vi.mocked(readPinnedRepoGradeReadme).mockImplementation(async (target) => ({
-    status: "present", target, path, text: target.repo === "Other" ? "Different assignment" : instructions, blobSha: sha,
+  vi.mocked(readPinnedRepoGradeReadme).mockImplementationOnce(async (target) => ({
+    status: "present", target, path: template.path, text: "Different assignment", blobSha: template.blobSha,
   }));
   await expect(runStartupTarget()).resolves.toEqual({ status: "profile-unavailable" });
   vi.mocked(readPinnedRepoGradeReadme).mockClear();
@@ -863,6 +864,8 @@ it("requires every repo's explicit ref while excluding failed unrelated branches
   const unrelated = { status: "blocked" as const, reason: "unavailable" as const, repo: other.repo, sourceRef: "trunk" };
   const found = { status: "scanned" as const, enumerationComplete: true, repos: [selected, unrelated, other] };
   const profile = savedStartupProfile("Correctness (100%): Check the loop.", { useReadmeInstructions: true, sourceRef: "Main" });
+  maybeSingle.mockResolvedValue({ data: { github_org: "school", repos: [templateRepo] }, error: null });
+  pinnedTemplate("Use a loop.");
   vi.mocked(readCurrentRepoGradeProfilesForOwner).mockResolvedValue(new Map([[profile.folder, profile.sourceRef]]));
   vi.mocked(discoverRepoGradeSources).mockResolvedValueOnce(found);
   rpc.mockImplementation(async (name, args) => {
@@ -877,16 +880,14 @@ it("requires every repo's explicit ref while excluding failed unrelated branches
   });
 
   await expect(runStartupTarget()).resolves.toEqual({ status: "no-submission" });
-  expect(vi.mocked(readPinnedRepoGradeReadme).mock.calls.map(([target]) => [target.repo, target.sourceRef])).toEqual([
-    ["Repo", "Main"], ["Other", "Main"],
-  ]);
+  expect(vi.mocked(readPinnedRepoGradeReadme).mock.calls.map(([target]) => [target.repo, target.sourceRef])).toEqual([["Template", "Main"]]);
   for (const unresolved of [[], [{ ...unrelated, sourceRef: "Main" }], [other, other]]) {
     vi.mocked(discoverRepoGradeSources).mockResolvedValueOnce({ ...found, repos: [selected, unrelated, ...unresolved] });
     await expect(runStartupTarget()).resolves.toEqual({ status: "profile-unavailable" });
   }
   vi.mocked(discoverRepoGradeSources).mockResolvedValueOnce({ ...found, enumerationComplete: false });
   await expect(runStartupTarget()).resolves.toEqual({ status: "partial" });
-  expect(readPinnedRepoGradeReadme).toHaveBeenCalledTimes(2);
+  expect(readPinnedRepoGradeReadme).toHaveBeenCalledTimes(1);
   expect(claimRepoGrade).toHaveBeenCalledTimes(1);
 });
 
@@ -906,7 +907,7 @@ it("uses compact owner/course history and matches exact discovered targets witho
   const result = await planRepoGradeCourseAction(courseId.toUpperCase());
   expect(from).toHaveBeenCalledExactlyOnceWith("repo_grade_attempts");
   expect(receiptQuery.select).toHaveBeenCalledExactlyOnceWith(
-    "generation, user_id, course_id, repo, folder, source_ref, source_sha, mode, status, claimed_at", { count: "exact" },
+    "generation, user_id, course_id, repo, folder, source_ref, source_sha, mode, status, dispatch_state, claimed_at", { count: "exact" },
   );
   expect(receiptQuery.eq.mock.calls).toEqual([["user_id", account.id], ["course_id", courseId]]);
   expect(receiptQuery.neq).toHaveBeenCalledExactlyOnceWith("mode", "manual");

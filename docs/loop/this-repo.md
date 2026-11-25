@@ -296,6 +296,9 @@ failed, or inaccessible check. The owner's test handoff names the URL and
 verified revision. A feature-branch push or green local gate supplies neither
 database nor production deployment evidence.
 
+For Lecture Videos, record the separate live browser, Gemini, ElevenLabs, and
+export checks in the [Lecture Videos release check](../lecture-videos-release-check.md).
+
 ---
 
 ## 7. Files held elsewhere right now

@@ -615,12 +615,13 @@ describe("remembered sentinel (discussion-clicks W-B-1)", () => {
   });
 });
 
-describe("launch view set is exactly the frozen 11 (discussion-clicks W-B-2)", () => {
-  const FROZEN_11 = [
+describe("supported recording launch views", () => {
+  const SUPPORTED_VIEWS = [
     "announcement",
     "avatar",
     "captions",
     "discussions",
+    "lecturevideos",
     "messages",
     "moduledeck",
     "record",
@@ -635,25 +636,25 @@ describe("launch view set is exactly the frozen 11 (discussion-clicks W-B-2)", (
       .map((m) => m[1])
       .sort();
 
-  it("the union members equal the frozen 11 (source-text exact set)", () => {
+  it("the union members match the supported views", () => {
     const start = src.indexOf("export type RecordingLaunchView =");
     expect(start).toBeGreaterThan(-1);
     const end = src.indexOf(";", start);
     expect(end).toBeGreaterThan(start);
-    expect(quoted(src.slice(start, end))).toEqual(FROZEN_11);
+    expect(quoted(src.slice(start, end))).toEqual(SUPPORTED_VIEWS);
   });
 
-  it("the RECORDING_LAUNCH_VIEWS array members equal the frozen 11 (source-text exact set)", () => {
+  it("the runtime launch list matches the supported views", () => {
     const start = src.indexOf("const RECORDING_LAUNCH_VIEWS");
     expect(start).toBeGreaterThan(-1);
     const end = src.indexOf("];", start);
     expect(end).toBeGreaterThan(start);
     const afterEq = src.indexOf("= [", start);
-    expect(quoted(src.slice(afterEq, end))).toEqual(FROZEN_11);
+    expect(quoted(src.slice(afterEq, end))).toEqual(SUPPORTED_VIEWS);
   });
 
-  it("every frozen view still parses to itself", () => {
-    for (const v of FROZEN_11) {
+  it("every supported view parses to itself", () => {
+    for (const v of SUPPORTED_VIEWS) {
       expect(parseRecordingLaunch({ view: v })).toEqual({ view: v });
     }
   });

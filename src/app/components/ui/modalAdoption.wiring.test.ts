@@ -356,7 +356,8 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // same terms as SnapshotRubricCaptureReview.tsx before it - it adopts
     // ModalShell from birth rather than needing a name on one of the three
     // allowlists.
-    expect(DIALOG_SITES.length).toBe(54);
+    // Lecture Videos adds one shared confirmation for destructive edits.
+    expect(DIALOG_SITES.length).toBe(55);
   });
 
   it("splits into the adopting sites and all three non-adopting allowlists' combined length", () => {
@@ -427,10 +428,14 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // 39 as of the LIVE-LMS-STUDENT-MESSAGING W3 chunk - the thirty-eight
     // described above plus live-messaging/MessagingModal.tsx, which likewise
     // adopts ModalShell from birth.
-    expect(ADOPTING_PATHS.size).toBe(39);
+    expect(ADOPTING_PATHS.size).toBe(40);
     expect(DIALOG_SITES.length - ADOPTING_PATHS.size).toBe(
       PERMANENT_EXCLUSIONS.length + DEFERRED_CLASS_MISMATCH.length + PENDING_ADOPTION.length,
     );
+  });
+
+  it("routes Lecture Videos confirmations through the shared modal", () => {
+    expect(ADOPTING_PATHS.has("src/app/components/lecture-videos/LectureVideos.tsx")).toBe(true);
   });
 });
 

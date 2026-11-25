@@ -150,6 +150,7 @@ describe("recording-split structure", () => {
         ["messages", "Message replies"], ["moduledeck", "Module walkthrough deck"],
         ["speed", "Change speed"], ["captions", "Caption a video"],
         ["slides", "Narrate a deck"], ["avatar", "Avatar"],
+        ["lecturevideos", "Lecture Videos"],
       ]);
     });
 
@@ -222,9 +223,9 @@ describe("recording-split structure", () => {
     // TOOLS-IA-REORG W2: eight tabs; seven literal tabpanel divs plus the
     // record wrapper, whose role is dynamic (tabpanel on Recording, a labelled
     // region while Announcements > From a recording reuses it).
-    it("renders seven literal tabpanel content divs plus the dynamic record wrapper (eight tabs)", () => {
+    it("renders eight literal tabpanels plus the dynamic record wrapper", () => {
       const matches = recordingTabContent.match(/role="tabpanel"/g) ?? [];
-      expect(matches).toHaveLength(7);
+      expect(matches).toHaveLength(8);
       expect(recordingTabContent).toContain('role={announcementsActive ? "region" : "tabpanel"}');
     });
 
@@ -249,11 +250,12 @@ describe("recording-split structure", () => {
         "captions",
         "slides",
         "avatar",
+        "lecturevideos",
       ];
       const panelTargets = new Set(
         keys.map((key) => `rec-panel-${key}`)
       );
-      expect(panelTargets.size).toBe(8);
+      expect(panelTargets.size).toBe(9);
       for (const target of panelTargets) {
         expect(recordingTabContent, `expected a tabpanel div with id="${target}"`).toContain(`id="${target}"`);
       }
@@ -284,7 +286,7 @@ describe("recording-split structure", () => {
         sharedLabelledBy,
         "the announcement tab left the strip (W2); the wrapper must not name it"
       ).not.toContain("rec-tab-announcement");
-      for (const key of ["discussions", "messages", "moduledeck", "speed", "captions", "slides", "avatar"]) {
+      for (const key of ["discussions", "messages", "moduledeck", "speed", "captions", "slides", "avatar", "lecturevideos"]) {
         expect(recordingTabContent, `expected aria-labelledby="rec-tab-${key}" on its panel`).toContain(
           `aria-labelledby="rec-tab-${key}"`
         );

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { Button, MenuItem, TextField } from "@mui/material";
 import { openScopedRecording } from "./recording/open-scoped-recording";
 import { REC_VIEWS, type RecView } from "./recording/rec-views";
@@ -43,6 +44,8 @@ import { openAnnouncementsTab } from "@/lib/announcements-nav";
 import type { Take } from "./recording/types";
 
 export type { Take } from "./recording/types";
+
+const LectureVideos = dynamic(() => import("./lecture-videos/LectureVideos"));
 
 export default function RecordingTab({
   active = true,
@@ -101,6 +104,10 @@ export default function RecordingTab({
   // overrides the strip's selection WITHOUT touching or persisting it, so the
   // user's real Recording sub-view survives a visit to Announcements.
   const recView: typeof storedRecView | "announcement" = announcementsActive ? "announcement" : storedRecView;
+  const [lectureVideosOpened, setLectureVideosOpened] = useState(false);
+  if (active && recView === "lecturevideos" && !lectureVideosOpened) {
+    setLectureVideosOpened(true);
+  }
 
   // Launch seam (Knowledge base "Start recording" on a page selection, and
   // the fab's Recording-tab entries): RecordingTab is kept mounted for the
@@ -952,6 +959,10 @@ export default function RecordingTab({
           requestAccess={dev.requestAccess}
           avatarStudio={avatarStudio}
         />
+      </div>
+
+      <div role="tabpanel" id="rec-panel-lecturevideos" aria-labelledby="rec-tab-lecturevideos" hidden={recView !== "lecturevideos"}>
+        {lectureVideosOpened && <LectureVideos active={active && recView === "lecturevideos"} />}
       </div>
     </TabShell>
   );

@@ -62,6 +62,7 @@ export type RecordingLaunchView =
   | "captions"
   | "slides"
   | "avatar"
+  | "lecturevideos"
   | "moduledeck"
   | "walkannounce"
   | "messages"
@@ -75,6 +76,7 @@ const RECORDING_LAUNCH_VIEWS: readonly RecordingLaunchView[] = [
   "captions",
   "slides",
   "avatar",
+  "lecturevideos",
   "moduledeck",
   "walkannounce",
   "messages",

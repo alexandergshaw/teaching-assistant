@@ -4,7 +4,7 @@ import { stripComments as sourceCode } from "@/app/components/ui/modalAdoptionSo
 import { initializeManualView } from "./navigation-initial-state";
 import { buildUrlSearch, parseUrlState, resolveRecViewFromUrl } from "../../url-state";
 import { legacyRecViewRedirect } from "@/lib/rec-view-migration";
-const views = ["record", "discussions", "messages", "moduledeck", "speed", "captions", "slides", "avatar"] as const;
+const views = ["record", "discussions", "messages", "moduledeck", "speed", "captions", "slides", "avatar", "lecturevideos"] as const;
 const nav = sourceCode(readFileSync("src/app/components/home/useAppNavigation.ts", "utf8"));
 function storageFor(values: Record<string, string>) {
   return { getItem: (key: string) => values[key] ?? null, setItem: vi.fn((key: string, value: string) => { values[key] = value; }) };

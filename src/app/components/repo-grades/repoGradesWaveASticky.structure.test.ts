@@ -152,8 +152,8 @@ describe("REPO-HEADER-VISUAL VH-10 pins", () => {
   it("VH-10(b): both header inputs carry the shared .headerInput class", () => {
     const searchInput = sliceBetween(HEADER, "<InputBase", "/>");
     expect(searchInput, "search input (StickyHeader) must carry styles.headerInput").toMatch(/styles\.headerInput\b/);
-    const typeaheadInput = sliceBetween(TYPEAHEAD, "<input", "/>");
-    expect(typeaheadInput, "typeahead input must carry styles.headerInput").toMatch(/styles\.headerInput\b/);
+    const typeaheadInput = sliceBetween(TYPEAHEAD, "renderInput={(params)", '"aria-label": "Choose repositories to grade"');
+    expect(typeaheadInput).toMatch(/htmlInput:\s*\{\s*\.\.\.params\.slotProps\.htmlInput,\s*className:\s*\[params\.slotProps\.htmlInput\.className, styles\.headerInput\]/);
   });
 
   it("VH-10(c): delegates the bounded grade-set popup to MUI's portalled Autocomplete", () => {
@@ -164,10 +164,17 @@ describe("REPO-HEADER-VISUAL VH-10 pins", () => {
     expect(TYPEAHEAD).not.toContain("disablePortal");
   });
 
-  it("VH-10(d): the chip remove button keeps its grade-set remove aria-label", () => {
-    const removeBtn = sliceBetween(TYPEAHEAD, "<button", "</button>");
-    expect(removeBtn).toContain("aria-label");
-    expect(removeBtn).toContain("from the grade set");
+  it("VH-10(d): each selected repository has a named remove button using Autocomplete's deletion handler", () => {
+    const renderValue = sliceBetween(TYPEAHEAD, "renderValue=", "renderInput=");
+    expect(renderValue).toContain("getItemProps({ index })");
+    const chip = sliceBetween(renderValue, "<Chip", "/>");
+    expect(chip).toContain("{...itemProps}");
+    expect(chip).toContain('component="button"');
+    expect(chip).toContain('type="button"');
+    expect(chip).toContain('aria-label={`Remove ${row.repo} from the grade set`}');
+    expect(chip).toContain("onClick={onDelete}");
+    expect(chip).toContain("onDelete={onDelete}");
+    expect(TYPEAHEAD).toContain("onToggleRepo(details.option.repo)");
   });
 });
 
@@ -204,8 +211,7 @@ describe("REPO-GRADES-STATUS-PROMINENCE: sticky grading banner", () => {
   });
 });
 
-// REPO-PAGE-OVERHAUL W3 (re-scan in the sticky header) and W4 (one persisted
-// "Run setup" disclosure wrapping BOTH the controls and the link panel).
+// REPO-PAGE-OVERHAUL W3 (re-scan in the sticky header).
 describe("REPO-PAGE-OVERHAUL W3: re-scan control in the sticky header", () => {
   const W_INDEX = withoutLineComments(read("index.tsx"));
   const W_HEADER = withoutLineComments(read("RepoGradesStickyHeader.tsx"));
@@ -234,19 +240,27 @@ describe("REPO-PAGE-OVERHAUL W3: re-scan control in the sticky header", () => {
   });
 });
 
-describe("REPO-PAGE-OVERHAUL W4: Run setup disclosure", () => {
-  const W_INDEX = withoutLineComments(read("index.tsx"));
+describe("REPO-PAGE-OVERHAUL W4: Grading settings and status disclosure", () => {
+  const W_INDEX = INDEX;
+  const disclosure = () => sliceBetween(W_INDEX, "<Accordion ", "</Accordion>");
 
-  it("AC-W4-1/3: the parent details is persisted via setupOpen and defaults open while !allBound", () => {
-    expect(W_INDEX).toContain("effectiveOpen(uiState.setupOpen, !allBound)");
-    expect(W_INDEX).toMatch(/setupOpen: value/);
+  it("the single settings disclosure starts collapsed and opens on request", () => {
+    expect(W_INDEX.match(/<Accordion\b/g)).toHaveLength(1);
+    const opening = sliceBetween(disclosure(), "<Accordion ", "<AccordionSummary");
+    expect(opening).not.toMatch(/\s(?:defaultExpanded|expanded|onChange)\b/);
+    const summary = sliceBetween(disclosure(), "<AccordionSummary", "</AccordionSummary>");
+    expect(summary).toContain("Grading settings and status");
   });
 
-  it("VISUAL-B: the parent summary and the nested Grading settings summary share the .disclosureSummary class, with the bound summary shown collapsed", () => {
-    expect(W_INDEX).toMatch(/<AccordionSummary className=\{gridStyles\.disclosureSummary\}/);
-    expect(W_INDEX).toContain("{boundSummary}");
-    expect(withoutLineComments(read("RepoGradesControls.tsx"))).toMatch(/<summary className=\{gridStyles\.disclosureSummary\}>Grading settings/);
-    expect(ruleBlock(CSS, ".disclosureSummary::before")).toMatch(/border-right/);
+  it("VISUAL-B: startup status and setup warnings remain visible in the collapsed summary", () => {
+    const summary = sliceBetween(disclosure(), "<AccordionSummary", "</AccordionSummary>");
+    expect(summary).toContain("expandIcon={<SvgIcon>");
+    expect(summary).toContain("<RepoGradesStartupBrief />");
+    expect(summary).toMatch(/\{\(coursesError \|\| missingOrg \|\| scanError \|\| rosterError \|\| assignmentsError \|\| canvasGateBlockedReason \|\| assignmentsEmpty \|\| scan\?\.truncated \|\| scan\?\.rateLimit\) &&\s*<Typography[^>]+role="status">Run setup needs attention/);
+    const controls = withoutLineComments(read("RepoGradesControls.tsx"));
+    expect(controls).toContain('<section aria-label="Grading settings">');
+    expect(controls).toContain("<p>Grading settings - {settingsSummary}</p>");
+    expect(controls).not.toMatch(/<(?:Accordion|details)\b/);
   });
 
   it("VISUAL-A: the working header uses the compact padding, bottom-aligns its fields, captions Target branch (not Search) and names both", () => {
@@ -264,30 +278,35 @@ describe("REPO-PAGE-OVERHAUL W4: Run setup disclosure", () => {
     expect(ruleBlock(CSS, ".grid thead th")).toMatch(/vertical-align:\s*top/);
     expect(CSS).not.toContain(".columnHeaderFolder");
     expect(ruleBlock(CSS, ".actionHeading .actionTrigger")).toMatch(/inset-inline-end:\s*0/);
-    const grid = read("RepoGradesGrid.tsx");
-    const menu = sliceBetween(grid, "<RepoGradeActionsMenu", "</RepoGradeActionsMenu>");
+    const grid = withoutLineComments(read("RepoGradesGrid.tsx"));
+    const header = sliceBetween(grid, "className={styles.actionHeading}", "</RepoGradeActionsMenu>");
+    const menu = sliceBetween(header, "<RepoGradeActionsMenu", '<MenuItem key="options"');
     expect(menu).toContain("onGradeColumn(column.folder)");
     expect(menu).toContain('onControlGradeColumn(column.folder, "stop")');
     expect(menu).toContain("onPostColumn(column, pointsPossible)");
-    expect(menu).toContain("secondary={gradingThisColumn ? null : rubricDescription}");
+    expect(menu).toContain("aria-describedby={gradingThisColumn ? queueStatusId : undefined}");
+    expect(menu).toMatch(/secondary=\{gradingThisColumn \? null : !column\.folder[\s\S]*Uses saved automatic grading settings for this assignment\./);
     const options = sliceBetween(grid, "<Collapse in={folderOptionsOpen}", "</Collapse>");
+    expect(options).toContain("onAssignmentChange(column.folder, value?.id ?? null)");
     expect(options).toContain('"aria-label": `Canvas assignment for the ${column.folder} column`');
-    expect(grid.indexOf('role="status"')).toBeGreaterThan(grid.indexOf("</RepoGradeActionsMenu>"));
+    const progress = sliceBetween(grid, "<span id={queueStatusId}", '{busy && <span');
+    expect(grid.indexOf(progress)).toBeGreaterThan(grid.indexOf("</RepoGradeActionsMenu>"));
+    expect(progress).toContain('role="status"');
+    expect(progress).toContain("bulkProgress.done");
     expect(grid).not.toContain("<span className={pageStyles.fieldHint}>Select</span>");
   });
 
-  it("AC-W4-7: the parent accordion contains both RepoGradesControls and LinkUsernamesPanel", () => {
-    const open = W_INDEX.indexOf("<Accordion\n");
-    const controls = W_INDEX.indexOf("<RepoGradesControls");
-    const link = W_INDEX.indexOf("<LinkUsernamesPanel");
+  it("AC-W4-7: the disclosure groups setup and detailed status, with course filters and the gradebook outside", () => {
+    const details = sliceBetween(disclosure(), "<AccordionDetails", "</AccordionDetails>");
+    expect(details).toContain("<RepoGradesStartupStatus />");
+    expect(details).toContain("<RepoGradeReservationRecovery />");
+    expect(details).toContain("<RepoGradesDashboard");
+    expect(details).toContain("<RepoGradesControls");
+    expect(details).toContain("<RepoGradesStatusBanners");
+    expect(W_INDEX).not.toContain("<LinkUsernamesPanel");
     const close = W_INDEX.indexOf("</Accordion>");
-    expect(open).toBeGreaterThan(-1);
-    expect(W_INDEX.slice(open, open + 120)).toContain("setupRegion");
-    expect(controls).toBeGreaterThan(open);
-    expect(link).toBeGreaterThan(controls);
-    expect(close).toBeGreaterThan(link);
-    // The status banners stay outside (visible when collapsed).
-    expect(W_INDEX.indexOf("<RepoGradesStatusBanners")).toBeGreaterThan(close);
+    expect(W_INDEX.indexOf("<RepoGradeCourseFilters")).toBeGreaterThan(close);
+    expect(W_INDEX.indexOf("<RepoGradesStickyHeader")).toBeGreaterThan(close);
   });
 
   it("AC-W4-4: still exactly one aria-live in comment-stripped index.tsx", () => {

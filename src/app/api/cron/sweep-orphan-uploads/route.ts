@@ -1,8 +1,6 @@
 import { randomInt } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
-import { listFilesAs, removeFilesAs } from "@/lib/supabase/storage";
-import { SYLLABUS_UPLOAD_BUCKET } from "@/lib/syllabus-upload-source";
 import {
   sweepOrphanUploads,
   ORPHAN_SWEEP_THRESHOLD_MS,
@@ -10,10 +8,9 @@ import {
   PHASE1_ROOT_LISTING_BUDGET_MS,
   MAX_USER_PREFIXES_PER_TICK,
   SWEEP_LIST_PAGE_SIZE,
-  type OrphanSweepLister,
-  type OrphanSweepRemover,
   type StartIndexPicker,
 } from "@/lib/orphan-upload-sweep";
+import { makeOrphanSweepLister, makeOrphanSweepRemover } from "./storage-adapters";
 
 // The scheduled sweep for orphaned rubric/syllabus upload objects - the
 // backstop for two independent leak mechanisms in
@@ -33,40 +30,6 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
-
-// The two adapters deciding how Supabase Storage SDK results become the
-// sweep's own shapes - exported (and directly unit-tested in route.test.ts
-// against fakes shaped like storage.test.ts's) rather than left as inline
-// object literals inside GET, where the wholesale `sweepOrphanUploads` mock
-// in route.test.ts would otherwise mean these two mapping lines are never
-// actually exercised. `makeOrphanSweepRemover`'s `entry.name` line in
-// particular is the single line deciding whether `removedNames` (and
-// therefore `deleted`) holds leaf names or full paths - see Ruling 1 in
-// src/lib/orphan-upload-sweep.ts's header and the `matchedByLeafName` /
-// `matchedByFullPath` counters below.
-export function makeOrphanSweepLister(supabase: ReturnType<typeof createServiceClient>): OrphanSweepLister {
-  return {
-    async listPage(path, page) {
-      const result = await listFilesAs(supabase, SYLLABUS_UPLOAD_BUCKET, path, page);
-      if (result.error || result.data === null) {
-        return { entries: [], error: result.error?.message ?? "Unknown listing error" };
-      }
-      return { entries: result.data, error: null };
-    },
-  };
-}
-
-export function makeOrphanSweepRemover(supabase: ReturnType<typeof createServiceClient>): OrphanSweepRemover {
-  return {
-    async remove(paths) {
-      const result = await removeFilesAs(supabase, SYLLABUS_UPLOAD_BUCKET, paths);
-      if (result.error || result.data === null) {
-        return { removedNames: [], error: result.error?.message ?? "Unknown removal error" };
-      }
-      return { removedNames: result.data.map((entry) => entry.name), error: null };
-    },
-  };
-}
 
 export async function GET(req: NextRequest) {
   // SECURITY: this check is the entire trust boundary for the service-role

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Autocomplete from "@mui/material/Autocomplete";
 import Button from "@mui/material/Button";
+import Chip from "@mui/material/Chip";
 import TextField from "@mui/material/TextField";
 import type { RepoGradeRow } from "./repoGradesRows";
 import { rowMatchesQuery } from "./repoGradesSearch";
@@ -43,7 +44,40 @@ export default function RepoGradesGradeSetTypeahead({ rows, selected, onToggleRe
             else if (details?.option) onToggleRepo(details.option.repo);
           }}
           noOptionsText="No matching repos"
-          renderInput={(params) => <TextField {...params} size="small" label="Grade set" placeholder="Add repos to grade (default: all)" slotProps={{ ...params.slotProps, htmlInput: { ...params.slotProps.htmlInput, "aria-label": "Choose repositories to grade" } }} />}
+          renderValue={(repositories, getItemProps) => repositories.map((row, index) => {
+            const { key, onDelete, ...itemProps } = getItemProps({ index });
+            return (
+              <Chip
+                {...itemProps}
+                key={key}
+                component="button"
+                type="button"
+                size="small"
+                label={row.repo}
+                aria-label={`Remove ${row.repo} from the grade set`}
+                onClick={onDelete}
+                onDelete={onDelete}
+              />
+            );
+          })}
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              variant="standard"
+              size="small"
+              label="Grade set"
+              placeholder="Add repos to grade (default: all)"
+              slotProps={{
+                ...params.slotProps,
+                input: { ...params.slotProps.input, disableUnderline: true },
+                htmlInput: {
+                  ...params.slotProps.htmlInput,
+                  className: [params.slotProps.htmlInput.className, styles.headerInput].join(" "),
+                  "aria-label": "Choose repositories to grade",
+                },
+              }}
+            />
+          )}
         />
       </div>
       {summary && (

@@ -19,7 +19,8 @@ vi.mock("@/lib/orphan-upload-sweep", async () => {
 
 import { createServiceClient } from "@/lib/supabase/server";
 import { sweepOrphanUploads, SWEEP_SOFT_DEADLINE_MS, ORPHAN_SWEEP_THRESHOLD_MS } from "@/lib/orphan-upload-sweep";
-import { GET, makeOrphanSweepLister, makeOrphanSweepRemover } from "./route";
+import { GET } from "./route";
+import { makeOrphanSweepLister, makeOrphanSweepRemover } from "./storage-adapters";
 import type { NextRequest } from "next/server";
 
 const CRON_SECRET = "test-secret";

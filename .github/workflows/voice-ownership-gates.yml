@@ -1,0 +1,68 @@
+name: Narrated Videos release gates
+on:
+  push:
+    branches: [codex/voice-ownership-gates]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        gate: [lint, types, regression, build, focused]
+    env:
+      TZ: America/Chicago
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 6e1ca69fb9d94192573c64afabd3e692de19a216
+          fetch-depth: 0
+          persist-credentials: false
+      - run: |
+          base64 -d > "$RUNNER_TEMP/candidate.bundle" <<'BUNDLE'
+          IyB2MiBnaXQgYnVuZGxlCi1kNmQyYjE4NjFmNjhkODBlZmZjNzhhODYyOGU4ODdmODU5ODZlMzNiIEdlbmVyYWxpemUgbmFycmF0
+          ZWQgcmVjb3JkaW5ncyBhbmQgbWFuYWdlIEVsZXZlbkxhYnMgdm9pY2VzCjZlMWNhNjlmYjlkOTQxOTI1NzNjNjRhZmFiZDNlNjky
+          ZGUxOWEyMTYgcmVmcy9oZWFkcy9tYWluCgpQQUNLAAAAAgAAAAecD3iclY5BigMhEEX3nqIukEFjd1kNIQRCdrPNAUotiZDWprUz
+          c/x0jpDVh8d/8PoqAh41W20nyzzQEB0S02BDHCMiJpSkySChVwuvUjpEjEdvCE1CiqQlpeB2BY8kRC7ROBGKtV7x1h91hWuN8g+n
+          8JlLXaRw/gl1PoNx0+iM0yPBQZPWaqdz7l2+cdS9CYRaWm79U3d7ykvKL/sGr5qDQP0rsrZHXiDtMfPWuef9rt7nRE5F8ALd+IzM
+          jbkm+Y8fGZvD/d9dZ2U0hHicm8s2l22DPZOIbP2N0qCcSwtcDzUmW/ZMr/X29Jk1OZjpFADRpw1V9wIKQS4k19MV3w3O72772SrF
+          ohoH83icm8o6lVXOxAAIFBILChhWuKqGzXgsmaywYf6U1odtHuLNcls3ypUzAQD76Q3z/wEfwKsH3x6sgKvp7sNX46y6vFJ8eHic
+          e8j5kHNCk8hlB0HF8me63x1eNU/Pyj3y/0XkJcaN07xZAO9wD0n+AzqLw6z+Y0jwySQBhkWE326HRnqgeJwBPgDB/+2DAe2DAbAU
+          FBRI0GLkItBCfSNhxDLF31ZpO01XOJPwEx0WcwAhla7yTCsJC4JQSomcKnJXej6HrrNbFJItKzQY8fIX3FPHFvSJBtPkPvI/Lc9P
+          9A4pP914nPub8Sh7w0b5yb4CnJPXy8vq6yhUK+jp6ZXlZyan6iiAqfjMFCsFpZTMtLTUotS8kvj88rzUlHiwlNLk39LGk70FuFnB
+          3Ml/pQ0n79BS3eytIM8oBlJXVJyRWRBalKNgq5CXWq4QGuQzuUFOqd4gVlPTmksBCFIrClKTSzSQ1eoVJJZk5CXmpmrqleQ7pWoo
+          6ZcZ6YPNL1bCo6s4NbEoOSMgsSgxt1gvPbVEQwnmeqA2qFFgEb0ydqjE5ljFd0wg57OBJWInKxiLT/ZWsJ28SGUvOERiVRWYYxVq
+          J0/U8gGJb2ZTO8iIrl5OV2LzT/XJYHM4IOIKtZsnar1gRBEBmmG/ea/OAXYA2qSAKv0aVSFTRc7RENuFM3Ot4Nnk+fONRvp4nE2P
+          wUrDQBCGKYJIj/VmPUxipSmF1IqnyLZnBS+iXkqRNTtpFpJNya4pRaQv4EX2Raq+hD6Ob+ButgEvy87MP9//z+9b6/u9te10N6MR
+          3EsElSJImiMUK4GlTPkSclSUUUWBynqc8aeSlusQ7kxRjYGZOc+gRLkshMQ2gGHFVECRc/WPgxUKWKXmsZTqvAEBZyi6iiccnUFV
+          8Bitm91lYVvve/1O3XzkTEZufsU08U7150VPbycH+sc73BtctvXxsOfb1RenktMIHuzndpduNodXI+O+rz/8vl4fnWxi01eQUxWn
+          JgABe2votsOEZwrLIKjLAZCJw07DJg4QQppAxh/A0dwJpKGGGYqFSmvxGKagihsq6AKZydaLMdjJZmfzAUQgnrPMongCgef8vq67
+          /eEfy0GRU8IqM7izgCaJg4EI2Na+JigYlOog
+          BUNDLE
+          git bundle verify "$RUNNER_TEMP/candidate.bundle"
+          git fetch "$RUNNER_TEMP/candidate.bundle" refs/heads/main
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "6e1ca69fb9d94192573c64afabd3e692de19a216"
+          test "$(git rev-parse 'HEAD^{tree}')" = "b60a30393aa484d768a843cd5d666f6ef081686b"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - if: matrix.gate == 'lint'
+        run: npm run lint
+      - if: matrix.gate == 'types'
+        run: npx --no-install tsc --noEmit
+      - if: matrix.gate == 'regression'
+        env:
+          VITEST_MAX_WORKERS: '2'
+        run: npm test
+      - if: matrix.gate == 'build'
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: local-build-only
+        run: npm run build
+      - if: matrix.gate == 'focused'
+        env:
+          VITEST_MAX_WORKERS: '2'
+        run: npm run test:paths src/app/actions/eleven-voice-library.test.ts src/app/actions/media-voice.guard.test.ts src/app/actions/media-voice.budget.test.ts src/app/components/lecture-videos src/app/components/ui/modalAdoption.wiring.test.ts src/app/url-state.rec-view.test.ts src/lib/recording-launch.test.ts src/app/components/recording/recording-split.structure.test.ts src/file-size-ceiling.structure.test.ts

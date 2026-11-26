@@ -145,8 +145,15 @@ async function getVoice(key: string, voiceId: string): Promise<ElevenManagedVoic
 }
 
 async function requireManageableVoice(key: string, voiceId: string): Promise<ElevenManagedVoice> {
-  const voice = await getVoice(key, voiceId);
-  if (!voice.manageable) throw new Error("Only personal voices owned by this ElevenLabs account can be managed.");
+  // Use the same ownership metadata as the library. The v1 detail response
+  // can omit ownership even when the v2 library identifies the voice as owned.
+  const params = new URLSearchParams({ voice_ids: voiceId, include_total_count: "false" });
+  const response = await voiceRequest(key, `/v2/voices?${params}`);
+  const data = await response.json() as { voices?: VoiceResponse[] };
+  if (!Array.isArray(data?.voices)) throw new Error("ElevenLabs returned incomplete voice information.");
+  const matches = data.voices.filter((voice) => voice?.voice_id === voiceId);
+  const voice = matches.length === 1 ? toManagedVoice(matches[0]) : null;
+  if (!voice?.manageable) throw new Error("Only personal voices owned by this ElevenLabs account can be managed.");
   return voice;
 }
 

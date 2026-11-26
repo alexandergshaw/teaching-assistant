@@ -125,11 +125,15 @@ describe("ElevenLabs voice library", () => {
   });
 
   it("verifies live ownership before applying only name and description updates", async () => {
-    mocks.fetch.mockResolvedValueOnce(Response.json({ ...voice, is_owner: false })).mockResolvedValueOnce(Response.json(voice))
+    mocks.fetch.mockResolvedValueOnce(Response.json({ voices: [{ ...voice, is_owner: false }, { ...voice, voice_id: "different_owned_voice" }] }))
+      .mockResolvedValueOnce(Response.json({ voices: [voice] }))
       .mockResolvedValueOnce(Response.json({ status: "ok" }));
     expect(await updateElevenVoiceAction(voice.voice_id, "Name", "Description")).toHaveProperty("error", expect.stringContaining("owned"));
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
     expect(await updateElevenVoiceAction(voice.voice_id, "Name", "Description")).toEqual({ ok: true });
+    const ownershipUrl = new URL(String(mocks.fetch.mock.calls[1][0]));
+    expect(ownershipUrl.pathname).toBe("/v2/voices");
+    expect(ownershipUrl.searchParams.get("voice_ids")).toBe(voice.voice_id);
     const [url, request] = mocks.fetch.mock.lastCall!;
     expect(url).toBe(`https://api.elevenlabs.io/v1/voices/${voice.voice_id}/edit`);
     expect([...((request?.body as FormData).entries())]).toEqual([["name", "Name"], ["description", "Description"]]);
@@ -141,10 +145,10 @@ describe("ElevenLabs voice library", () => {
     expect(mocks.fetch).not.toHaveBeenCalled();
     const extras = sampleForm();
     extras.set("labels", '{"accent":"American"}');
-    mocks.fetch.mockResolvedValueOnce(Response.json(voice));
+    mocks.fetch.mockResolvedValueOnce(Response.json({ voices: [voice] }));
     expect(await updateElevenVoiceAction(voice.voice_id, "Name", "Description", extras)).toHaveProperty("error", expect.stringContaining("instant voice clones"));
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
-    mocks.fetch.mockResolvedValueOnce(Response.json({ ...voice, category: "cloned" })).mockResolvedValueOnce(Response.json({ status: "ok" }));
+    mocks.fetch.mockResolvedValueOnce(Response.json({ voices: [{ ...voice, category: "cloned" }] })).mockResolvedValueOnce(Response.json({ status: "ok" }));
     expect(await updateElevenVoiceAction(voice.voice_id, "Name", "Description", extras)).toEqual({ ok: true });
     const body = mocks.fetch.mock.lastCall?.[1]?.body as FormData;
     expect(body.get("labels")).toBe('{"accent":"American"}');
@@ -153,20 +157,20 @@ describe("ElevenLabs voice library", () => {
   });
 
   it("protects configured and stored defaults and fails closed when the default lookup fails", async () => {
-    mocks.fetch.mockImplementation(async () => Response.json(voice));
+    mocks.fetch.mockImplementation(async () => Response.json({ voices: [voice] }));
     expect(await deleteElevenVoiceAction("configured_voice")).toHaveProperty("error", expect.stringContaining("workspace default"));
     mocks.referenced.mockResolvedValueOnce({ data: [{ user_id: "any-user" }], error: null }).mockResolvedValueOnce({ data: null, error: { message: "down" } });
     expect(await deleteElevenVoiceAction(voice.voice_id)).toHaveProperty("error", expect.stringContaining("saved default"));
     expect(await deleteElevenVoiceAction(voice.voice_id)).toHaveProperty("error", expect.stringContaining("No voice was deleted"));
     expect(mocks.fetch.mock.calls.map(([, request]) => request?.method)).not.toContain("DELETE");
-    mocks.fetch.mockResolvedValueOnce(Response.json(voice)).mockResolvedValueOnce(Response.json({ status: "ok" }));
+    mocks.fetch.mockResolvedValueOnce(Response.json({ voices: [voice] })).mockResolvedValueOnce(Response.json({ status: "ok" }));
     expect(await deleteElevenVoiceAction(voice.voice_id)).toEqual({ ok: true });
     expect(mocks.fetch.mock.lastCall?.[1]?.method).toBe("DELETE");
     expect(mocks.clearFilter).toHaveBeenLastCalledWith([["voice_id", voice.voice_id], ["voice_sample_path", null]]);
   });
 
   it("reports confirmed provider deletion even when a raced default cannot be reconciled", async () => {
-    mocks.fetch.mockResolvedValueOnce(Response.json(voice)).mockResolvedValueOnce(Response.json({ status: "ok" }));
+    mocks.fetch.mockResolvedValueOnce(Response.json({ voices: [voice] })).mockResolvedValueOnce(Response.json({ status: "ok" }));
     mocks.clearFilter.mockResolvedValueOnce({ error: { message: "unavailable" } });
     expect(await deleteElevenVoiceAction(voice.voice_id)).toEqual({ ok: true, warning: expect.stringContaining("could not be reconciled") });
   });

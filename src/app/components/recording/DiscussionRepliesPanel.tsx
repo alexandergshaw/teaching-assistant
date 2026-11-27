@@ -570,7 +570,7 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
   return (
     <div className={styles.adaptPanel}>
       <div className={styles.adaptPanelHeader}>
-        <h2 className={styles.adaptPanelTitle}>Discussion replies</h2>
+        <h2 className={styles.adaptPanelTitle}>Discussion Board Reply Generation</h2>
         <p className={styles.adaptPanelSubtitle}>
           Screen-record a discussion board while you scroll - the app reads the posts off the screen and drafts a
           reply to each one.

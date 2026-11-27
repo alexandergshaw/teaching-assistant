@@ -23,7 +23,7 @@ describe("production parent initializer URL precedence", () => {
         const storage = storageFor({ "ta-content-view": savedContent, "ta-active-tab": "manual", "ta-manual-view": "recording", ...(savedRec ? { "ta-rec-view": savedRec } : {}) });
         const parent = initializeManualView(search, storage, "manual", () => null);
         expect({ ...parseUrlState(search), manualView: parent }).toMatchObject({ tab: "manual", toolsSection: "manual", manualView: "recording" });
-        expect(resolveRecViewFromUrl(search, savedRec)).toBe(views.includes(raw as typeof views[number]) ? raw : "record");
+        expect(resolveRecViewFromUrl(search, savedRec)).toBe(views.includes(raw as typeof views[number]) ? raw : "lecturevideos");
         expect(legacyRecViewRedirect(savedRec, parent, search)).toBeNull();
         expect(storage.setItem).not.toHaveBeenCalled();
       }

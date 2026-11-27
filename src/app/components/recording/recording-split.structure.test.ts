@@ -123,34 +123,12 @@ describe("recording-split structure", () => {
       "utf-8"
     ));
 
-    // The strip is one inline array-of-tuples literal rendered via .map -
-    // this pins the entry COUNT (a fresh entry silently dropped, or an old
-    // one silently duplicated, both change this number without changing any
-    // other visible source text) at ten: the pre-existing six
-    // (record/discussions/speed/captions/slides/avatar), the dedicated
-    // Announcement front door added for recording FOR an announcement, the
-    // dedicated Module walkthrough deck front door for the
-    // module-walkthrough-deck feature
-    // (docs/module-walkthrough-deck-acceptance-criteria.md AC1), the
-    // dedicated Message replies front door for the message-replies feature
-    // (docs/message-replies-acceptance-criteria.md M1), and the dedicated
-    // Announcement-from-a-walkthrough front door for that feature
-    // (docs/announcement-from-walkthrough-acceptance-criteria.md) - a
-    // SIBLING capture surface to Module walkthrough deck, not a mode of it.
-    // GRAD-SUBTAB wave 2 (docs/tools-grading-subtab-wave2-architecture.md):
-    // the dedicated Grading and Grading-from-screenshots front doors MOVED
-    // OUT of this strip entirely - they are now Tools > Grading inner-nav
-    // items, not Recording sub-tabs (twelve -> ten).
-    // TOOLS-IA-REORG W2: the "announcement" tab was RE-PARENTED to Tools >
-    // Announcements > From a recording (nine -> eight).
-    it("should render exactly eight inner-view tabs", () => {
+    it("renders exactly the three generation tabs in order", () => {
       expect(recordingTabContent).toContain("REC_VIEWS.map(([key, label])");
       expect(REC_VIEWS).toEqual([
-        ["record", "Record"], ["discussions", "Discussion replies"],
-        ["messages", "Message replies"], ["moduledeck", "Module walkthrough deck"],
-        ["speed", "Change speed"], ["captions", "Caption a video"],
-        ["slides", "Narrate a deck"], ["avatar", "Avatar"],
-        ["lecturevideos", "Narrated Videos"],
+        ["lecturevideos", "Narration/Caption Generation"],
+        ["moduledeck", "Slide Deck Generation"],
+        ["discussions", "Discussion Board Reply Generation"],
       ]);
     });
 
@@ -170,24 +148,17 @@ describe("recording-split structure", () => {
       "utf-8"
     ));
 
-    // The restored-view read (the localStorage-backed useState initializer
-    // near the top of the file) is a chained equality that falls back to
-    // "record" for anything it does not recognize - a new recView value that
-    // is not added to this chain restores to "record" silently on reload
-    // instead of the view the instructor was actually on. Scoped to the
-    // chain itself (bounded by its own `return`/ternary) rather than the
-    // whole file, so this cannot be satisfied by the value appearing
-    // anywhere else in the source (e.g. only in the strip above).
-    it("should accept every non-default recView value in the restored-view equality chain, including messages", () => {
+    it("accepts all visible and legacy URL destinations", () => {
       expect(recordingTabContent).toContain('return resolveRecViewFromUrl(window.location.search, localStorage.getItem("ta-rec-view"));');
       for (const [value] of REC_VIEWS) expect(normalizeRecView(value)).toBe(value);
+      for (const value of ["record", "messages", "speed", "captions", "slides", "avatar"]) expect(normalizeRecView(value)).toBe(value);
     });
 
     // TOOLS-IA-REORG W2 (R-b1): "announcement" left recView; a chain that
     // re-accepted it would strand/duplicate the re-parented front door.
     it("should NOT accept announcement in the restore guard - it moved to Tools > Announcements", () => {
       expect(isRecView("announcement")).toBe(false);
-      expect(normalizeRecView("announcement")).toBe("record");
+      expect(normalizeRecView("announcement")).toBe("lecturevideos");
     });
 
     // GRAD-SUBTAB wave 2: "grading"/"snapgrade" moved out of recView entirely
@@ -196,9 +167,9 @@ describe("recording-split structure", () => {
     // to accept them would be a silent sign the panels moved back in.
     it("should NOT accept grading or snapgrade in the restore guard - both moved to Tools > Grading", () => {
       expect(isRecView("grading")).toBe(false);
-      expect(normalizeRecView("grading")).toBe("record");
+      expect(normalizeRecView("grading")).toBe("lecturevideos");
       expect(isRecView("snapgrade")).toBe(false);
-      expect(normalizeRecView("snapgrade")).toBe("record");
+      expect(normalizeRecView("snapgrade")).toBe("lecturevideos");
     });
 
     // ANNOUNCEMENTS-TAB A-W2 (REQ-7): the walkthrough-announcement capture panel
@@ -206,7 +177,7 @@ describe("recording-split structure", () => {
     // that re-accepted it would be a silent sign the panel moved back in.
     it("should NOT accept walkannounce in the restore guard - it moved to Tools > Announcements", () => {
       expect(isRecView("walkannounce")).toBe(false);
-      expect(normalizeRecView("walkannounce")).toBe("record");
+      expect(normalizeRecView("walkannounce")).toBe("lecturevideos");
     });
   });
 
@@ -216,80 +187,26 @@ describe("recording-split structure", () => {
       "utf-8"
     ));
 
-    // CC9's own text: "the record/announcement pair shares ONE wrapper", so
-    // ten tabs are served by NINE panel divs, not ten. GRAD-SUBTAB wave 2
-    // drops the grading/snapgrade tab AND their panel divs (twelve/eleven ->
-    // ten/nine), moving both to Tools > Grading.
-    // TOOLS-IA-REORG W2: eight tabs; seven literal tabpanel divs plus the
-    // record wrapper, whose role is dynamic (tabpanel on Recording, a labelled
-    // region while Announcements > From a recording reuses it).
-    it("renders eight literal tabpanels plus the dynamic record wrapper", () => {
+    it("assigns tabpanel roles to the three visible siblings", () => {
       const matches = recordingTabContent.match(/role="tabpanel"/g) ?? [];
-      expect(matches).toHaveLength(8);
-      expect(recordingTabContent).toContain('role={announcementsActive ? "region" : "tabpanel"}');
+      expect(matches).toHaveLength(3);
     });
 
-    // The ten tab buttons render from ONE array literal via a single .map()
-    // lambda (pinned one-line by the "inner-view strip" canary above), so the
-    // button JSX - including its aria-controls expression - appears exactly
-    // ONCE in source and is applied ten times at render. A literal per-tab
-    // occurrence count cannot see through a single JSX expression reused ten
-    // times; this instead pins that one expression's exact shape and proves,
-    // for every one of the ten keys in the strip, that the id it resolves to
-    // is one some tabpanel div actually declares.
-    it("gives every tab button an aria-controls expression that resolves to a real tabpanel id for all nine keys", () => {
+    it("connects each visible tab to its panel in both directions", () => {
       expect(recordingTabContent).toContain(
         "aria-controls={`rec-panel-${key}`}"
       );
-      const keys = [
-        "record",
-        "discussions",
-        "messages",
-        "moduledeck",
-        "speed",
-        "captions",
-        "slides",
-        "avatar",
-        "lecturevideos",
-      ];
-      const panelTargets = new Set(
-        keys.map((key) => `rec-panel-${key}`)
-      );
-      expect(panelTargets.size).toBe(9);
-      for (const target of panelTargets) {
-        expect(recordingTabContent, `expected a tabpanel div with id="${target}"`).toContain(`id="${target}"`);
+      expect(recordingTabContent).toContain("id={`rec-tab-${key}`}");
+      for (const [key] of REC_VIEWS) {
+        expect(recordingTabContent).toContain(`role="tabpanel" id="rec-panel-${key}" aria-labelledby="rec-tab-${key}"`);
       }
     });
 
-    it("gives every tab button its own id expression, and every panel div an aria-labelledby naming the tab(s) that control it", () => {
-      expect(recordingTabContent).toContain("id={`rec-tab-${key}`}");
-      // Widened (never weakened): the shared record/announcement panel used
-      // to name both tabs in one static string, always "rec-tab-record
-      // rec-tab-announcement" regardless of which of the two was selected,
-      // so the shared panel was permanently announced as "Record Record
-      // announcement" to assistive tech. It is now a dynamic expression that
-      // resolves to whichever single tab is actually showing the panel. This
-      // assertion accepts any expression shape (the literal string is no
-      // longer required) but keeps a canary that BOTH tab ids are still
-      // named somewhere in that expression, so a rewrite that drops one id
-      // (or reintroduces the old always-both string) still fails here.
-      const sharedLabelledByMatch = recordingTabContent.match(/id="rec-panel-record"[\s\S]*?aria-labelledby=\{[^}]*\}/);
-      expect(
-        sharedLabelledByMatch,
-        "expected a dynamic aria-labelledby expression on the shared record/announcement panel (id=\"rec-panel-record\")"
-      ).toBeTruthy();
-      const sharedLabelledBy = sharedLabelledByMatch![0];
-      expect(sharedLabelledBy, "expected the shared panel's aria-labelledby expression to name rec-tab-record").toContain(
-        "rec-tab-record"
-      );
-      expect(
-        sharedLabelledBy,
-        "the announcement tab left the strip (W2); the wrapper must not name it"
-      ).not.toContain("rec-tab-announcement");
-      for (const key of ["discussions", "messages", "moduledeck", "speed", "captions", "slides", "avatar", "lecturevideos"]) {
-        expect(recordingTabContent, `expected aria-labelledby="rec-tab-${key}" on its panel`).toContain(
-          `aria-labelledby="rec-tab-${key}"`
-        );
+    it("labels direct-only panels without referring to removed tab ids", () => {
+      expect(recordingTabContent).toMatch(/role="region"\s+id="rec-panel-record"\s+aria-label=\{announcementsActive \? "Record an announcement" : "Record"\}/);
+      for (const key of ["messages", "speed", "captions", "slides", "avatar"]) {
+        expect(recordingTabContent).toContain(`role="region" id="rec-panel-${key}" aria-label=`);
+        expect(recordingTabContent).not.toContain(`aria-labelledby="rec-tab-${key}"`);
       }
     });
   });

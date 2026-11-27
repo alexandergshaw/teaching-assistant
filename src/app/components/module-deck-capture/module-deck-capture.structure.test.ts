@@ -89,7 +89,7 @@ describe('"moduledeck" is wired into BOTH the recView union AND the SEPARATE res
   });
 
   it("the inner-view tab strip includes a moduledeck entry, so the view is reachable by more than a reload or a launch event", () => {
-    expect(REC_VIEWS).toContainEqual(["moduledeck", "Module walkthrough deck"]);
+    expect(REC_VIEWS).toContainEqual(["moduledeck", "Slide Deck Generation"]);
     expect(recordingTabSource).toContain("REC_VIEWS.map(([key, label])");
   });
 });

@@ -6,7 +6,7 @@ import { initializeManualView } from "./components/home/navigation-initial-state
 import { toolsStateFromRailItem } from "./components/tabs/tab-rails";
 import { buildTabHref, isPlainLeftClick } from "./components/tabs/tab-link";
 import { VC_SUB_TABS, VC_ORG_VIEWS, isVcSubTab, isVcOrgView, VC_SUB_TAB_CHANGE_EVENT, VC_ORG_VIEW_CHANGE_EVENT } from "./components/vc-views";
-import { buildUrlSearch, parseUrlState, normalizeVcSubTab, normalizeVcOrgView, resolveVcSubTabFromUrl, resolveVcOrgViewFromUrl, isVersionControlUrl } from "./url-state";
+import { buildUrlSearch, parseUrlState, normalizeRecordingEntry, normalizeVcSubTab, normalizeVcOrgView, resolveVcSubTabFromUrl, resolveVcOrgViewFromUrl, isVersionControlUrl } from "./url-state";
 const base = { ...parseUrlState("?tab=manual&manualView=version-control") };
 const read = (path: string) => stripComments(readFileSync(path, "utf8")).replace(/\r\n/g, "\n");
 const nav = read("src/app/components/home/useAppNavigation.ts");
@@ -152,7 +152,7 @@ describe("Version Control native links", () => {
       for (const view of c.values) {
         setter(view); expect(local).toHaveBeenLastCalledWith(view); expect(storage.get(c.key)).toBe(view); expect(mirror[c.field]).toBe(view);
         const page = read("src/app/page.tsx");
-        const state = variableArrow(page, "navState", { ...base, activeTab: "manual", nav: { ...mirror, recView: "record", kbInstitution: null, kbPageId: null } });
+        const state = variableArrow(page, "navState", { ...base, activeTab: "manual", normalizeRecordingEntry, nav: { ...mirror, recView: "record", kbInstitution: null, kbPageId: null } });
         const parsed = parseUrlState(buildTabHref(state, toolsStateFromRailItem("manual:version-control", "manual", "version-control")).slice(1));
         expect(c.field === "vcSubTab" ? normalizeVcSubTab(parsed.vcSubTab) : normalizeVcOrgView(parsed.vcOrgView)).toBe(c.field === "vcOrgView" && mirror.vcSubTab !== "orgs" ? "students" : view);
       }

@@ -658,7 +658,7 @@ export default function ModuleDeckCapturePanel({ active }: { active: boolean }) 
   return (
     <div className={styles.adaptPanel}>
       <div className={styles.adaptPanelHeader}>
-        <h2 className={styles.adaptPanelTitle}>Module walkthrough (record a lecture deck)</h2>
+        <h2 className={styles.adaptPanelTitle}>Slide Deck Generation</h2>
         <p className={styles.adaptPanelSubtitle}>
           Share your screen and scroll through a module - the app reads what is visible and turns it into a lecture
           slide deck using the template you pick below. The deck&apos;s slide count comes from the template, not from

@@ -1,5 +1,5 @@
 import { isVcSubTab, isVcOrgView, type VcSubTab, type VcOrgView } from "./components/vc-views";
-import { isRecView, type RecView } from "./components/recording/rec-views";
+import { isRecView, REC_VIEWS, type RecView } from "./components/recording/rec-views";
 // Pure helpers mapping the app's full tab/sub-tab nesting to and from the
 // URL's query string, so the browser's Back/Forward buttons can move between
 // them.
@@ -620,10 +620,13 @@ export function buildUrlSearch(state: UrlNavState): string {
   return `?${params.toString()}`;
 }
 
-export const DEFAULT_REC_VIEW: RecView = "record";
+export const DEFAULT_REC_VIEW: RecView = "lecturevideos";
 export const REC_VIEW_CHANGE_EVENT = "recording-view-change";
 export function normalizeRecView(value: unknown): RecView {
   return isRecView(value) ? value : DEFAULT_REC_VIEW;
+}
+export function normalizeRecordingEntry(value: unknown): RecView {
+  return REC_VIEWS.find(([view]) => view === value)?.[0] ?? DEFAULT_REC_VIEW;
 }
 export function isRecordingUrl(search: string): boolean {
   if (!new URLSearchParams(search).has("tab")) return false;
@@ -631,7 +634,7 @@ export function isRecordingUrl(search: string): boolean {
   return location.tab === "manual" && location.toolsSection === "manual" && location.manualView === "recording";
 }
 export function resolveRecViewFromUrl(search: string, saved: unknown): RecView {
-  return isRecordingUrl(search) ? normalizeRecView(parseUrlState(search).recView) : normalizeRecView(saved);
+  return isRecordingUrl(search) ? normalizeRecView(parseUrlState(search).recView) : normalizeRecordingEntry(saved);
 }
 
 export function normalizeVcSubTab(value: unknown): VcSubTab { return isVcSubTab(value) ? value : "orgs"; }

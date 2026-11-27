@@ -70,8 +70,8 @@ describe('"messages" is wired into BOTH the recView union AND the SEPARATE resto
     expect(normalizeRecView("messages")).toBe("messages");
   });
 
-  it("the inner-view tab strip includes a messages entry, directly after the discussions entry, so the view is reachable by more than a reload or a launch event", () => {
-    expect(REC_VIEWS.slice(1, 3)).toEqual([["discussions", "Discussion replies"], ["messages", "Message replies"]]);
+  it("keeps messages reachable through routing while omitting it from the visible strip", () => {
+    expect(REC_VIEWS.map(([view]) => view)).not.toContain("messages");
     expect(recordingTabSource).toContain("REC_VIEWS.map(([key, label])");
   });
 });

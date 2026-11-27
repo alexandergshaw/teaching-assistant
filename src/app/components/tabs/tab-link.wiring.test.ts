@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 import ts from "typescript";
-import { parseUrlState, resolveRecViewFromUrl } from "../../url-state";
+import { normalizeRecordingEntry, parseUrlState, resolveRecViewFromUrl } from "../../url-state";
 import { buildTabHref } from "./tab-link";
 import { toolsStateFromRailItem } from "./tab-rails";
 
@@ -124,8 +124,8 @@ describe("AC1/AC2: page.tsx wires hrefs into the top strip, all three rails and 
     }
   });
 
-  it("carries the stored Recording mirror through the hook return and page into outer hrefs, while inner links select their own view", () => {
-    const saved = "captions";
+  it("carries a visible stored Recording view into outer hrefs and leaves legacy views directly addressable", () => {
+    const saved = "moduledeck";
     const stateCall = initializer(NAV, "[recView, setRecView]") as ts.CallExpression;
     const recView = evaluate(stateCall.arguments[0].getText(), {
       window: { location: { search: "?tab=courses" } },
@@ -137,17 +137,21 @@ describe("AC1/AC2: page.tsx wires hrefs into the top strip, all three rails and 
     const bindings = Object.fromEntries(returned.match(/\b\w+\b/g)!.map((name) => [name, "unused"]));
     const nav = evaluate(returned, { ...bindings, ...defaults, activeTab: "courses", recView });
     expect(nav.recView).toBe(saved);
-    const navState = evaluate(initializer(PAGE, "navState").getText(), { ...defaults, activeTab: "courses", nav });
+    const navBindings = { ...defaults, activeTab: "courses", normalizeRecordingEntry };
+    const navState = evaluate(initializer(PAGE, "navState").getText(), { ...navBindings, nav });
     const recording = toolsStateFromRailItem("manual:recording", navState.toolsSection, navState.manualView);
-    const expected = "/?tab=manual&manualView=recording&recView=captions";
+    const expected = "/?tab=manual&manualView=recording&recView=moduledeck";
     expect(buildTabHref(navState, { tab: "manual", ...recording })).toBe(expected);
     expect(buildTabHref({ ...navState, ...recording }, { tab: "manual" })).toBe(expected);
+    const afterLegacy = evaluate(initializer(PAGE, "navState").getText(), { ...navBindings, nav: { ...nav, recView: "captions" } });
+    expect(buildTabHref(afterLegacy, { tab: "manual", ...recording })).toBe("/?tab=manual&manualView=recording");
     const component = read("src", "app", "components", "RecordingTab.tsx");
     const innerHref = evaluate(initializer(component, "recViewHref").getText(), {
       window: { location: { search: expected.slice(1) } }, parseUrlState, buildTabHref,
     });
     expect(innerHref("speed")).toBe("/?tab=manual&manualView=recording&recView=speed");
-    expect(innerHref("record")).toBe("/?tab=manual&manualView=recording");
+    expect(innerHref("record")).toBe("/?tab=manual&manualView=recording&recView=record");
+    expect(innerHref("lecturevideos")).toBe("/?tab=manual&manualView=recording");
   });
 });
 

@@ -50,7 +50,7 @@ import { ManualRail } from "./components/manual/ManualRail";
 import { resolveStateFromDestinationId } from "./components/manual/manual-rail";
 import { TabRail } from "./components/tabs/TabRail";
 import { buildTabHref, isPlainLeftClick } from "./components/tabs/tab-link";
-import type { UrlNavState } from "./url-state";
+import { normalizeRecordingEntry, type UrlNavState } from "./url-state";
 import {
   COURSES_RAIL_ITEMS,
   TOOLS_RAIL_ITEMS,
@@ -102,7 +102,7 @@ export default function Home() {
     toolsSection,
     librarySection,
     manualView,
-    recView: nav.recView,
+    recView: normalizeRecordingEntry(nav.recView),
     vcSubTab: nav.vcSubTab,
     vcOrgView: nav.vcOrgView,
     automateView,
@@ -466,8 +466,13 @@ export default function Home() {
   };
   const handleToolsRailChange = (id: string) => {
     const next = toolsStateFromRailItem(id, toolsSection, manualView);
+    if (next.manualView === "recording" && next.toolsSection === "manual") restoreRecordingSibling();
     if (next.toolsSection !== toolsSection) setToolsSection(next.toolsSection);
     if (next.manualView !== manualView) setManualView(next.manualView);
+  };
+  const restoreRecordingSibling = () => {
+    const view = normalizeRecordingEntry(nav.recView);
+    if (view !== nav.recView) navigateToRecordingTool(view);
   };
 
   return (
@@ -512,7 +517,9 @@ export default function Home() {
           // ctrl/cmd/shift click would otherwise switch THIS tab as well as
           // opening the new browser tab. The event is the click.
           onChange={(e, v: ActiveTab) => {
-            if (isPlainLeftClick(e as unknown as React.MouseEvent)) setActiveTab(v);
+            if (!isPlainLeftClick(e as unknown as React.MouseEvent)) return;
+            if (v === "manual" && toolsSection === "manual" && manualView === "recording") restoreRecordingSibling();
+            setActiveTab(v);
           }}
           sx={{
             position: "sticky",

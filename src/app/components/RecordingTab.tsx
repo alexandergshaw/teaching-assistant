@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { Button, MenuItem, TextField } from "@mui/material";
 import { openScopedRecording } from "./recording/open-scoped-recording";
 import { REC_VIEWS, type RecView } from "./recording/rec-views";
-import { REC_VIEW_CHANGE_EVENT, normalizeRecView, resolveRecViewFromUrl, parseUrlState } from "../url-state";
+import { DEFAULT_REC_VIEW, REC_VIEW_CHANGE_EVENT, normalizeRecordingEntry, normalizeRecView, resolveRecViewFromUrl, parseUrlState } from "../url-state";
 import { buildTabHref, isPlainLeftClick } from "./tabs/tab-link";
 import TabShell from "./TabShell";
 import CaptionStudio from "./CaptionStudio";
@@ -64,7 +64,7 @@ export default function RecordingTab({
   // announcement is now Tools > Announcements > From a recording, served by
   // this same instance through the `announcementsActive` prop. A stored
   // `ta-rec-view = "announcement"` is migrated by src/lib/rec-view-migration.ts
-  // (page.tsx redirects the user) and restores here as "record".
+  // (page.tsx redirects the user) and restores here as the default view.
   //
   // "grading"/"snapgrade" (docs/grading-via-recording-acceptance-criteria.md,
   // docs/snapshot-grading-acceptance-criteria.md) MOVED OUT of this union
@@ -73,7 +73,7 @@ export default function RecordingTab({
   // siblings of this tab, reached through Tools > Grading's own inner nav
   // (gradingView), not through recView.
   const [storedRecView, setRecViewState] = useState<RecView>(() => {
-    if (typeof window === "undefined") return "record";
+    if (typeof window === "undefined") return DEFAULT_REC_VIEW;
     return resolveRecViewFromUrl(window.location.search, localStorage.getItem("ta-rec-view"));
   });
   const setRecView = useCallback((view: RecView) => {
@@ -81,6 +81,10 @@ export default function RecordingTab({
     localStorage.setItem("ta-rec-view", view);
     window.dispatchEvent(new CustomEvent(REC_VIEW_CHANGE_EVENT, { detail: view }));
   }, []);
+  const restoreRememberedRecordingView = useEffectEvent(() => {
+    const view = normalizeRecordingEntry(storedRecView);
+    if (view !== storedRecView) setRecView(view);
+  });
   const recViewHref = (view: RecView) => buildTabHref(
     parseUrlState(typeof window === "undefined" ? "" : window.location.search),
     { tab: "manual", toolsSection: "manual", manualView: "recording", recView: view },
@@ -104,6 +108,7 @@ export default function RecordingTab({
   // overrides the strip's selection WITHOUT touching or persisting it, so the
   // user's real Recording sub-view survives a visit to Announcements.
   const recView: typeof storedRecView | "announcement" = announcementsActive ? "announcement" : storedRecView;
+  const focusableRecView = REC_VIEWS.some(([key]) => key === recView) ? recView : DEFAULT_REC_VIEW;
   const [lectureVideosOpened, setLectureVideosOpened] = useState(false);
   if (active && recView === "lecturevideos" && !lectureVideosOpened) {
     setLectureVideosOpened(true);
@@ -135,7 +140,11 @@ export default function RecordingTab({
       // widening recView back to include them) is what lets recView's union
       // actually shrink - tsc rejects setRecView(detail.view) otherwise,
       // since detail.view still carries both values.
-      if (detail.view === "remembered" || detail.view === "walkannounce" || detail.view === "announcement") return;
+      if (detail.view === "remembered") {
+        restoreRememberedRecordingView();
+        return;
+      }
+      if (detail.view === "walkannounce" || detail.view === "announcement") return;
       setRecView(detail.view);
     };
     window.addEventListener(RECORDING_LAUNCH_EVENT, handler);
@@ -716,7 +725,7 @@ export default function RecordingTab({
           <a key={key} href={recViewHref(key)} role="tab" aria-selected={recView === key}
             id={`rec-tab-${key}`}
             aria-controls={`rec-panel-${key}`}
-            tabIndex={recView === key ? 0 : -1}
+            tabIndex={focusableRecView === key ? 0 : -1}
             onKeyDown={(e) => {
               const tabs = Array.from(e.currentTarget.parentElement?.querySelectorAll<HTMLAnchorElement>('[role="tab"]') ?? []);
               const idx = tabs.indexOf(e.currentTarget);
@@ -742,9 +751,8 @@ export default function RecordingTab({
         ))}
       </div>
 
-      {/* Shared by Record AND Announcements > From a recording (W2: the latter
-          is no longer a strip tab, so this wrapper is a tabpanel only while
-          the strip is showing and a labelled region otherwise). The owner's
+      {/* Shared by the direct Record route and Announcements > From a recording.
+          The owner's
           ask was a directly-reachable front door for recording FOR an
           announcement, not a replacement for the existing per-take route
           reached from a take's own row while on Record. TakeAnnouncementPanel is gated on
@@ -758,10 +766,9 @@ export default function RecordingTab({
           Record; an instructor who opens the panel from a take's row while
           already on Record keeps that exact route too, unchanged. */}
       <div
-        role={announcementsActive ? "region" : "tabpanel"}
+        role="region"
         id="rec-panel-record"
-        aria-labelledby={announcementsActive ? undefined : "rec-tab-record"}
-        aria-label={announcementsActive ? "Record an announcement" : undefined}
+        aria-label={announcementsActive ? "Record an announcement" : "Record"}
         style={{ display: recView === "record" || recView === "announcement" ? undefined : "none" }}
       >
         {error && <p role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>{error}</p>}
@@ -903,7 +910,7 @@ export default function RecordingTab({
           a speed re-encode can run five to eighty minutes, and RecordingTab
           is the always-mounted surface; FilesTab unmounts on a tab switch and
           would silently kill the job mid-encode. */}
-      <div role="tabpanel" id="rec-panel-speed" aria-labelledby="rec-tab-speed" style={{ display: recView === "speed" ? undefined : "none" }}>
+      <div role="region" id="rec-panel-speed" aria-label="Change speed" style={{ display: recView === "speed" ? undefined : "none" }}>
         <SpeedPanel takes={takes.takes} backupDir={takes.backupDir} />
       </div>
 
@@ -941,19 +948,19 @@ export default function RecordingTab({
           inner view - the message-replies feature's own capture loop needs
           exactly the guarantee "discussions", "grading" and "moduledeck"
           need above (docs/message-replies-acceptance-criteria.md M1). */}
-      <div role="tabpanel" id="rec-panel-messages" aria-labelledby="rec-tab-messages" style={{ display: recView === "messages" ? undefined : "none" }}>
+      <div role="region" id="rec-panel-messages" aria-label="Message replies" style={{ display: recView === "messages" ? undefined : "none" }}>
         <MessageRepliesPanel active={active && recView === "messages"} />
       </div>
 
-      <div role="tabpanel" id="rec-panel-captions" aria-labelledby="rec-tab-captions" style={{ display: recView === "captions" ? undefined : "none" }}>
+      <div role="region" id="rec-panel-captions" aria-label="Caption a video" style={{ display: recView === "captions" ? undefined : "none" }}>
         <CaptionStudio takes={takes.takes} backupDir={takes.backupDir} />
       </div>
 
-      <div role="tabpanel" id="rec-panel-slides" aria-labelledby="rec-tab-slides" style={{ display: recView === "slides" ? undefined : "none" }}>
+      <div role="region" id="rec-panel-slides" aria-label="Narrate a deck" style={{ display: recView === "slides" ? undefined : "none" }}>
         <SlideStudio />
       </div>
 
-      <div role="tabpanel" id="rec-panel-avatar" aria-labelledby="rec-tab-avatar" style={{ display: recView === "avatar" ? undefined : "none" }}>
+      <div role="region" id="rec-panel-avatar" aria-label="Avatar" style={{ display: recView === "avatar" ? undefined : "none" }}>
         <AvatarStudioPanel
           devices={dev.devices}
           requestAccess={dev.requestAccess}

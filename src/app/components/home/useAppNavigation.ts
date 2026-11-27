@@ -5,7 +5,7 @@ import { type VcSubTab, type VcOrgView, isVcSubTab, isVcOrgView, VC_SUB_TAB_CHAN
 import { resolveVcSubTabFromUrl, resolveVcOrgViewFromUrl, normalizeVcSubTab, normalizeVcOrgView } from "../../url-state";
 import { initializeManualView } from "./navigation-initial-state";
 import { isRecView, type RecView } from "../recording/rec-views";
-import { REC_VIEW_CHANGE_EVENT, normalizeRecView, resolveRecViewFromUrl } from "../../url-state";
+import { DEFAULT_REC_VIEW, REC_VIEW_CHANGE_EVENT, normalizeRecView, resolveRecViewFromUrl } from "../../url-state";
 import { VIEW_KEY, type ContentView } from "../content-tab/constants";
 import {
   type AnnouncementsView,
@@ -294,7 +294,7 @@ export function useAppNavigation() {
     return resolveFilesViewFromUrl(window.location.search, localStorage.getItem(FILES_VIEW_KEY));
   });
   const [recView, setRecView] = useState<RecView>(() => {
-    if (typeof window === "undefined") return "record";
+    if (typeof window === "undefined") return DEFAULT_REC_VIEW;
     return resolveRecViewFromUrl(window.location.search, localStorage.getItem("ta-rec-view"));
   });
   const [vcSubTab, setVcSubTab] = useState<VcSubTab>(() => {

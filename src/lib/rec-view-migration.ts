@@ -3,7 +3,7 @@ import { isRecordingUrl } from "@/app/url-state";
 // Recording's inner strip into Tools > Announcements > From a recording, so the
 // Recording-local persisted value `ta-rec-view = "announcement"` no longer names
 // a Recording tab. A returning user whose last Recording sub-view was that one
-// must land on the Announcements successor instead of silently on "Record".
+// must land on the Announcements successor.
 //
 // A LEAF module: no React import, nothing server-only, so the decision is
 // unit-testable (vitest here is node-env).
@@ -20,8 +20,8 @@ export interface LegacyRecViewRedirect {
  * Where a persisted `ta-rec-view` should send a returning user, or null when no
  * redirect applies. Redirects only when the stored value is the retired one AND
  * the user is currently landing on the Recording chip (the place that value was
- * meaningful); anyone elsewhere stays put - Recording itself falls back to
- * "record" for the unknown value.
+ * meaningful); anyone elsewhere stays put, and Recording uses its default view
+ * for the unknown value.
  */
 export function legacyRecViewRedirect(
   storedRecView: string | null,

@@ -272,7 +272,7 @@ export function GenerateFromSelectionSection({
             size="small"
             disabled={busy !== ""}
             onClick={moduleWalkthroughLaunch.onLaunch}
-            title={`Open the Recording tab's Module walkthrough deck capture, pre-filled for "${moduleWalkthroughLaunch.moduleLabel}" - screen-share and scroll through the module, then generate a lecture deck from what was captured`}
+            title={`Open Slide Deck Generation with "${moduleWalkthroughLaunch.moduleLabel}" selected. Share your screen, scroll through the module, and generate a lecture deck from the capture.`}
           >
             Capture module walkthrough
           </Button>

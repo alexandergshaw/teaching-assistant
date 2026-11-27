@@ -88,7 +88,8 @@ const RECORDING_LAUNCH_VIEWS: readonly RecordingLaunchView[] = [
  * to Tools > Announcements > From a walkthrough (ANNOUNCEMENTS-TAB wave A-W2:
  * its capture panel moved out of Recording); every other view, including
  * the "remembered" sentinel (the fab's view-less entry, which RecordingTab
- * resolves to its own persisted sub-view), goes to Tools > Recording. */
+ * resolves to the current visible sibling or Recording's default), goes to
+ * Tools > Recording. */
 export function resolveRecordingLaunchRoute(view: RecordingLaunchView): {
   manualView: "recording" | "announcements";
   announcementsView?: "walkthrough";

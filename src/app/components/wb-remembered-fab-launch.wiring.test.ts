@@ -28,7 +28,7 @@ describe("W-B-3: AiChatFab handler lands on the remembered sub-view", () => {
   });
 });
 
-describe("W-B-4: RecordingTab does not overwrite recView on the sentinel", () => {
+describe("W-B-4: RecordingTab resolves the sentinel as an ordinary Recording entry", () => {
   const src = read("src/app/components/RecordingTab.tsx");
   const start = src.indexOf("const handler = (e: Event) => {");
   const end = src.indexOf("window.addEventListener(RECORDING_LAUNCH_EVENT, handler);", start);
@@ -38,13 +38,14 @@ describe("W-B-4: RecordingTab does not overwrite recView on the sentinel", () =>
     expect(end).toBeGreaterThan(start);
   });
 
-  it("guards the sentinel before setRecView and never forces a literal", () => {
+  it("handles the sentinel separately from explicit Recording launches", () => {
     const slice = withoutLineComments(src.slice(start, end));
     const guard = slice.indexOf('detail.view === "remembered"');
     const set = slice.indexOf("setRecView(detail.view)");
     expect(guard).toBeGreaterThan(-1);
     expect(set).toBeGreaterThan(-1);
     expect(guard).toBeLessThan(set);
+    expect(slice).toMatch(/if \(detail\.view === "remembered"\) \{\s*restoreRememberedRecordingView\(\);\s*return;\s*\}/);
     expect(slice).not.toMatch(/setRecView\("record"\)/);
   });
 });

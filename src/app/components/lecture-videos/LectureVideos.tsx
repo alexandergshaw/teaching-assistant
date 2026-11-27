@@ -35,7 +35,7 @@ function watchLink(value: string) {
 
 export default function LectureVideos({ active = true }: { active?: boolean }) {
   const { user, loading, accessDecision } = useSupabase();
-  if (loading) return <Typography role="status">Opening Narrated Videos…</Typography>;
+  if (loading) return <Typography role="status">Opening narration and caption generation…</Typography>;
   if (!user) return <Alert severity="info">Sign in to open your saved video project.</Alert>;
   return <LectureWorkspace key={user.id} account={user.id} active={active} canManageVoices={isOwnerDecision(accessDecision)} />;
 }
@@ -292,7 +292,7 @@ function LectureWorkspace({ account, active, canManageVoices }: { account: strin
   return (
     <Stack ref={workspace} spacing={3} sx={{ p: { xs: 1, md: 2 }, minWidth: 0 }}>
       <Box>
-        <Typography component="h2" variant="h5">Narrated Videos</Typography>
+        <Typography component="h2" variant="h5">Narration/Caption Generation</Typography>
         <Typography variant="body2" color="text.secondary" role="status" sx={{ mt: 0.5 }}>
           {saveStatus === "saving" ? "Saving project on this device…" : saveStatus === "saved" ? "Project saved on this device" : "Project changes are unsaved"}
         </Typography>

@@ -93,7 +93,7 @@ describe("SnapshotGradingPanel is no longer mounted by page.tsx (nav-only remova
 describe('"snapgrade" is fully retired from RecordingTab (recView union, restore guard, and the strip)', () => {
   it('"snapgrade" is NOT in the recView union, NOT in the SEPARATE restore guard\'s v === chain, and NOT in the strip', () => {
     expect(isRecView("snapgrade")).toBe(false);
-    expect(normalizeRecView("snapgrade")).toBe("record");
+    expect(normalizeRecView("snapgrade")).toBe("lecturevideos");
     expect(recordingTabSource).toMatch(/useState<RecView>/);
     expect(recordingTabSource).toContain('return resolveRecViewFromUrl(window.location.search, localStorage.getItem("ta-rec-view"));');
     expect(recordingTabSource).not.toMatch(/\["snapgrade",\s*"[^"]+"\]/);

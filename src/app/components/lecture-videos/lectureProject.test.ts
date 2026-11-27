@@ -18,6 +18,15 @@ const part: LecturePart = {
 };
 
 describe("lecture export readiness", () => {
+  it("allows original audio only even with an unfinished narration draft", () => {
+    const sourceOnly: LecturePart = { ...part, audioMode: "source", output: undefined };
+    const edited = changePartCue(sourceOnly, "first", (cue) => ({ ...cue, audio: undefined }));
+    expect(renderBlocker(edited)).toBeUndefined();
+    expect(edited.source).toBe(part.source);
+    expect(edited.cues).toHaveLength(2);
+    expect(renderBlocker({ ...edited, audioMode: "cues" })).toMatch(/generate audio/i);
+  });
+
   it("blocks overlapping or overlong cues", () => {
     expect(renderBlocker(part)).toBeUndefined();
     expect(renderBlocker(changePartCue(part, "second", (cue) => ({ ...cue, start: "2" }))))

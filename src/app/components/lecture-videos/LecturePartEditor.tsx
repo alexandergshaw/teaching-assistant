@@ -3,8 +3,9 @@
 import { useMemo, useRef, useState } from "react";
 import { Alert, Box, Button, Divider, FormControlLabel, LinearProgress, MenuItem, Paper, Stack, Switch, TextField, Typography } from "@mui/material";
 import { renderNarratedVideo, type NarrationClip } from "@/lib/narrate-video";
-import { buildVttContent } from "../caption-studio/utils/captions";
+import LectureCaptions from "./LectureCaptions";
 import { AudioPlayer, Section, UploadButton, useBlobUrl } from "./lectureControls";
+import { lectureCaptionBlob } from "./lecture-captions";
 import { audioFromBlob, readBase64 } from "./lectureMedia";
 import { assignCues, changePartCue, cueTimingError, missingCueVoices, partName, renderBlocker, type LectureCue, type LecturePart, type LectureProject } from "./lectureProject";
 import { draftPartCues, synthesizeCue } from "./lectureWorkflow";
@@ -24,25 +25,13 @@ type Props = {
 export default function LecturePartEditor({ part, project, index, disabled, update, run, confirm }: Props) {
   const sourceUrl = useBlobUrl(part.source);
   const outputUrl = useBlobUrl(part.output);
-  const captionFile = useMemo(() => {
-    if (part.audioMode !== "cues" || !part.output) return;
-    const captions = part.cues.flatMap((cue) => {
-      if (!cue.audio) return [];
-      const start = Number(cue.start);
-      return [{
-        start,
-        end: Math.min(start + cue.audio.duration, part.duration),
-        text: cue.text.replace(/[&<>]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[character] ?? character))
-          .replace(/\r?\n+/g, " "),
-      }];
-    }).sort((a, b) => a.start - b.start);
-    return new Blob([buildVttContent(captions)], { type: "text/vtt" });
-  }, [part.audioMode, part.output, part.cues, part.duration]);
+  const captionFile = useMemo(() => lectureCaptionBlob(part), [part]);
   const captionUrl = useBlobUrl(captionFile);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const name = partName(part, index);
   const blocker = renderBlocker(part);
+  const originalAudioOnly = part.audioMode === "source";
   const audioCount = part.cues.filter((cue) => cue.audio).length;
   const lastVoiceEnd = Math.max(0, ...part.cues.map((cue) => cue.audio ? Number(cue.start) + cue.audio.duration : 0));
   const silentTail = part.duration - lastVoiceEnd;
@@ -77,7 +66,7 @@ export default function LecturePartEditor({ part, project, index, disabled, upda
   }
 
   function render() {
-    if (blocker) return;
+    if (originalAudioOnly || blocker) return;
     run(`Rendering ${name}`, async (signal) => {
       const audioContext = new AudioContext();
       setProgress(0);
@@ -118,13 +107,14 @@ export default function LecturePartEditor({ part, project, index, disabled, upda
 
   const missingVoices = missingCueVoices(part);
   const extension = part.output?.type.includes("mp4") ? "mp4" : "webm";
-  const outputName = `${name.replace(/[\\/:*?"<>|]+/g, "-")}.${extension}`;
+  const exportName = name.replace(/[\\/:*?"<>|]+/g, "-");
+  const outputName = `${exportName}.${extension}`;
 
   return (
     <Stack spacing={2}>
       <Box sx={{
         display: "grid", gap: 2, alignItems: "start",
-        gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "minmax(0, 1fr) minmax(0, 1fr)" },
+        gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: originalAudioOnly ? "minmax(0, 1fr)" : "minmax(0, 1fr) minmax(0, 1fr)" },
       }}>
         <Box sx={{ position: { lg: "sticky" }, top: { lg: 16 }, minWidth: 0 }}>
           <Section title={`Part ${index + 1} recording`}>
@@ -135,12 +125,25 @@ export default function LecturePartEditor({ part, project, index, disabled, upda
                 onChange={(event) => update((previous) => ({ ...previous, focus: event.target.value }))} />
             </Stack>
             <Typography variant="body2" color="text.secondary">{part.source.name} · {part.duration.toFixed(1)} s</Typography>
-            <Box component="video" ref={videoRef} src={sourceUrl} controls muted playsInline preload="metadata"
-              aria-label={`Source recording for ${name}`} sx={{ width: "100%", maxHeight: 380, bgcolor: "common.black", borderRadius: 1 }} />
+            <TextField select label="Audio for export" value={part.audioMode} disabled={disabled} sx={{ maxWidth: 340 }}
+              onChange={(event) => {
+                const mode = event.target.value;
+                if (mode === "source" || mode === "take" || mode === "cues") {
+                  update((previous) => ({ ...previous, audioMode: mode, output: undefined }));
+                }
+              }}>
+              <MenuItem value="source">Original audio only</MenuItem>
+              <MenuItem value="cues">Generated cue narration</MenuItem>
+              <MenuItem value="take">Imported narration take</MenuItem>
+            </TextField>
+            <Box component="video" ref={videoRef} src={sourceUrl} controls muted={!originalAudioOnly} playsInline preload="metadata"
+              aria-label={`Source recording for ${name}`} sx={{ width: "100%", maxHeight: 380, bgcolor: "common.black", borderRadius: 1 }}>
+              {captionUrl && <track kind="captions" label="Captions" srcLang="en" src={captionUrl} />}
+            </Box>
           </Section>
         </Box>
 
-        <Section title="Narration cues">
+        {part.audioMode === "cues" && <Section title="Narration cues">
           <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
             <Button variant="contained" disabled={disabled} onClick={(event) => part.cues.length
               ? confirm("Replace cue draft?", "Drafting again replaces this part's cues and their generated voice clips.", draft, event.currentTarget)
@@ -195,45 +198,47 @@ export default function LecturePartEditor({ part, project, index, disabled, upda
               </Paper>
             );
           })}
-        </Section>
+        </Section>}
+        {part.audioMode === "take" && <Section title="Narration take">
+          <UploadButton label={part.take ? "Replace full voice take" : "Import full voice take"}
+            accept=".mp3,.m4a,.wav,.aac,.ogg,.opus,.webm,.flac,.mp4" disabled={disabled} onFiles={([file]) => importTake(file)} />
+          {part.take && <>
+            <Typography variant="body2" color="text.secondary">{part.take.name} · {part.take.duration.toFixed(1)} s audio / {part.duration.toFixed(1)} s video</Typography>
+            <AudioPlayer blob={part.take.blob} label={`Imported take for ${name}`} />
+            {part.duration - part.take.duration > 1 && (
+              <Alert severity="info">Narration ends {(part.duration - part.take.duration).toFixed(1)} s before the video ends.</Alert>
+            )}
+          </>}
+        </Section>}
       </Box>
 
-      <Section title="Voice track and export">
-        <FormControlLabel label="Mix recording audio with narration"
-          control={<Switch checked={part.mixSourceAudio ?? false} disabled={disabled}
-            onChange={(_, checked) => update((previous) => ({ ...previous, mixSourceAudio: checked, output: undefined }))} />} />
-        <TextField select label="Voice track" value={part.audioMode} disabled={disabled} sx={{ maxWidth: 280 }}
-          onChange={(event) => update((previous) => ({ ...previous, audioMode: event.target.value === "take" ? "take" : "cues", output: undefined }))}>
-          <MenuItem value="cues">Generated cue voices</MenuItem>
-          <MenuItem value="take">Imported full take</MenuItem>
-        </TextField>
-        <UploadButton label={part.take ? "Replace full voice take" : "Import full voice take"}
-          accept=".mp3,.m4a,.wav,.aac,.ogg,.opus,.webm,.flac,.mp4" disabled={disabled} onFiles={([file]) => importTake(file)} />
-        {part.take && <>
-          <Typography variant="body2" color="text.secondary">{part.take.name} · {part.take.duration.toFixed(1)} s audio / {part.duration.toFixed(1)} s video</Typography>
-          <AudioPlayer blob={part.take.blob} label={`Imported take for ${name}`} />
-          {part.audioMode === "take" && part.duration - part.take.duration > 1 && (
-            <Alert severity="info">The final {(part.duration - part.take.duration).toFixed(1)} s of the video will be silent.</Alert>
+      <LectureCaptions part={part} disabled={disabled} update={update} run={run} confirm={confirm} />
+
+      <Section title="Export">
+        {originalAudioOnly ? (
+          <Button component="a" variant="contained" href={sourceUrl} download={part.source.name} disabled={!sourceUrl || disabled}
+            sx={{ alignSelf: "flex-start" }}>Download original recording</Button>
+        ) : <>
+          <FormControlLabel label="Mix recording audio with narration"
+            control={<Switch checked={part.mixSourceAudio ?? false} disabled={disabled}
+              onChange={(_, checked) => update((previous) => ({ ...previous, mixSourceAudio: checked, output: undefined }))} />} />
+          <Divider />
+          {part.audioMode === "cues" && !blocker && silentTail > 1 && (
+            <Alert severity="info">Narration ends {silentTail.toFixed(1)} s before the video ends.</Alert>
           )}
-        </>}
-        <Divider />
-        {part.audioMode === "cues" && !blocker && silentTail > 1 && (
-          <Alert severity="info">The final {silentTail.toFixed(1)} s of the video will be silent.</Alert>
-        )}
-        <Button variant="contained" onClick={render} disabled={disabled || Boolean(blocker)} sx={{ alignSelf: "flex-start" }}>
-          {part.output ? "Render again" : "Render preview"}
-        </Button>
-        <Typography variant="body2" color="text.secondary">Exports as MP4 when supported by this browser, or WebM otherwise.</Typography>
-        {blocker && <Typography variant="body2" color="text.secondary">{blocker}</Typography>}
-        {progress !== null && <LinearProgress variant="determinate" value={progress} aria-label="Rendering video" />}
-        {outputUrl && <>
-          <Box component="video" src={outputUrl} controls playsInline preload="metadata" aria-label={`Narrated preview for ${name}`}
-            sx={{ width: "100%", maxHeight: 380, bgcolor: "common.black", borderRadius: 1 }}>
-            {captionUrl && <track kind="captions" label="Narration" srcLang="en" src={captionUrl} />}
-          </Box>
-          <Button variant="outlined" href={outputUrl} download={outputName} sx={{ alignSelf: "flex-start" }}>Download {extension.toUpperCase()}</Button>
-          {captionUrl && <Button variant="outlined" href={captionUrl} download={outputName.replace(/\.[^.]+$/, ".vtt")}
-            sx={{ alignSelf: "flex-start" }}>Download captions</Button>}
+          <Button variant="contained" onClick={render} disabled={disabled || Boolean(blocker)} sx={{ alignSelf: "flex-start" }}>
+            {part.output ? "Render again" : "Render preview"}
+          </Button>
+          <Typography variant="body2" color="text.secondary">Exports as MP4 when supported by this browser, or WebM otherwise.</Typography>
+          {blocker && <Typography variant="body2" color="text.secondary">{blocker}</Typography>}
+          {progress !== null && <LinearProgress variant="determinate" value={progress} aria-label="Rendering video" />}
+          {outputUrl && <>
+            <Box component="video" src={outputUrl} controls playsInline preload="metadata" aria-label={`Narrated preview for ${name}`}
+              sx={{ width: "100%", maxHeight: 380, bgcolor: "common.black", borderRadius: 1 }}>
+              {captionUrl && <track kind="captions" label="Captions" srcLang="en" src={captionUrl} />}
+            </Box>
+            <Button variant="outlined" href={outputUrl} download={outputName} sx={{ alignSelf: "flex-start" }}>Download {extension.toUpperCase()}</Button>
+          </>}
         </>}
         <TextField fullWidth label="Student watch link" placeholder="https://" value={part.watchUrl} disabled={disabled}
           helperText="Paste the link after uploading the exported video to your hosting service."

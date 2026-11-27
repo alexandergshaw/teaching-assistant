@@ -1,3 +1,5 @@
+import type { LectureCaptionSettings } from "./lecture-captions";
+
 export type LectureAudio = {
   blob: Blob;
   duration: number;
@@ -19,7 +21,8 @@ export type LecturePart = {
   source: File;
   duration: number;
   cues: LectureCue[];
-  audioMode: "cues" | "take";
+  audioMode: "source" | "cues" | "take";
+  captions?: LectureCaptionSettings;
   take?: LectureAudio;
   output?: Blob;
   watchUrl: string;
@@ -170,6 +173,7 @@ export function cueTimingError(cue: LectureCue, part: LecturePart): string | und
 }
 
 export function renderBlocker(part: LecturePart): string | undefined {
+  if (part.audioMode === "source") return;
   if (part.audioMode === "take") {
     if (!part.take) return "Import the finished voice take for this part.";
     if (part.take.duration > part.duration + TIMING_TOLERANCE) {

@@ -206,7 +206,7 @@ function LectureWorkspace({ account, active, canManageVoices }: { account: strin
   function draftMissingCues() {
     run("Drafting cues for remaining parts", async (signal) => {
       for (const [partIndex, part] of project.parts.entries()) {
-        if (part.cues.length) continue;
+        if (part.audioMode !== "cues" || part.cues.length) continue;
         const cues = await draftPartCues(part, partIndex, project, signal);
         updatePart(part.id, (previous) => assignCues(previous, cues));
       }
@@ -377,7 +377,7 @@ function LectureWorkspace({ account, active, canManageVoices }: { account: strin
             <Button color="error" disabled={disabled || !selected} onClick={(event) => removePart(event.currentTarget)}>Remove part</Button>
           </Stack>
           {project.parts.length > 1 && <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
-            <Button variant="outlined" disabled={disabled || !project.parts.some((part) => !part.cues.length)} onClick={draftMissingCues}>
+            <Button variant="outlined" disabled={disabled || !project.parts.some((part) => part.audioMode === "cues" && !part.cues.length)} onClick={draftMissingCues}>
               Draft cues for remaining parts
             </Button>
             <Button variant="outlined" disabled={disabled || project.voiceSelectionRequired || !project.parts.some((part) => part.audioMode === "cues" && missingCueVoices(part).length)} onClick={generateMissingVoices}>

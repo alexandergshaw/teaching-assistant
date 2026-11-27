@@ -110,7 +110,12 @@ export async function renderNarratedVideo(
   clips: NarrationClip[],
   mode: "replace" | "mix",
   onProgress?: (pct: number) => void,
-  options?: { audioContext: AudioContext; strict: true; signal?: AbortSignal },
+  options?: {
+    audioContext: AudioContext;
+    strict: true;
+    signal?: AbortSignal;
+    drawOverlay?: (context: CanvasRenderingContext2D, timeSec: number) => void;
+  },
 ): Promise<Blob> {
   const url = URL.createObjectURL(source);
   const v = document.createElement("video");
@@ -210,7 +215,11 @@ export async function renderNarratedVideo(
 
     let lastReportedPct = 0;
 
-    if (options?.strict) ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+    const drawFrame = () => {
+      ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+      options?.drawOverlay?.(ctx, v.currentTime);
+    };
+    if (options?.strict) drawFrame();
     options?.signal?.throwIfAborted();
     rec.start(1000);
 
@@ -249,7 +258,7 @@ export async function renderNarratedVideo(
 
     // Draw loop
     const ticker = startFrameTicker(30, () => {
-      ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+      drawFrame();
       if (onProgress) {
         const pct = Math.min(100, Math.round((v.currentTime / dur) * 100));
         if (pct !== lastReportedPct) {

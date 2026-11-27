@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Chip, FormControl, FormLabel } from "@mui/material";
 import type { Course } from "@/lib/supabase/courses";
-import { buildRepoGradeCourseFilters } from "./repoGradesCoursePicker";
+import { buildRepoGradeTermFilters } from "./repoGradesCoursePicker";
 import styles from "./repo-grades-dashboard.module.css";
 
 export default function RepoGradeCourseFilters({ courses, courseId, onCourseIdChange }: {
@@ -12,9 +12,12 @@ export default function RepoGradeCourseFilters({ courses, courseId, onCourseIdCh
   onCourseIdChange: (courseId: string) => void;
 }) {
   const [preferredInstitution, setPreferredInstitution] = useState<string | null>(null);
-  const { institutions, courseInstitution, activeInstitution, classes } =
-    buildRepoGradeCourseFilters(courses, courseId, preferredInstitution);
+  const [preferredTerm, setPreferredTerm] = useState<string | null>(null);
+  const { institutions, courseInstitution, activeInstitution, terms, courseTerm, activeTerm, classes } =
+    buildRepoGradeTermFilters(courses, courseId, preferredInstitution, preferredTerm);
   if (institutions.length === 0) return null;
+  let missingTermLabel = "Term not set";
+  while (terms.includes(missingTermLabel)) missingTermLabel += " (missing)";
 
   return (
     <div className={styles.courseFilters}>
@@ -29,7 +32,25 @@ export default function RepoGradeCourseFilters({ courses, courseId, onCourseIdCh
               aria-pressed={institution === activeInstitution}
               onClick={() => {
                 setPreferredInstitution(institution);
+                if (institution !== activeInstitution) setPreferredTerm(null);
                 if (courseId && institution !== courseInstitution) onCourseIdChange("");
+              }} />
+          ))}
+        </div>
+      </FormControl>
+      <FormControl component="fieldset">
+        <FormLabel component="legend">Term</FormLabel>
+        <div className={styles.courseChipRow}>
+          {terms.map((term) => (
+            <Chip key={term} className={styles.courseChip} component="button" type="button"
+              label={term || missingTermLabel}
+              color={term === activeTerm ? "primary" : "default"}
+              variant={term === activeTerm ? "filled" : "outlined"}
+              aria-pressed={term === activeTerm}
+              onClick={() => {
+                setPreferredInstitution(activeInstitution);
+                setPreferredTerm(term);
+                if (courseId && term !== courseTerm) onCourseIdChange("");
               }} />
           ))}
         </div>

@@ -84,14 +84,18 @@ describe("class repository results wiring", () => {
     expect(index).toContain('void targetRequests.refresh()');
     expect(index).toContain('Previously completed or uncertain attempts are not automatically regraded.');
   });
-  it("uses the course setter for class chips and clears the old class on an institution change", () => {
+  it("uses institution, term, and class chips in order and clears a class outside the new filters", () => {
     expect(index).toMatch(/<RepoGradeCourseFilters\s+courses=\{courses\}\s+courseId=\{uiState.courseId\}\s+onCourseIdChange=\{handleCourseIdChange\}/);
     expect(index).toMatch(/<RepoGradesControls[\s\S]*?onCourseIdChange=\{handleCourseIdChange\}/);
     expect(filters).toContain('if (courseId && institution !== courseInstitution) onCourseIdChange("")');
+    expect(filters).toContain('if (institution !== activeInstitution) setPreferredTerm(null)');
+    expect(filters).toMatch(/setPreferredInstitution\(activeInstitution\);\s*setPreferredTerm\(term\);\s*if \(courseId && term !== courseTerm\) onCourseIdChange\(""\)/);
+    expect(filters).toContain('aria-pressed={term === activeTerm}');
     expect(filters).toContain("onClick={() => onCourseIdChange(id)}");
-    expect(filters.match(/<Chip[^>]*component="button" type="button"/g)).toHaveLength(2);
-    expect(filters.match(/<FormControl component="fieldset"/g)).toHaveLength(2);
-    expect(filters.match(/<FormLabel component="legend"/g)).toHaveLength(2);
+    expect(filters.match(/<Chip[^>]*component="button" type="button"/g)).toHaveLength(3);
+    expect(filters.match(/<FormControl component="fieldset"/g)).toHaveLength(3);
+    expect([...filters.matchAll(/<FormLabel component="legend">([^<]+)<\/FormLabel>/g)].map(([, label]) => label))
+      .toEqual(["Institution", "Term", "Class"]);
     expect(index.indexOf("<RepoGradesControls")).toBeLessThan(index.indexOf("<RepoGradeCourseFilters"));
   });
 

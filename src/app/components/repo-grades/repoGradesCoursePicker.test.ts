@@ -8,7 +8,7 @@
 // default filter over the label this leaf produces, so there is no second
 // predicate to pin.
 import { describe, it, expect } from "vitest";
-import { buildCourseOptions, buildRepoGradeCourseFilters, courseIdToAutoSelect, effectiveOpen } from "./repoGradesCoursePicker";
+import { buildCourseOptions, buildRepoGradeCourseFilters, buildRepoGradeTermFilters, courseIdToAutoSelect, effectiveOpen } from "./repoGradesCoursePicker";
 import type { Course } from "@/lib/supabase/courses";
 import { emptyCourseProject } from "@/lib/course-project";
 
@@ -105,6 +105,50 @@ describe("Repo Grades institution and class filters", () => {
     expect(buildRepoGradeCourseFilters([], "", "State")).toEqual({
       institutions: [], courseInstitution: null, activeInstitution: null, classes: [],
     });
+  });
+});
+
+describe("Repo Grader term filters", () => {
+  const courses = [
+    course({ id: "untagged", name: "Independent Study", institution: "State" }),
+    course({ id: "fall", name: "Intro Bio", institution: "State", term: " Fall 2026 ", courseCode: "BIO 101" }),
+    course({ id: "spring", name: "Intro Bio", institution: "State", term: "Spring 2026" }),
+    course({ id: "fall-lab", name: "Lab", institution: "State", term: "Fall 2026" }),
+    course({ id: "old-lab", name: "Lab", institution: "State", term: "  " }),
+    course({ id: "community", name: "Bio", institution: "Community College", term: "Summer 2026" }),
+  ];
+
+  it("defaults to the first named term in course order and only shows that institution's terms and classes", () => {
+    const filters = buildRepoGradeTermFilters(courses, "", "State", null);
+    expect(filters).toMatchObject({ activeInstitution: "State", terms: ["Fall 2026", "Spring 2026", ""], activeTerm: "Fall 2026" });
+    expect(filters.classes.map(({ id }) => id)).toEqual(["fall", "fall-lab"]);
+  });
+
+  it("uses a preferred term when valid and keeps untagged classes selectable", () => {
+    expect(buildRepoGradeTermFilters(courses, "", "State", "Spring 2026").classes.map(({ id }) => id)).toEqual(["spring"]);
+    const untagged = buildRepoGradeTermFilters(courses, "", "State", "");
+    expect(untagged.activeTerm).toBe("");
+    expect(untagged.classes.map(({ id }) => id)).toEqual(["untagged", "old-lab"]);
+  });
+
+  it("restores a selected class's institution and term ahead of both local choices", () => {
+    const selected = buildRepoGradeTermFilters(courses, "spring", "Community College", "Fall 2026");
+    expect(selected).toMatchObject({ activeInstitution: "State", courseInstitution: "State", activeTerm: "Spring 2026", courseTerm: "Spring 2026" });
+    expect(selected.classes.map(({ id }) => id)).toEqual(["spring"]);
+    expect(buildRepoGradeTermFilters(courses, "old-lab", "Community College", "Fall 2026")).toMatchObject({ activeTerm: "", courseTerm: "" });
+  });
+
+  it("ignores stored terms from other institutions and leaves an empty course list empty", () => {
+    const changed = buildRepoGradeTermFilters(courses, "", "Community College", "Fall 2026");
+    expect(changed).toMatchObject({ activeInstitution: "Community College", terms: ["Summer 2026"], activeTerm: "Summer 2026" });
+    expect(changed.classes.map(({ id }) => id)).toEqual(["community"]);
+    expect(buildRepoGradeTermFilters([], "spring", "State", "Fall 2026")).toMatchObject({ terms: [], activeTerm: null, courseTerm: null, classes: [] });
+  });
+
+  it("uses the missing-term group when an institution has only untagged courses", () => {
+    const filters = buildRepoGradeTermFilters([courses[0], courses[4]], "", "State", "Fall 2026");
+    expect(filters).toMatchObject({ terms: [""], activeTerm: "" });
+    expect(filters.classes.map(({ id }) => id)).toEqual(["untagged", "old-lab"]);
   });
 });
 

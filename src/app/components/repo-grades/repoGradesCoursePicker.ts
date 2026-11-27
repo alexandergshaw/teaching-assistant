@@ -98,6 +98,29 @@ export function buildRepoGradeCourseFilters(
   };
 }
 
+/** Repo Grader drills into a term; the shared institution picker still lists every class. */
+export function buildRepoGradeTermFilters(
+  courses: readonly CourseFilterOption[], courseId: string,
+  preferredInstitution: string | null, preferredTerm: string | null,
+) {
+  const filters = buildRepoGradeCourseFilters(courses, courseId, preferredInstitution);
+  const termByCourse = new Map(courses.map((course) => [course.id, course.term?.trim() ?? ""]));
+  const availableTerms = new Set(filters.classes.map(({ id }) => termByCourse.get(id)!));
+  const terms = [...availableTerms].filter(Boolean);
+  if (availableTerms.has("")) terms.push("");
+  const courseTerm = termByCourse.get(courseId) ?? null;
+  const activeTerm = courseTerm
+    ?? (preferredTerm !== null && availableTerms.has(preferredTerm) ? preferredTerm : terms[0])
+    ?? null;
+  return {
+    ...filters,
+    terms,
+    courseTerm,
+    activeTerm,
+    classes: filters.classes.filter(({ id }) => termByCourse.get(id) === activeTerm),
+  };
+}
+
 /**
  * The single-course default (A7 W2). Returns the course id to select, or null
  * to change nothing. A written id that is still present is returned unchanged;

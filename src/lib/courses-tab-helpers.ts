@@ -1,8 +1,10 @@
-import type { Course, CourseStudentRepo } from "./supabase/courses";
+import type { Course, CourseInput, CourseStudentRepo } from "./supabase/courses";
 import type { CardLayoutGroup } from "@/lib/card-layout";
 import { DEFAULT_CARD_LAYOUT } from "@/lib/card-layout";
 import type { InstitutionField } from "@/lib/institution-fields";
 import { DEFAULT_INSTITUTION_FIELDS } from "@/lib/institution-fields";
+import { formatAssignmentDueRule, parseAssignmentDueRule } from "@/lib/assignment-due-rule";
+import { coerceGradesDueDate, coerceGradesDueTime } from "@/lib/grades-due";
 
 export interface CourseForm {
   id: string | null;
@@ -30,11 +32,17 @@ export interface CourseForm {
   syllabusTemplateId: string;
   courseKind: string;
   endDate: string;
+  gradesDueDate: string;
+  gradesDueTime: string;
   breaks: string;
   assignmentDueRule: string;
   email: string;
   emailClient: string;
   classLengthMinutes: string;
+  instructorBio: string;
+  instructorTitle: string;
+  instructorCredentials: string;
+  instructorDepartment: string;
 }
 
 export type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime" | "studentRepos" | "modality" | "topicOutline" | "syllabusTemplateId" | "courseKind" | "endDate" | "gradesDueDate" | "breaks" | "assignmentDueRule" | "email" | "emailClient" | "classLengthMinutes" | "instructorBio" | "instructorTitle" | "instructorCredentials" | "instructorDepartment";
@@ -65,11 +73,17 @@ export const EMPTY_FORM: CourseForm = {
   syllabusTemplateId: "",
   courseKind: "",
   endDate: "",
+  gradesDueDate: "",
+  gradesDueTime: "",
   breaks: "",
   assignmentDueRule: "",
   email: "",
   emailClient: "",
   classLengthMinutes: "",
+  instructorBio: "",
+  instructorTitle: "",
+  instructorCredentials: "",
+  instructorDepartment: "",
 };
 
 export function formFromCourse(c: Course): CourseForm {
@@ -99,12 +113,56 @@ export function formFromCourse(c: Course): CourseForm {
     syllabusTemplateId: c.syllabusTemplateId ?? "",
     courseKind: c.courseKind ?? "",
     endDate: c.endDate ?? "",
+    gradesDueDate: c.gradesDueDate ?? "",
+    gradesDueTime: coerceGradesDueTime(c.gradesDueTime) ?? "",
     breaks: c.breaks ?? "",
     assignmentDueRule: c.assignmentDueRule ?? "",
     email: c.email ?? "",
     emailClient: c.emailClient ?? "",
     classLengthMinutes: c.classLengthMinutes !== null ? String(c.classLengthMinutes) : "",
+    instructorBio: c.instructorBio ?? "",
+    instructorTitle: c.instructorTitle ?? "",
+    instructorCredentials: c.instructorCredentials ?? "",
+    instructorDepartment: c.instructorDepartment ?? "",
   };
+}
+
+export function inputFromCourseForm(form: CourseForm, editing: Course | null): { input: CourseInput } | { error: string } {
+  if (!form.name.trim()) return { error: "Enter a course name." };
+  const startDate = coerceGradesDueDate(form.startDate);
+  const endDate = coerceGradesDueDate(form.endDate);
+  const gradesDueDate = coerceGradesDueDate(form.gradesDueDate);
+  const gradesDueTime = coerceGradesDueTime(form.gradesDueTime);
+  if (form.startDate && !startDate) return { error: "Enter a valid start date." };
+  if (form.endDate && !endDate) return { error: "Enter a valid end date." };
+  if (startDate && endDate && endDate < startDate) return { error: "End date must be on or after the start date." };
+  if (form.gradesDueDate && !gradesDueDate) return { error: "Enter a valid grades due date." };
+  if (form.gradesDueTime && (!gradesDueDate || !gradesDueTime)) {
+    return { error: "Enter a grades due date and a valid time, or leave the time blank." };
+  }
+  const assignmentDue = parseAssignmentDueRule(form.assignmentDueRule);
+  if (form.assignmentDueRule && !assignmentDue) return { error: "Choose a valid assignment due day and time, or leave the day blank." };
+  const duration = form.classLengthMinutes.trim();
+  const classLengthMinutes = duration ? Number(duration) : null;
+  if (duration && (!/^\d+$/.test(duration) || !Number.isSafeInteger(classLengthMinutes) || Number(duration) <= 0)) {
+    return { error: "Enter class length as a positive whole number of minutes." };
+  }
+  const numberOrNull = (value: string) => value.trim() && Number.isFinite(Number(value)) ? Number(value) : null;
+  const { id, ...values } = form;
+  return { input: {
+    ...(id && editing ? courseToInput(editing) : {}),
+    ...values,
+    repos: form.repos.map((repo) => ({ repo: repo.repo, branch: repo.branch.trim() || null })),
+    integrations: form.integrations.map((item) => ({ name: item.name, url: item.url.trim() || null })),
+    startDate,
+    endDate,
+    gradesDueDate,
+    gradesDueTime,
+    assignmentDueRule: assignmentDue ? formatAssignmentDueRule(assignmentDue.day, assignmentDue.time) : null,
+    weeks: numberOrNull(form.weeks),
+    tests: numberOrNull(form.tests),
+    classLengthMinutes,
+  } };
 }
 
 export function courseToInput(c: Course) {

@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, type ReactNode, type RefObject } from "react";
+import Button from "@mui/material/Button";
 
 // One table row per course: sticky-name cell, scalar inline-edit cells for
 // the visible columns, the former row-expansion cards as cells (Codebases,
@@ -687,9 +688,10 @@ export default function CourseRow({
           <button type="button" className={styles.linkButton} onClick={() => onNavigate("workflows", course)}>
             Workflows
           </button>
-          <button type="button" className={styles.linkButton} onClick={() => onEdit(course)}>
+          <Button type="button" variant="text" size="small" className={styles.linkButton} disabled={!heavyReady}
+            sx={{ minWidth: 0, p: 0, textTransform: "none" }} onClick={() => onEdit(course)}>
             Edit
-          </button>
+          </Button>
           <button
             type="button"
             className={`${styles.linkButton} ${tableStyles.dangerLink}`}

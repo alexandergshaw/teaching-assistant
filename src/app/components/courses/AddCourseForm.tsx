@@ -17,11 +17,13 @@ import {
 import { updateCourseHubAction } from "@/app/actions";
 import type { Course } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
-import { EMPTY_FORM, type CourseForm, formFromCourse, readFileBase64 } from "@/lib/courses-tab-helpers";
+import { EMPTY_FORM, type CourseForm, formFromCourse, inputFromCourseForm, readFileBase64 } from "@/lib/courses-tab-helpers";
 import { checkFileWireBudget } from "@/lib/upload-budget";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { COURSE_LMS_OPTIONS } from "@/lib/course-lms-options";
 import { COURSE_KINDS } from "@/lib/course-kind";
+import { WEEKDAYS, WEEKDAY_LABELS, parseAssignmentDueRule } from "@/lib/assignment-due-rule";
+import { EMAIL_CLIENT_OPTIONS } from "@/lib/courses-table-labels";
 import GithubRepoPicker from "../GithubRepoPicker";
 import styles from "../../page.module.css";
 import tableStyles from "./CoursesTable.module.css";
@@ -46,6 +48,9 @@ export default function AddCourseForm({ editing, institutions, orgs, syllabi, on
   const [fetchingRoster, setFetchingRoster] = useState(false);
   const syllabusUploadRef = useRef<HTMLInputElement>(null);
   const textbookPhotoRef = useRef<HTMLInputElement>(null);
+  const dueRule = parseAssignmentDueRule(form.assignmentDueRule);
+  const dueDay = dueRule?.day ?? form.assignmentDueRule.split("|")[0];
+  const dueTime = dueRule?.time ?? "";
 
   const update = (patch: Partial<CourseForm>) => setForm((f) => ({ ...f, ...patch }));
   const updateRepo = (i: number, patch: Partial<{ repo: string; branch: string }>) =>
@@ -59,42 +64,22 @@ export default function AddCourseForm({ editing, institutions, orgs, syllabi, on
   const removeIntegration = (i: number) => setForm((f) => ({ ...f, integrations: f.integrations.filter((_, idx) => idx !== i) }));
 
   const handleSave = async () => {
-    if (!form.name.trim()) {
-      setError("Enter a course name.");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    const input = {
-      name: form.name,
-      courseCode: form.courseCode,
-      term: form.term,
-      institution: form.institution,
-      canvasUrl: form.canvasUrl,
-      repos: form.repos.map((r) => ({ repo: r.repo, branch: r.branch.trim() || null })),
-      githubOrg: form.githubOrg,
-      textbook: form.textbook,
-      syllabusId: form.syllabusId,
-      integrations: form.integrations.map((i) => ({ name: i.name, url: i.url.trim() || null })),
-      roster: form.roster,
-      notes: form.notes,
-      topics: form.topics,
-      startDate: form.startDate,
-      description: form.description,
-      weeks: form.weeks.trim() ? (Number.isFinite(Number(form.weeks.trim())) ? Number(form.weeks.trim()) : null) : null,
-      tests: form.tests.trim() ? (Number.isFinite(Number(form.tests.trim())) ? Number(form.tests.trim()) : null) : null,
-      lms: form.lms,
-      dayTime: form.dayTime,
-      modality: form.modality,
-      courseKind: form.courseKind,
-    };
-    const result = form.id ? await updateCourseHubAction(form.id, input) : await createCourseHubAction(input);
-    setSaving(false);
+    const result = inputFromCourseForm(form, editing);
     if ("error" in result) {
       setError(result.error);
       return;
     }
-    onSaved(result.course);
+    setSaving(true);
+    setError(null);
+    try {
+      const saved = form.id ? await updateCourseHubAction(form.id, result.input) : await createCourseHubAction(result.input);
+      if ("error" in saved) setError(saved.error);
+      else onSaved(saved.course);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not save the course.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleUploadSyllabus = async (file: File) => {
@@ -217,15 +202,38 @@ export default function AddCourseForm({ editing, institutions, orgs, syllabi, on
       <div className={styles.adaptFieldGrid3}>
         <TextField label="Course code" size="small" fullWidth placeholder="e.g. BIT270" value={form.courseCode} onChange={(e) => update({ courseCode: e.target.value })} />
         <TextField label="Term" size="small" fullWidth placeholder="e.g. Fall 2026" value={form.term} onChange={(e) => update({ term: e.target.value })} />
-        <TextField
-          label="Start date"
-          size="small"
-          fullWidth
-          type="date"
-          value={form.startDate}
-          onChange={(e) => update({ startDate: e.target.value })}
-          slotProps={{ inputLabel: { shrink: true } }}
-        />
+      </div>
+
+      <div className={styles.field}>
+        <p className={styles.syllabusSectionHeading}>Dates and schedule</p>
+        <div className={styles.adaptFieldGrid3}>
+          <TextField label="Start date" size="small" fullWidth type="date" value={form.startDate}
+            onChange={(e) => update({ startDate: e.target.value })} slotProps={{ inputLabel: { shrink: true } }} />
+          <TextField label="End date" size="small" fullWidth type="date" value={form.endDate}
+            onChange={(e) => update({ endDate: e.target.value })}
+            slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: form.startDate || undefined } }} />
+          <TextField label="Grades due date" size="small" fullWidth type="date" value={form.gradesDueDate}
+            onChange={(e) => update(e.target.value ? { gradesDueDate: e.target.value } : { gradesDueDate: "", gradesDueTime: "" })}
+            slotProps={{ inputLabel: { shrink: true } }} />
+          <TextField label="Grades due time" size="small" fullWidth type="time" value={form.gradesDueTime}
+            disabled={!form.gradesDueDate} onChange={(e) => update({ gradesDueTime: e.target.value })}
+            slotProps={{ inputLabel: { shrink: true } }} />
+          <TextField select label="Weekly assignment due day" size="small" fullWidth value={dueDay}
+            onChange={(e) => update({ assignmentDueRule: e.target.value ? `${e.target.value}|${dueTime || "23:59"}` : "" })}>
+            <MenuItem value="">Not set</MenuItem>
+            {WEEKDAYS.map((day) => <MenuItem key={day} value={day}>{WEEKDAY_LABELS[day]}</MenuItem>)}
+          </TextField>
+          <TextField label="Weekly assignment due time" size="small" fullWidth type="time" value={dueTime} disabled={!dueDay}
+            onChange={(e) => update({ assignmentDueRule: `${dueDay}|${e.target.value}` })}
+            slotProps={{ inputLabel: { shrink: true } }} />
+          <TextField label="Day/Time" size="small" fullWidth placeholder="MW 10:00-11:15" value={form.dayTime} onChange={(e) => update({ dayTime: e.target.value })} />
+          <TextField label="Class length (minutes)" size="small" fullWidth type="number" value={form.classLengthMinutes}
+            onChange={(e) => update({ classLengthMinutes: e.target.value })} slotProps={{ htmlInput: { min: 1, step: 1 } }} />
+          <TextField label="Weeks" size="small" fullWidth type="number" value={form.weeks} onChange={(e) => update({ weeks: e.target.value })} />
+          <TextField label="Tests" size="small" fullWidth type="number" value={form.tests} onChange={(e) => update({ tests: e.target.value })} />
+        </div>
+        <TextField label="Breaks and holidays" size="small" fullWidth multiline minRows={2}
+          placeholder="e.g. March 16-20 - Spring break" value={form.breaks} onChange={(e) => update({ breaks: e.target.value })} />
       </div>
 
       <TextField
@@ -239,10 +247,19 @@ export default function AddCourseForm({ editing, institutions, orgs, syllabi, on
         onChange={(e) => update({ description: e.target.value })}
       />
 
-      <div className={styles.adaptFieldGrid3}>
-        <TextField label="Weeks" size="small" fullWidth type="number" value={form.weeks} onChange={(e) => update({ weeks: e.target.value })} />
-        <TextField label="Tests" size="small" fullWidth type="number" value={form.tests} onChange={(e) => update({ tests: e.target.value })} />
-        <TextField label="Day/Time" size="small" fullWidth placeholder="MW 10:00-11:15" value={form.dayTime} onChange={(e) => update({ dayTime: e.target.value })} />
+      <div className={styles.field}>
+        <p className={styles.syllabusSectionHeading}>Instructor details</p>
+        <div className={styles.adaptFieldGrid3}>
+          <TextField label="Instructor email" size="small" fullWidth type="email" value={form.email} onChange={(e) => update({ email: e.target.value })} />
+          <TextField select label="Email client" size="small" fullWidth value={form.emailClient} onChange={(e) => update({ emailClient: e.target.value })}>
+            {EMAIL_CLIENT_OPTIONS.map((option) => <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>)}
+          </TextField>
+          <TextField label="Instructor title" size="small" fullWidth value={form.instructorTitle} onChange={(e) => update({ instructorTitle: e.target.value })} />
+          <TextField label="Instructor credentials" size="small" fullWidth value={form.instructorCredentials} onChange={(e) => update({ instructorCredentials: e.target.value })} />
+          <TextField label="Instructor department" size="small" fullWidth value={form.instructorDepartment} onChange={(e) => update({ instructorDepartment: e.target.value })} />
+        </div>
+        <TextField label="Instructor bio" size="small" fullWidth multiline minRows={2} value={form.instructorBio}
+          onChange={(e) => update({ instructorBio: e.target.value })} />
       </div>
 
       <div className={styles.adaptFieldGrid3}>
@@ -431,7 +448,7 @@ export default function AddCourseForm({ editing, institutions, orgs, syllabi, on
       <TextField label="Notes" size="small" fullWidth multiline minRows={2} placeholder="Anything else worth keeping with this course." value={form.notes} onChange={(e) => update({ notes: e.target.value })} />
 
       {formNote && <p className={styles.fieldHint}>{formNote}</p>}
-      {error && <p className={styles.error}>{error}</p>}
+      {error && <p role="alert" className={styles.error}>{error}</p>}
 
       {/* marginTop: 0 overrides page.module.css's .adaptActionBar (margin-top:
           14px) - see CoursesTable.tsx's identical override for why this

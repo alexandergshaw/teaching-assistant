@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { emptyCourseProject } from "@/lib/course-project";
 import {
   formFromCourse,
+  inputFromCourseForm,
   courseToInput,
   rosterStats,
   rosterToRows,
@@ -80,6 +81,47 @@ const mockCourse: Course = {
   materialsZipSize: null,
   updatedAt: "2024-09-01T00:00:00Z",
 };
+
+describe("inputFromCourseForm", () => {
+  it("creates a course with only its name", () => {
+    expect(inputFromCourseForm({ ...EMPTY_FORM, name: "Intro to databases" }, null)).toMatchObject({
+      input: { name: "Intro to databases", startDate: null, endDate: null, gradesDueDate: null, classLengthMinutes: null },
+    });
+  });
+
+  it("round-trips dates, scheduling and instructor details while preserving assets on edit", () => {
+    const course = {
+      ...mockCourse, gradesDueDate: "2024-12-20", gradesDueTime: "9:05",
+      instructorTitle: "Professor", instructorCredentials: "PhD", instructorDepartment: "Computer Science", instructorBio: "Researches databases.",
+    };
+    const saved = inputFromCourseForm({ ...formFromCourse(course), name: "New course name", endDate: "" }, course);
+    expect(saved).toMatchObject({ input: {
+      name: "New course name", endDate: null, gradesDueDate: "2024-12-20", gradesDueTime: "09:05",
+      classLengthMinutes: 75, breaks: course.breaks, assignmentDueRule: "sun|23:59",
+      email: course.email, emailClient: course.emailClient, instructorTitle: course.instructorTitle,
+      instructorCredentials: course.instructorCredentials, instructorDepartment: course.instructorDepartment, instructorBio: course.instructorBio,
+      csvName: course.csvName, csvData: course.csvData, rubricName: course.rubricName, rubricData: course.rubricData,
+      syllabusTemplateId: course.syllabusTemplateId, studentRepos: course.studentRepos,
+    } });
+  });
+
+  it.each([
+    [{ startDate: "2024-02-30" }, "valid start date"],
+    [{ endDate: "2024-02-30" }, "valid end date"],
+    [{ startDate: "2024-09-01", endDate: "2024-08-31" }, "End date"],
+    [{ gradesDueDate: "2024-02-30" }, "valid grades due date"],
+    [{ gradesDueTime: "12:00" }, "due date and a valid time"],
+    [{ gradesDueDate: "2024-02-29", gradesDueTime: "24:00" }, "due date and a valid time"],
+    [{ assignmentDueRule: "sun|" }, "assignment due day and time"],
+    [{ classLengthMinutes: "0" }, "positive whole number"],
+    [{ classLengthMinutes: "-1" }, "positive whole number"],
+    [{ classLengthMinutes: "2.5" }, "positive whole number"],
+  ])("refuses invalid schedule values %o", (values, message) => {
+    expect(inputFromCourseForm({ ...EMPTY_FORM, name: "Course", ...values }, null)).toEqual({
+      error: expect.stringContaining(message),
+    });
+  });
+});
 
 describe("formFromCourse", () => {
   it("converts Course to CourseForm", () => {

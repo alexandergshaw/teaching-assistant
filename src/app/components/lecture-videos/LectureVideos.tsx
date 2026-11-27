@@ -13,6 +13,7 @@ import { isOwnerDecision } from "@/lib/access";
 import { checkWireBudget } from "@/lib/upload-budget";
 import { ModalShell } from "../ui/ModalShell";
 import LecturePartEditor, { type RunLectureTask } from "./LecturePartEditor";
+import LectureDownloads from "./LectureDownloads";
 import LectureScreenCapture from "./LectureScreenCapture";
 import LectureVoiceManager from "./LectureVoiceManager";
 import { Section, UploadButton } from "./lectureControls";
@@ -389,6 +390,8 @@ function LectureWorkspace({ account, active, canManageVoices }: { account: strin
 
       {selected && <LecturePartEditor key={selected.id} part={selected} project={project} index={index} disabled={disabled}
         update={(change) => updatePart(selected.id, change)} run={run} confirm={confirm} />}
+
+      <LectureDownloads parts={project.parts} disabled={disabled} />
 
       <Accordion disableGutters>
         <AccordionSummary expandIcon={<span aria-hidden="true">+</span>} id="video-announcement-header" aria-controls="video-announcement">

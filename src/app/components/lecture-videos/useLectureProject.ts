@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { emptyProject, LectureSaveConflict, loadLectureProject, saveLectureProject, type LecturePart, type LectureProject } from "./lectureProject";
+import { emptyProject, keepCurrentLectureExports, LectureSaveConflict, loadLectureProject, saveLectureProject, type LecturePart, type LectureProject } from "./lectureProject";
 
 const pendingWrites = new Map<string, Promise<void>>();
 
@@ -56,7 +56,15 @@ export function useLectureProject(account: string) {
 
   function update(change: (project: LectureProject) => LectureProject) {
     if (!active.current) return;
-    const next = change(current.current);
+    const previous = current.current;
+    let next = change(previous);
+    if (next.parts !== previous.parts) {
+      const previousParts = new Map(previous.parts.map((part) => [part.id, part]));
+      next = { ...next, parts: next.parts.map((part) => {
+        const old = previousParts.get(part.id);
+        return old && old !== part ? keepCurrentLectureExports(old, part) : part;
+      }) };
+    }
     current.current = next;
     setProject(next);
     save(next);

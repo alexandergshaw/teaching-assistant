@@ -14,6 +14,11 @@ export function lectureCaptionMode(part: LecturePart): LectureCaptionSettings["m
   return mode === "narration" && part.audioMode !== "cues" ? "off" : mode;
 }
 
+export function lectureCaptionRenderSource(part: LecturePart, version: "original" | "narrated"): Blob | undefined {
+  if (version === "original") return part.source;
+  if (part.audioMode !== "source" && part.output?.size) return part.output;
+}
+
 function timeInSeconds(value: string): number | undefined {
   const time = /^(?:(\d{2,4}):)?([0-5]\d):([0-5]\d)[.,](\d{3})$/.exec(value);
   if (!time) return undefined;

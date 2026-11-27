@@ -3,9 +3,9 @@
 import { useMemo, useState } from "react";
 import { Alert, Button, LinearProgress, MenuItem, Paper, Stack, TextField, Typography } from "@mui/material";
 import { renderNarratedVideo } from "@/lib/narrate-video";
-import { Section, UploadButton, useBlobUrl } from "./lectureControls";
+import { Section, UploadButton } from "./lectureControls";
 import {
-  drawLectureCaption, lectureCaptionBlob, lectureCaptionCues, lectureCaptionError, lectureCaptionMode,
+  drawLectureCaption, lectureCaptionCues, lectureCaptionError, lectureCaptionMode, lectureCaptionRenderSource,
   MAX_CAPTION_CUES, MAX_CAPTION_FILE_BYTES, MAX_CAPTION_TEXT, parseLectureCaptionFile,
   type LectureCaptionDraft, type LectureCaptionSettings,
 } from "./lecture-captions";
@@ -23,19 +23,11 @@ type Props = {
 export default function LectureCaptions({ part, disabled, update, run, confirm }: Props) {
   const [progress, setProgress] = useState<string | null>(null);
   const [burnProgress, setBurnProgress] = useState<number | null>(null);
-  const [burned, setBurned] = useState<{ blob: Blob; source: Blob; track: string }>();
   const mode = lectureCaptionMode(part);
   const custom = part.captions?.custom ?? [];
   const error = lectureCaptionError(part);
   const cues = useMemo(() => lectureCaptionCues(part), [part]);
-  const track = useMemo(() => JSON.stringify(cues), [cues]);
-  const vtt = useMemo(() => lectureCaptionBlob(part), [part]);
-  const vttUrl = useBlobUrl(vtt);
-  const exportSource = part.audioMode === "source" ? part.source : part.output;
-  const burnedBlob = burned?.source === exportSource && burned?.track === track ? burned.blob : undefined;
-  const burnedUrl = useBlobUrl(burnedBlob);
   const audio = lectureCaptionAudioSource(part);
-  const name = (part.title.trim() || part.source.name.replace(/\.[^.]+$/, "") || "video").replace(/[\\/:*?"<>|]+/g, "-");
 
   function setMode(next: LectureCaptionSettings["mode"]) {
     update((previous) => ({ ...previous, captions: { ...previous.captions, mode: next } }));
@@ -90,21 +82,23 @@ export default function LectureCaptions({ part, disabled, update, run, confirm }
     changeCustom((previous) => previous.map((draft) => draft.id === id ? { ...draft, [field]: value } : draft));
   }
 
-  function burn() {
-    if (!exportSource || !cues.length) return;
-    run("Burning captions into a separate video", async (signal) => {
+  function burn(version: "original" | "narrated") {
+    const source = lectureCaptionRenderSource(part, version);
+    if (!source || !cues.length) return;
+    run(`Burning captions into the ${version} video`, async (signal) => {
       const audioContext = new AudioContext();
       setBurnProgress(0);
       try {
         await audioContext.resume();
         signal.throwIfAborted();
-        const blob = await renderNarratedVideo(exportSource, [], "mix", setBurnProgress, {
+        const blob = await renderNarratedVideo(source, [], "mix", setBurnProgress, {
           audioContext, strict: true, signal,
           drawOverlay: (ctx, timeSec) => drawLectureCaption(ctx, cues, timeSec),
         });
         signal.throwIfAborted();
         if (!blob.size) throw new Error("The browser did not produce a captioned video.");
-        setBurned({ blob, source: exportSource, track });
+        const field = version === "original" ? "captionedOriginal" : "captionedNarrated";
+        update((previous) => ({ ...previous, [field]: blob }));
       } finally {
         setBurnProgress(null);
         if (audioContext.state !== "closed") await audioContext.close();
@@ -144,10 +138,14 @@ export default function LectureCaptions({ part, disabled, update, run, confirm }
     </>}
     {error && <Alert severity="warning">{error}</Alert>}
     {mode !== "off" && <Stack direction={{ xs: "column", sm: "row" }} spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
-      {vttUrl && <Button href={vttUrl} download={`${name}.vtt`}>Download captions (VTT)</Button>}
-      <Button variant="outlined" disabled={disabled || !exportSource || !cues.length} onClick={burn}>Burn captions into a copy</Button>
-      {burnedUrl && <Button href={burnedUrl} download={`${name}-captioned.${burnedBlob?.type.includes("mp4") ? "mp4" : "webm"}`}>Download captioned video</Button>}
+      <Button variant="outlined" disabled={disabled || !cues.length} onClick={() => burn("original")}>Make captioned copy of original</Button>
+      {part.audioMode !== "source" && <Button variant="outlined" disabled={disabled || !part.output || !cues.length}
+        onClick={() => burn("narrated")}>Make captioned copy with narration</Button>}
+      {cues.length > 0 && <Button href="#lecture-downloads">Open downloads</Button>}
     </Stack>}
+    {mode !== "off" && cues.length > 0 && part.audioMode !== "source" && !part.output && (
+      <Typography variant="body2" color="text.secondary">Render the narration video before burning captions into that version.</Typography>
+    )}
     {burnProgress !== null && <LinearProgress aria-label="Burning captions into video" variant="determinate" value={burnProgress} />}
   </Section>;
 }

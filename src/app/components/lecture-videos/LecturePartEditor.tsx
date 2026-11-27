@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { Alert, Box, Button, Divider, FormControlLabel, LinearProgress, MenuItem, Paper, Stack, Switch, TextField, Typography } from "@mui/material";
 import { renderNarratedVideo, type NarrationClip } from "@/lib/narrate-video";
 import LectureCaptions from "./LectureCaptions";
+import { narrationWavBlocker, prepareLectureNarrationWav } from "./lecture-export-audio";
 import { AudioPlayer, Section, UploadButton, useBlobUrl } from "./lectureControls";
 import { lectureCaptionBlob } from "./lecture-captions";
 import { audioFromBlob, readBase64 } from "./lectureMedia";
@@ -105,10 +106,15 @@ export default function LecturePartEditor({ part, project, index, disabled, upda
     }));
   }
 
+  function prepareNarrationWav() {
+    run(`Preparing narration WAV for ${name}`, async (signal) => {
+      const narrationWav = await prepareLectureNarrationWav(part, signal);
+      update((previous) => ({ ...previous, narrationWav }));
+    });
+  }
+
   const missingVoices = missingCueVoices(part);
-  const extension = part.output?.type.includes("mp4") ? "mp4" : "webm";
-  const exportName = name.replace(/[\\/:*?"<>|]+/g, "-");
-  const outputName = `${exportName}.${extension}`;
+  const wavBlocker = part.audioMode === "cues" ? narrationWavBlocker(part) : undefined;
 
   return (
     <Stack spacing={2}>
@@ -215,10 +221,7 @@ export default function LecturePartEditor({ part, project, index, disabled, upda
       <LectureCaptions part={part} disabled={disabled} update={update} run={run} confirm={confirm} />
 
       <Section title="Export">
-        {originalAudioOnly ? (
-          <Button component="a" variant="contained" href={sourceUrl} download={part.source.name} disabled={!sourceUrl || disabled}
-            sx={{ alignSelf: "flex-start" }}>Download original recording</Button>
-        ) : <>
+        {!originalAudioOnly && <>
           <FormControlLabel label="Mix recording audio with narration"
             control={<Switch checked={part.mixSourceAudio ?? false} disabled={disabled}
               onChange={(_, checked) => update((previous) => ({ ...previous, mixSourceAudio: checked, output: undefined }))} />} />
@@ -226,20 +229,25 @@ export default function LecturePartEditor({ part, project, index, disabled, upda
           {part.audioMode === "cues" && !blocker && silentTail > 1 && (
             <Alert severity="info">Narration ends {silentTail.toFixed(1)} s before the video ends.</Alert>
           )}
-          <Button variant="contained" onClick={render} disabled={disabled || Boolean(blocker)} sx={{ alignSelf: "flex-start" }}>
-            {part.output ? "Render again" : "Render preview"}
-          </Button>
+          <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+            <Button variant="contained" onClick={render} disabled={disabled || Boolean(blocker)}>
+              {part.output ? "Render narration again" : "Render narration video"}
+            </Button>
+            {part.audioMode === "cues" && !part.narrationWav && <Button variant="outlined" onClick={prepareNarrationWav}
+              disabled={disabled || Boolean(wavBlocker)}>Prepare narration WAV</Button>}
+          </Stack>
           <Typography variant="body2" color="text.secondary">Exports as MP4 when supported by this browser, or WebM otherwise.</Typography>
           {blocker && <Typography variant="body2" color="text.secondary">{blocker}</Typography>}
+          {!blocker && wavBlocker && <Typography variant="body2" color="text.secondary">{wavBlocker}</Typography>}
           {progress !== null && <LinearProgress variant="determinate" value={progress} aria-label="Rendering video" />}
           {outputUrl && <>
             <Box component="video" src={outputUrl} controls playsInline preload="metadata" aria-label={`Narrated preview for ${name}`}
               sx={{ width: "100%", maxHeight: 380, bgcolor: "common.black", borderRadius: 1 }}>
               {captionUrl && <track kind="captions" label="Captions" srcLang="en" src={captionUrl} />}
             </Box>
-            <Button variant="outlined" href={outputUrl} download={outputName} sx={{ alignSelf: "flex-start" }}>Download {extension.toUpperCase()}</Button>
           </>}
         </>}
+        <Button href="#lecture-downloads" sx={{ alignSelf: "flex-start" }}>Open downloads</Button>
         <TextField fullWidth label="Student watch link" placeholder="https://" value={part.watchUrl} disabled={disabled}
           helperText="Paste the link after uploading the exported video to your hosting service."
           onChange={(event) => update((previous) => ({ ...previous, watchUrl: event.target.value }))} />

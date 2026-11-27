@@ -1,4 +1,4 @@
-import type { LectureCaptionSettings } from "./lecture-captions";
+import { lectureCaptionMode, type LectureCaptionSettings } from "./lecture-captions";
 
 export type LectureAudio = {
   blob: Blob;
@@ -25,6 +25,9 @@ export type LecturePart = {
   captions?: LectureCaptionSettings;
   take?: LectureAudio;
   output?: Blob;
+  narrationWav?: Blob;
+  captionedOriginal?: Blob;
+  captionedNarrated?: Blob;
   watchUrl: string;
   mixSourceAudio?: boolean;
 };
@@ -148,6 +151,25 @@ export function assignCues(part: LecturePart, cues: LectureCue[]): LecturePart {
 
 export function changePartCue(part: LecturePart, id: string, change: (cue: LectureCue) => LectureCue): LecturePart {
   return assignCues(part, part.cues.map((cue) => cue.id === id ? change(cue) : cue));
+}
+
+export function keepCurrentLectureExports(previous: LecturePart, next: LecturePart): LecturePart {
+  const sourceChanged = previous.source !== next.source || previous.duration !== next.duration;
+  const cuesChanged = previous.cues !== next.cues;
+  const captionMode = lectureCaptionMode(next);
+  const captionTrackChanged = sourceChanged || previous.captions !== next.captions
+    || lectureCaptionMode(previous) !== captionMode || (captionMode === "narration" && cuesChanged);
+  const narratedInputsChanged = captionTrackChanged || previous.output !== next.output || previous.audioMode !== next.audioMode
+    || (next.audioMode === "cues" && cuesChanged)
+    || (next.audioMode === "take" && previous.take !== next.take)
+    || (next.audioMode !== "source" && previous.mixSourceAudio !== next.mixSourceAudio);
+  if (!sourceChanged && !cuesChanged && !captionTrackChanged && !narratedInputsChanged) return next;
+  return {
+    ...next,
+    narrationWav: sourceChanged || cuesChanged ? undefined : next.narrationWav,
+    captionedOriginal: captionTrackChanged ? undefined : next.captionedOriginal,
+    captionedNarrated: narratedInputsChanged ? undefined : next.captionedNarrated,
+  };
 }
 
 export function missingCueVoices(part: LecturePart): LectureCue[] {

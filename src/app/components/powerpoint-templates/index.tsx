@@ -17,9 +17,18 @@ import { useSupabase } from "@/context/SupabaseProvider";
 
 export default function PowerPointTemplates({ onUseInSlideDeckCreation, active = true }: { onUseInSlideDeckCreation?: () => void; active?: boolean }) {
   const { user, loading } = useSupabase();
-  if (loading) return <Alert severity="info" role="status">Loading your session...</Alert>;
-  if (!user) return <Alert severity="info">Sign in to manage PowerPoint templates.</Alert>;
-  return <PowerPointTemplatesSession key={user.id} userId={user.id} active={active} onUseInSlideDeckCreation={onUseInSlideDeckCreation} />;
+  return (
+    <>
+      <TabHeader eyebrow="Presentations" title="PowerPoint Templates" subtitle="Review extracted slide text and save classifications. Standard download fills the original deck by position; choose Match slides by role in Slide Deck Creation to use your classifications. Slides need editable text, and slide and bullet capacity limits apply. Image previews are not available." />
+      {loading ? (
+        <Alert severity="info" role="status">Loading your session...</Alert>
+      ) : user ? (
+        <PowerPointTemplatesSession key={user.id} userId={user.id} active={active} onUseInSlideDeckCreation={onUseInSlideDeckCreation} />
+      ) : (
+        <Alert severity="info">Sign in to manage PowerPoint templates.</Alert>
+      )}
+    </>
+  );
 }
 
 function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active, userId }: { onUseInSlideDeckCreation?: () => void; active: boolean; userId: string }) {
@@ -233,7 +242,6 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active, userId }
   }
   if (!recoveryReady) return <Alert severity="info" role="status">Checking for an unsaved PowerPoint draft...</Alert>;
   return <div className={styles.page}>
-    <TabHeader eyebrow="Presentations" title="PowerPoint Templates" subtitle="Review extracted slide text and save classifications. Standard download fills the original deck by position; choose Match slides by role in Slide Deck Creation to use your classifications. Slides need editable text, and slide and bullet capacity limits apply. Image previews are not available." />
     <p className={styles.helperText}>Unsaved names and classifications can be recovered in this browser for this account. Recovery is cleared on sign-out. Source files and slide text are not saved here.</p>
     {recoveryMessage && <Alert severity="info">{recoveryMessage}</Alert>}
     {recoveryBlocked && <Alert severity="warning">New edits cannot be recovered until the previous recovery record is resolved. <Button size="small" onClick={() => { try { localStorage.removeItem(recoveryKey(userId)); setRecoveryBlocked(false); setRecoveryMessage(""); } catch { setRecoveryWriteFailed(true); } }}>Discard old recovery record</Button></Alert>}

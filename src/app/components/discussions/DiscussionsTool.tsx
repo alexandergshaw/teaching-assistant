@@ -145,7 +145,6 @@ function DiscussionsSession({ userId }: { userId: string | null }) {
   };
   if (!draftReady) return <Alert severity="info" role="status">Loading your discussion draft...</Alert>;
   return <Stack spacing={2}>
-    <Box><Typography variant="h5" component="h1">Discussions</Typography><Typography>Make one generic reply for each student. The reply uses their name but does not assume what they posted.</Typography></Box>
     {coursesError && <Alert severity="error" onClose={() => setCoursesError("")}>{coursesError} <Button size="small" onClick={() => void retryCourses()} disabled={coursesLoading}>Retry loading classes</Button></Alert>}
     <Typography variant="body2">{draftKey ? "Draft inputs are saved on this browser for your account. Generated replies and review confirmations are not saved." : "Sign in to save your draft on this browser."} Changing an input clears the generated replies; you can generate them again.</Typography>
     {storageFailed && <Alert severity="warning">Draft storage is unavailable. Your inputs may be lost if you leave this page.</Alert>}

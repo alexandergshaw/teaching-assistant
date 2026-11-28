@@ -1,5 +1,7 @@
 "use client";
 
+import Alert from "@mui/material/Alert";
+import Typography from "@mui/material/Typography";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { useAutomationInventory } from "./workflows/useAutomationInventory";
 import { AutomationsPanel } from "./workflows/AutomationsPanel";
@@ -217,49 +219,49 @@ export default function AutomationsTabView({ onOpenWorkflow }: AutomationsTabVie
     [user, supabase, triggers, triggerEditForm, workflows, isWorkflowHeadlessSafeById, setTriggers, cancelEdit]
   );
 
-  if (loading) {
-    return <div style={{ padding: 20 }}>Loading automations…</div>;
-  }
-
-  if (error) {
-    return <div style={{ padding: 20, color: "var(--danger)" }}>Error: {error}</div>;
-  }
-
   return (
-    <TabShell>
-      {toggleError && (
-        <p className={styles.error} style={{ marginBottom: 16 }}>
-          {toggleError}
-        </p>
+    <TabShell eyebrow="Automate" title="Automations">
+      {loading ? (
+        <Typography role="status">Loading automations…</Typography>
+      ) : error ? (
+        <Alert severity="error">Error: {error}</Alert>
+      ) : (
+        <>
+          {toggleError && (
+            <p className={styles.error} style={{ marginBottom: 16 }}>
+              {toggleError}
+            </p>
+          )}
+          <AutomationsPanel
+            workflows={workflows}
+            schedules={schedules}
+            triggers={triggers}
+            onSelectWorkflow={onOpenWorkflow}
+            onToggleSchedule={handleToggleSchedule}
+            onToggleTrigger={handleToggleTrigger}
+            hubCourses={hubCourses}
+            institutions={institutions}
+            activeInstitution={activeInstitution}
+            orgs={orgs}
+            orgsError={orgsError}
+            isWorkflowHeadlessSafeById={isWorkflowHeadlessSafeById}
+            expanded={expanded}
+            onToggleExpanded={toggleExpanded}
+            editingKey={editingKey}
+            scheduleEditForm={scheduleEditForm}
+            setScheduleEditForm={setScheduleEditForm}
+            triggerEditForm={triggerEditForm}
+            setTriggerEditForm={setTriggerEditForm}
+            editBusy={editBusy}
+            editError={editError}
+            onStartEditSchedule={startEditSchedule}
+            onStartEditTrigger={startEditTrigger}
+            onSaveScheduleEdit={handleSaveScheduleEdit}
+            onSaveTriggerEdit={handleSaveTriggerEdit}
+            onCancelEdit={cancelEdit}
+          />
+        </>
       )}
-      <AutomationsPanel
-        workflows={workflows}
-        schedules={schedules}
-        triggers={triggers}
-        onSelectWorkflow={onOpenWorkflow}
-        onToggleSchedule={handleToggleSchedule}
-        onToggleTrigger={handleToggleTrigger}
-        hubCourses={hubCourses}
-        institutions={institutions}
-        activeInstitution={activeInstitution}
-        orgs={orgs}
-        orgsError={orgsError}
-        isWorkflowHeadlessSafeById={isWorkflowHeadlessSafeById}
-        expanded={expanded}
-        onToggleExpanded={toggleExpanded}
-        editingKey={editingKey}
-        scheduleEditForm={scheduleEditForm}
-        setScheduleEditForm={setScheduleEditForm}
-        triggerEditForm={triggerEditForm}
-        setTriggerEditForm={setTriggerEditForm}
-        editBusy={editBusy}
-        editError={editError}
-        onStartEditSchedule={startEditSchedule}
-        onStartEditTrigger={startEditTrigger}
-        onSaveScheduleEdit={handleSaveScheduleEdit}
-        onSaveTriggerEdit={handleSaveTriggerEdit}
-        onCancelEdit={cancelEdit}
-      />
     </TabShell>
   );
 }

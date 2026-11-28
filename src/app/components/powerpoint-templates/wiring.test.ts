@@ -89,9 +89,7 @@ describe("PowerPoint template UI wiring (source, not rendering)", () => {
     expect(source).not.toContain('disabled={busy || !slide.text.trim()}');
   });
   it("gates account-owned state and protects unsaved edits before replacement", () => {
-    expect(source).toContain('if (loading) return');
-    expect(source).toContain('if (!user) return');
-    expect(source).toContain('<PowerPointTemplatesSession key={user.id}');
+    expect(source).toMatch(/\{loading \?\s*\(\s*<Alert[^>]*role="status"[^>]*>[^<]+<\/Alert>\s*\)\s*:\s*user \?\s*\(\s*<PowerPointTemplatesSession key=\{user\.id\} userId=\{user\.id\}[^>]*\/>\s*\)\s*:\s*\(\s*<Alert\b/);
     expect(source).toContain('if (dirty && (file || sourceId || definition)) setPending({ kind: "file"');
     expect(source).toContain('const preserveName = !file && !sourceId && !definition && name.trim()');
     expect(source).toContain('if (!preserveName) setName(next.name');

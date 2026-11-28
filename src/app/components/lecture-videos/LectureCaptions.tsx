@@ -3,13 +3,15 @@
 import { useMemo, useState } from "react";
 import { Alert, Button, LinearProgress, MenuItem, Paper, Stack, TextField, Typography } from "@mui/material";
 import { renderNarratedVideo } from "@/lib/narrate-video";
-import { Section, UploadButton } from "./lectureControls";
+import { LectureDownloadButton } from "./LectureDownloads";
+import { Section, UploadButton, focusLectureSection } from "./lectureControls";
 import {
   drawLectureCaption, lectureCaptionCues, lectureCaptionError, lectureCaptionMode, lectureCaptionRenderSource,
   MAX_CAPTION_CUES, MAX_CAPTION_FILE_BYTES, MAX_CAPTION_TEXT, parseLectureCaptionFile,
   type LectureCaptionDraft, type LectureCaptionSettings,
 } from "./lecture-captions";
 import { lectureCaptionAudioSource, transcribeLectureCaptions } from "./lecture-caption-transcription";
+import type { LectureDownload } from "./lecture-downloads";
 import type { LecturePart } from "./lectureProject";
 
 type Props = {
@@ -18,9 +20,10 @@ type Props = {
   update: (change: (part: LecturePart) => LecturePart) => void;
   run: (label: string, task: (signal: AbortSignal) => Promise<void>) => void;
   confirm: (title: string, message: string, action: () => void, trigger: HTMLElement | null) => void;
+  downloads: LectureDownload[];
 };
 
-export default function LectureCaptions({ part, disabled, update, run, confirm }: Props) {
+export default function LectureCaptions({ part, disabled, update, run, confirm, downloads }: Props) {
   const [progress, setProgress] = useState<string | null>(null);
   const [burnProgress, setBurnProgress] = useState<number | null>(null);
   const mode = lectureCaptionMode(part);
@@ -106,7 +109,11 @@ export default function LectureCaptions({ part, disabled, update, run, confirm }
     });
   }
 
-  return <Section title="Captions">
+  const vttDownload = downloads.find((file) => file.kind === "captions");
+  const originalDownload = downloads.find((file) => file.kind === "captioned-original");
+  const narratedDownload = downloads.find((file) => file.kind === "captioned-narrated");
+
+  return <Section title="Captions" id="lecture-captions">
     <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} useFlexGap sx={{ flexWrap: "wrap" }}>
       <TextField select size="small" label="Caption track" value={mode} disabled={disabled} onChange={(event) => setMode(event.target.value as LectureCaptionSettings["mode"])}>
         <MenuItem value="off">Off</MenuItem>
@@ -119,6 +126,22 @@ export default function LectureCaptions({ part, disabled, update, run, confirm }
     </Stack>
     {!audio && <Typography variant="body2" color="text.secondary">Render the narrated audio mix before transcribing it.</Typography>}
     {progress && <Typography role="status" variant="body2">{progress}</Typography>}
+    {error && <Alert severity="warning">{error}</Alert>}
+    {mode !== "off" && <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+      <Button variant="outlined" disabled={disabled || !cues.length} onClick={() => burn("original")}>Make captioned copy of original</Button>
+      {part.audioMode !== "source" && <Button variant="outlined" disabled={disabled || !part.output || !cues.length}
+        onClick={() => burn("narrated")}>Make captioned copy with narration</Button>}
+      {vttDownload && <LectureDownloadButton file={vttDownload} label="Download captions (VTT)" disabled={disabled} />}
+      {originalDownload && <LectureDownloadButton file={originalDownload} label="Download captioned original" disabled={disabled} />}
+      {narratedDownload && <LectureDownloadButton file={narratedDownload} label="Download captioned narrated video" disabled={disabled} />}
+    </Stack>}
+    {mode !== "off" && cues.length > 0 && part.audioMode !== "source" && !part.output && (
+      <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
+        <Typography variant="body2" color="text.secondary">Render the narration video before burning captions into that version.</Typography>
+        <Button size="small" aria-controls="lecture-export" onClick={() => focusLectureSection("lecture-export")}>Open narration export</Button>
+      </Stack>
+    )}
+    {burnProgress !== null && <LinearProgress aria-label="Burning captions into video" variant="determinate" value={burnProgress} />}
     {mode === "custom" && <>
       <Typography variant="body2" color="text.secondary">Review automatic caption timing against the audible track before exporting.</Typography>
       <Button variant="outlined" disabled={disabled || custom.length >= MAX_CAPTION_CUES} onClick={addCue} sx={{ alignSelf: "flex-start" }}>Add caption</Button>
@@ -136,16 +159,5 @@ export default function LectureCaptions({ part, disabled, update, run, confirm }
         </Stack>
       </Paper>)}
     </>}
-    {error && <Alert severity="warning">{error}</Alert>}
-    {mode !== "off" && <Stack direction={{ xs: "column", sm: "row" }} spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
-      <Button variant="outlined" disabled={disabled || !cues.length} onClick={() => burn("original")}>Make captioned copy of original</Button>
-      {part.audioMode !== "source" && <Button variant="outlined" disabled={disabled || !part.output || !cues.length}
-        onClick={() => burn("narrated")}>Make captioned copy with narration</Button>}
-      {cues.length > 0 && <Button href="#lecture-downloads">Open downloads</Button>}
-    </Stack>}
-    {mode !== "off" && cues.length > 0 && part.audioMode !== "source" && !part.output && (
-      <Typography variant="body2" color="text.secondary">Render the narration video before burning captions into that version.</Typography>
-    )}
-    {burnProgress !== null && <LinearProgress aria-label="Burning captions into video" variant="determinate" value={burnProgress} />}
   </Section>;
 }

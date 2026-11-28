@@ -2,18 +2,21 @@
 
 import { useRef, useState } from "react";
 import { Alert, Button, Stack, Typography } from "@mui/material";
+import { LectureDownloadButton } from "./LectureDownloads";
+import type { LectureDownload } from "./lecture-downloads";
 import { Section } from "./lectureControls";
 import { buildLectureRecordingDeck, lectureSlideDeckBlocker } from "./lecture-recording-deck";
 import { partName, type LecturePart, type LectureProject } from "./lectureProject";
 import type { RunLectureTask } from "./LecturePartEditor";
 
-export default function LectureSlideDeckOutput({ part, project, index, disabled, update, run }: {
+export default function LectureSlideDeckOutput({ part, project, index, disabled, update, run, download }: {
   part: LecturePart;
   project: LectureProject;
   index: number;
   disabled: boolean;
   update: (change: (part: LecturePart) => LecturePart) => void;
   run: RunLectureTask;
+  download?: LectureDownload;
 }) {
   const [progress, setProgress] = useState("");
   const generation = useRef(0);
@@ -40,17 +43,17 @@ export default function LectureSlideDeckOutput({ part, project, index, disabled,
     });
   }
 
-  return <Section title="Slide deck">
+  return <Section title="Slide deck" id="lecture-slides">
     <Typography variant="body2" color="text.secondary">Create an editable PowerPoint from this recording’s original audio, visible content, and project materials.</Typography>
     <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
       <Button variant="outlined" disabled={disabled || Boolean(blocker)} onClick={generate}>
         {deck ? "Regenerate slide deck" : "Generate slide deck"}
       </Button>
-      {deck && <Button href="#lecture-downloads">Open downloads</Button>}
+      {download && <LectureDownloadButton file={download} label="Download PowerPoint" disabled={disabled} />}
     </Stack>
     {blocker && <Typography variant="body2" color="text.secondary">{blocker}</Typography>}
     {progress && <Typography role="status" variant="body2">{progress}</Typography>}
-    {deck && <Typography variant="body2">PowerPoint ready · {deck.title}</Typography>}
+    {deck && <Typography variant="body2">Last generated PowerPoint · {deck.title}</Typography>}
     {deck?.warnings.map((message) => <Alert severity="info" key={message}>{message}</Alert>)}
   </Section>;
 }

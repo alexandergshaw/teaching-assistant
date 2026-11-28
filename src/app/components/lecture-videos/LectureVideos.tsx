@@ -16,7 +16,7 @@ import LecturePartEditor, { type RunLectureTask } from "./LecturePartEditor";
 import LectureDownloads from "./LectureDownloads";
 import LectureScreenCapture from "./LectureScreenCapture";
 import LectureVoiceManager from "./LectureVoiceManager";
-import { Section, UploadButton } from "./lectureControls";
+import { Section, UploadButton, focusLectureSection, lectureSectionScrollMargin, lectureStickyTop } from "./lectureControls";
 import { partFromVideo, readBase64 } from "./lectureMedia";
 import { assignCues, changePartCue, materialContext, missingCueVoices, partName, removeProjectVoiceReference, type LecturePart, type LectureProject } from "./lectureProject";
 import { draftPartCues, synthesizeCue } from "./lectureWorkflow";
@@ -48,14 +48,38 @@ function LectureWorkspace({ account, active, canManageVoices }: { account: strin
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [voices, setVoices] = useState<Voice[] | null>(null);
+  const [voiceListError, setVoiceListError] = useState("");
+  const [voiceMenuOpen, setVoiceMenuOpen] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const confirmationTrigger = useRef<HTMLElement | null>(null);
+  const contextFocusPending = useRef(false);
+  const viewVisit = useRef(0);
   const voiceSelect = useRef<HTMLDivElement>(null);
   const work = useRef<AbortController | null>(null);
   const workspace = useRef<HTMLDivElement>(null);
+  const feedback = useRef<HTMLDivElement>(null);
+  const hasFeedback = Boolean(busy || error || notice);
   useLayoutEffect(() => () => work.current?.abort(), []);
   useLayoutEffect(() => {
-    if (!active) workspace.current?.querySelectorAll<HTMLMediaElement>("video, audio").forEach((media) => media.pause());
+    const root = workspace.current;
+    const status = feedback.current;
+    if (!root || !status) return;
+    const setFeedbackHeight = () => root.style.setProperty("--lecture-feedback-height", `${status.offsetHeight}px`);
+    setFeedbackHeight();
+    const observer = new ResizeObserver(setFeedbackHeight);
+    observer.observe(status);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--lecture-feedback-height");
+    };
+  }, [hasFeedback]);
+  useLayoutEffect(() => {
+    if (active) return;
+    viewVisit.current++;
+    contextFocusPending.current = false;
+    workspace.current?.querySelectorAll<HTMLMediaElement>("video, audio").forEach((media) => media.pause());
+    queueMicrotask(() => setVoiceMenuOpen(false));
   }, [active]);
   const index = project.parts.findIndex((part) => part.id === project.selectedId);
   const selected = project.parts[index];
@@ -154,12 +178,29 @@ function LectureWorkspace({ account, active, canManageVoices }: { account: strin
   }
 
   function loadVoices() {
+    const visit = viewVisit.current;
     run("Loading ElevenLabs voices", async (signal) => {
-      const result = await listElevenVoicesAction();
-      signal.throwIfAborted();
-      if ("error" in result) throw new Error(result.error);
-      setVoices(result.voices);
+      setVoiceListError("");
+      try {
+        const result = await listElevenVoicesAction();
+        signal.throwIfAborted();
+        if ("error" in result) throw new Error(result.error);
+        setVoices(result.voices);
+        const summary = workspace.current?.querySelector("#lecture-context[aria-expanded='true']");
+        if (viewVisit.current === visit && summary?.getClientRects().length) setVoiceMenuOpen(true);
+      } catch (cause) {
+        if (!signal.aborted) setVoiceListError(cause instanceof Error ? cause.message : "Could not load ElevenLabs voices.");
+      }
     });
+  }
+
+  function openContext() {
+    if (contextOpen && !contextFocusPending.current) {
+      focusLectureSection("lecture-context");
+      return;
+    }
+    contextFocusPending.current = true;
+    setContextOpen(true);
   }
 
   function chooseVoice(id: string) {
@@ -308,60 +349,22 @@ function LectureWorkspace({ account, active, canManageVoices }: { account: strin
           Another tab saved changes to the project. Your edits in this tab are unsaved.
         </Alert>
       )}
-      {busy && <Alert severity="info" role="status" icon={<CircularProgress size={20} />} sx={{ position: "sticky", top: 0, zIndex: 1 }}>{busy}…</Alert>}
-      {error && <Alert severity="error" onClose={() => setError("")} sx={{ whiteSpace: "pre-line" }}>{error}</Alert>}
-      {notice && <Alert severity="success" onClose={() => setNotice("")}>{notice}</Alert>}
-
-      <Section title="Video context">
-        <TextField label="Project title" value={project.title} disabled={disabled} onChange={(event) => field("title", event.target.value)} />
-        <TextField label="What should viewers learn or do?" value={project.goal ?? ""} disabled={disabled}
-          onChange={(event) => field("goal", event.target.value)} />
-        <TextField fullWidth multiline minRows={3} label="Context and notes" value={project.materials} disabled={disabled}
-          placeholder="Describe the audience, workflow, or details to cover."
-          onChange={(event) => field("materials", event.target.value)} />
-        <UploadButton label="Add reference files" accept=".pptx,.pdf,.docx,.txt,.md,.csv,.html" multiple disabled={disabled} onFiles={addMaterials} />
-        {project.materialFiles.map((file) => (
-          <Stack key={file.id} direction="row" spacing={1} sx={{ alignItems: "center", justifyContent: "space-between" }}>
-            <Typography variant="body2">{file.name}{file.truncated ? " (long file, text shortened)" : ""}</Typography>
-            <Button size="small" disabled={disabled} aria-label={`Remove ${file.name}`} onClick={(event) => confirm(
-              "Remove reference file?", `Remove the extracted text from ${file.name}?`,
-              () => update((previous) => ({ ...previous, materialFiles: previous.materialFiles.filter((material) => material.id !== file.id) })),
-              event.currentTarget,
-            )}>Remove</Button>
-          </Stack>
-        ))}
-        <TextField fullWidth multiline minRows={2} label="Speaking guidance" placeholder="How should the narration sound?"
-          value={project.guidance} disabled={disabled} onChange={(event) => field("guidance", event.target.value)} />
-        <TextField fullWidth multiline minRows={2} label="Speaking sample transcript" value={project.sample} disabled={disabled}
-          placeholder="Paste a transcript that shows your usual speaking style."
-          onChange={(event) => field("sample", event.target.value)} />
-        <UploadButton label="Transcribe a short WAV sample" accept=".wav,audio/wav,audio/x-wav" disabled={disabled}
-          onFiles={([file], input) => addSample(file, input)} />
-        {voices ? (
-          <TextField ref={voiceSelect} select label="Narration voice" value={project.voiceSelectionRequired ? "__choose__" : project.voice?.id ?? ""} disabled={disabled}
-            onChange={(event) => chooseVoice(event.target.value)} slotProps={{ select: { displayEmpty: true }, inputLabel: { shrink: true } }}>
-            {project.voiceSelectionRequired && <MenuItem disabled value="__choose__">Choose a replacement voice</MenuItem>}
-            <MenuItem value="">Account default</MenuItem>
-            {project.voice && !voices.some((voice) => voice.voiceId === project.voice?.id) && (
-              <MenuItem value={project.voice.id}>{project.voice.name} (unavailable)</MenuItem>
-            )}
-            {voices.map((voice) => <MenuItem key={voice.voiceId} value={voice.voiceId}>{voice.name}{voice.category === "cloned" ? " (cloned)" : ""}</MenuItem>)}
-          </TextField>
-        ) : <Button variant="outlined" onClick={loadVoices} disabled={disabled} sx={{ alignSelf: "flex-start" }}>
-          Choose ElevenLabs voice{project.voice ? ` (${project.voice.name})` : ""}
-        </Button>}
-        {canManageVoices && <LectureVoiceManager active={active} disabled={disabled || Boolean(confirmation)} selectedVoice={project.voice}
-          selectionRequired={project.voiceSelectionRequired}
-          onSelectVoice={selectProjectVoice} onVoiceSaved={voiceSaved} onVoiceDeleted={voiceDeleted} />}
-        {project.voiceSelectionRequired && <Alert severity="info">
-          Choose a replacement voice before generating more narration. Your existing audio and exports are available.
-        </Alert>}
-      </Section>
+      {hasFeedback && <Stack ref={feedback} spacing={0.5} sx={{
+        position: "sticky", top: lectureStickyTop, zIndex: 2, maxHeight: "min(40dvh, 280px)", overflowY: "auto",
+        "& .MuiAlert-message": { overflowWrap: "anywhere", minWidth: 0 },
+      }}>
+        {busy && <Alert severity="info" role="status" icon={<CircularProgress size={20} />}>{busy}…</Alert>}
+        {error && <Alert severity="error" onClose={() => setError("")} sx={{ whiteSpace: "pre-line" }}>{error}</Alert>}
+        {notice && <Alert severity="success" onClose={() => setNotice("")}>{notice}</Alert>}
+      </Stack>}
 
       <Section title="Recordings">
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+          <UploadButton label="Add recordings" accept=".mp4,.webm,.mov,.m4v,.ogg,.ogv" multiple disabled={disabled} onFiles={(files) => addVideos(files)} />
+          <Button onClick={openContext} aria-controls="lecture-context-details">Video context and voice</Button>
+        </Stack>
         <LectureScreenCapture active={active} disabled={Boolean(busy) || Boolean(confirmation)}
           onCapturingChange={setCapturing} onCaptured={(file, hasSystemAudio) => addVideos([file], hasSystemAudio)} />
-        <UploadButton label="Add recordings" accept=".mp4,.webm,.mov,.m4v,.ogg,.ogv" multiple disabled={disabled} onFiles={(files) => addVideos(files)} />
         {project.parts.length > 0 && <>
           <List disablePadding aria-label="Recordings">
             {project.parts.map((part, partIndex) => (
@@ -389,9 +392,78 @@ function LectureWorkspace({ account, active, canManageVoices }: { account: strin
       </Section>
 
       {selected && <LecturePartEditor key={selected.id} part={selected} project={project} index={index} disabled={disabled}
-        update={(change) => updatePart(selected.id, change)} run={run} confirm={confirm} />}
+        update={(change) => updatePart(selected.id, change)} run={run} confirm={confirm} openContext={openContext} />}
 
       <LectureDownloads parts={project.parts} disabled={disabled} />
+
+      <Accordion disableGutters expanded={contextOpen} onChange={(_, expanded) => {
+        setContextOpen(expanded);
+        if (!expanded) {
+          viewVisit.current++;
+          contextFocusPending.current = false;
+          setVoiceMenuOpen(false);
+        }
+      }} slotProps={{ transition: { onEntered: () => {
+        if (active && contextFocusPending.current) focusLectureSection("lecture-context");
+        contextFocusPending.current = false;
+      } } }}>
+        <AccordionSummary expandIcon={<span aria-hidden="true">+</span>} id="lecture-context" aria-controls="lecture-context-details"
+          sx={{ scrollMarginTop: lectureSectionScrollMargin }}>
+          <Typography component="span">Video context and voice (optional)</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Stack spacing={2}>
+            {voices ? (
+              <TextField ref={voiceSelect} select label="Narration voice" value={project.voiceSelectionRequired ? "__choose__" : project.voice?.id ?? ""} disabled={disabled}
+                autoFocus={active && contextOpen && voiceMenuOpen}
+                onChange={(event) => chooseVoice(event.target.value)} slotProps={{
+                  select: { displayEmpty: true, open: active && contextOpen && !disabled && voiceMenuOpen, onOpen: () => setVoiceMenuOpen(true), onClose: () => setVoiceMenuOpen(false) },
+                  inputLabel: { shrink: true },
+                }}>
+                {project.voiceSelectionRequired && <MenuItem disabled value="__choose__">Choose a replacement voice</MenuItem>}
+                <MenuItem value="">Account default</MenuItem>
+                {project.voice && !voices.some((voice) => voice.voiceId === project.voice?.id) && (
+                  <MenuItem value={project.voice.id}>{project.voice.name} (unavailable)</MenuItem>
+                )}
+                {voices.map((voice) => <MenuItem key={voice.voiceId} value={voice.voiceId}>{voice.name}{voice.category === "cloned" ? " (cloned)" : ""}</MenuItem>)}
+              </TextField>
+            ) : <Button variant="outlined" onClick={loadVoices} disabled={disabled} sx={{ alignSelf: "flex-start" }}>
+              Choose ElevenLabs voice{project.voice ? ` (${project.voice.name})` : ""}
+            </Button>}
+            {voiceListError && <Alert severity="error">{voiceListError}</Alert>}
+            {canManageVoices && <LectureVoiceManager active={active} disabled={disabled || Boolean(confirmation)} selectedVoice={project.voice}
+              selectionRequired={project.voiceSelectionRequired}
+              onSelectVoice={selectProjectVoice} onVoiceSaved={voiceSaved} onVoiceDeleted={voiceDeleted} />}
+            {project.voiceSelectionRequired && <Alert severity="info">
+              Choose a replacement voice before generating more narration. Your existing audio and exports are available.
+            </Alert>}
+            <TextField label="Project title" value={project.title} disabled={disabled} onChange={(event) => field("title", event.target.value)} />
+            <TextField label="What should viewers learn or do?" value={project.goal ?? ""} disabled={disabled}
+              onChange={(event) => field("goal", event.target.value)} />
+            <TextField fullWidth multiline minRows={3} label="Context and notes" value={project.materials} disabled={disabled}
+              placeholder="Describe the audience, workflow, or details to cover."
+              onChange={(event) => field("materials", event.target.value)} />
+            <UploadButton label="Add reference files" accept=".pptx,.pdf,.docx,.txt,.md,.csv,.html" multiple disabled={disabled} onFiles={addMaterials} />
+            {project.materialFiles.map((file) => (
+              <Stack key={file.id} direction="row" spacing={1} sx={{ alignItems: "center", justifyContent: "space-between" }}>
+                <Typography variant="body2">{file.name}{file.truncated ? " (long file, text shortened)" : ""}</Typography>
+                <Button size="small" disabled={disabled} aria-label={`Remove ${file.name}`} onClick={(event) => confirm(
+                  "Remove reference file?", `Remove the extracted text from ${file.name}?`,
+                  () => update((previous) => ({ ...previous, materialFiles: previous.materialFiles.filter((material) => material.id !== file.id) })),
+                  event.currentTarget,
+                )}>Remove</Button>
+              </Stack>
+            ))}
+            <TextField fullWidth multiline minRows={2} label="Speaking guidance" placeholder="How should the narration sound?"
+              value={project.guidance} disabled={disabled} onChange={(event) => field("guidance", event.target.value)} />
+            <TextField fullWidth multiline minRows={2} label="Speaking sample transcript" value={project.sample} disabled={disabled}
+              placeholder="Paste a transcript that shows your usual speaking style."
+              onChange={(event) => field("sample", event.target.value)} />
+            <UploadButton label="Transcribe a short WAV sample" accept=".wav,audio/wav,audio/x-wav" disabled={disabled}
+              onFiles={([file], input) => addSample(file, input)} />
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
 
       <Accordion disableGutters>
         <AccordionSummary expandIcon={<span aria-hidden="true">+</span>} id="video-announcement-header" aria-controls="video-announcement">
@@ -410,6 +482,10 @@ function LectureWorkspace({ account, active, canManageVoices }: { account: strin
             <TextField fullWidth label="GitHub starter URL" type="url" value={project.starterUrl} disabled={disabled}
               error={Boolean(project.starterUrl.trim() && !watchLink(project.starterUrl))}
               onChange={(event) => field("starterUrl", event.target.value)} />
+            {project.parts.map((part, partIndex) => <TextField key={part.id} fullWidth type="url" placeholder="https://"
+              label={`Watch link for part ${partIndex + 1}: ${partName(part, partIndex)}`} value={part.watchUrl} disabled={disabled}
+              error={Boolean(part.watchUrl.trim() && !watchLink(part.watchUrl))}
+              onChange={(event) => updatePart(part.id, (previous) => ({ ...previous, watchUrl: event.target.value }))} />)}
             {!!project.parts.length && <Typography variant="body2" color="text.secondary">
               The copied announcement includes the videos in order. {project.parts.filter((part) => watchLink(part.watchUrl)).length} of {project.parts.length} watch links added.
             </Typography>}

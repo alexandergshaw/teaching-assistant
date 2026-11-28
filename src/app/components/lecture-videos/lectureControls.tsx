@@ -4,11 +4,21 @@ import { useEffect, useState } from "react";
 import { Box, Button, Paper, Stack, Typography } from "@mui/material";
 import type { ReactNode } from "react";
 
-export function Section({ title, children }: { title: string; children: ReactNode }) {
+export const lectureStickyTop = "calc(var(--topbar-height, 58px) + var(--in-session-banner-height, 0px) + 44px)";
+export const lectureSectionScrollMargin = `calc(${lectureStickyTop} + var(--lecture-feedback-height, 0px) + 16px)`;
+
+export function focusLectureSection(id: string) {
+  const target = document.getElementById(id);
+  target?.focus({ preventScroll: true });
+  target?.scrollIntoView({ block: "start" });
+}
+
+export function Section({ title, id, children }: { title: string; id?: string; children: ReactNode }) {
   return (
-    <Paper variant="outlined" component="section" sx={{ p: { xs: 2, sm: 3 } }}>
+    <Paper variant="outlined" component="section" id={id} tabIndex={id ? -1 : undefined} aria-labelledby={id ? `${id}-heading` : undefined}
+      sx={{ p: { xs: 2, sm: 3 }, scrollMarginTop: id ? lectureSectionScrollMargin : undefined }}>
       <Stack spacing={2}>
-        <Typography component="h3" variant="h6">{title}</Typography>
+        <Typography component="h3" variant="h6" id={id ? `${id}-heading` : undefined}>{title}</Typography>
         {children}
       </Stack>
     </Paper>

@@ -1,13 +1,15 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { Alert, Box, Button, Divider, FormControlLabel, LinearProgress, MenuItem, Paper, Stack, Switch, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Divider, FormControl, FormControlLabel, FormLabel, LinearProgress, Paper, Radio, RadioGroup, Stack, Switch, TextField, Typography } from "@mui/material";
 import { renderNarratedVideo, type NarrationClip } from "@/lib/narrate-video";
 import LectureCaptions from "./LectureCaptions";
+import { LectureDownloadButton } from "./LectureDownloads";
 import LectureSlideDeckOutput from "./LectureSlideDeckOutput";
 import { narrationWavBlocker, prepareLectureNarrationWav } from "./lecture-export-audio";
-import { AudioPlayer, Section, UploadButton, useBlobUrl } from "./lectureControls";
+import { AudioPlayer, Section, UploadButton, focusLectureSection, lectureSectionScrollMargin, useBlobUrl } from "./lectureControls";
 import { lectureCaptionBlob } from "./lecture-captions";
+import { lectureDownloads } from "./lecture-downloads";
 import { audioFromBlob, readBase64 } from "./lectureMedia";
 import { assignCues, changePartCue, cueTimingError, missingCueVoices, partName, renderBlocker, type LectureCue, type LecturePart, type LectureProject } from "./lectureProject";
 import { draftPartCues, synthesizeCue } from "./lectureWorkflow";
@@ -22,18 +24,23 @@ type Props = {
   update: (change: (part: LecturePart) => LecturePart) => void;
   run: RunLectureTask;
   confirm: (title: string, message: string, action: () => void, trigger: HTMLElement | null) => void;
+  openContext: () => void;
 };
 
-export default function LecturePartEditor({ part, project, index, disabled, update, run, confirm }: Props) {
+export default function LecturePartEditor({ part, project, index, disabled, update, run, confirm, openContext }: Props) {
   const sourceUrl = useBlobUrl(part.source);
   const outputUrl = useBlobUrl(part.output);
   const captionFile = useMemo(() => lectureCaptionBlob(part), [part]);
   const captionUrl = useBlobUrl(captionFile);
+  const downloads = useMemo(() => lectureDownloads(part, index), [part, index]);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const name = partName(part, index);
   const blocker = renderBlocker(part);
   const originalAudioOnly = part.audioMode === "source";
+  const originalDownload = downloads.find((file) => file.kind === "original");
+  const narratedDownload = downloads.find((file) => file.kind === "narrated");
+  const audioDownload = downloads.find((file) => file.kind === "narration");
   const audioCount = part.cues.filter((cue) => cue.audio).length;
   const lastVoiceEnd = Math.max(0, ...part.cues.map((cue) => cue.audio ? Number(cue.start) + cue.audio.duration : 0));
   const silentTail = part.duration - lastVoiceEnd;
@@ -123,7 +130,10 @@ export default function LecturePartEditor({ part, project, index, disabled, upda
         display: "grid", gap: 2, alignItems: "start",
         gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: originalAudioOnly ? "minmax(0, 1fr)" : "minmax(0, 1fr) minmax(0, 1fr)" },
       }}>
-        <Box sx={{ position: { lg: "sticky" }, top: { lg: 16 }, minWidth: 0 }}>
+        <Box sx={{
+          minWidth: 0,
+          "@media (min-height: 820px)": { position: { lg: "sticky" }, top: { lg: lectureSectionScrollMargin } },
+        }}>
           <Section title={`Part ${index + 1} recording`}>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField fullWidth label="Part title" value={part.title} disabled={disabled}
@@ -132,17 +142,29 @@ export default function LecturePartEditor({ part, project, index, disabled, upda
                 onChange={(event) => update((previous) => ({ ...previous, focus: event.target.value }))} />
             </Stack>
             <Typography variant="body2" color="text.secondary">{part.source.name} · {part.duration.toFixed(1)} s</Typography>
-            <TextField select label="Audio for export" value={part.audioMode} disabled={disabled} sx={{ maxWidth: 340 }}
-              onChange={(event) => {
-                const mode = event.target.value;
-                if (mode === "source" || mode === "take" || mode === "cues") {
-                  update((previous) => ({ ...previous, audioMode: mode, output: undefined }));
-                }
-              }}>
-              <MenuItem value="source">Original audio only</MenuItem>
-              <MenuItem value="cues">Generated cue narration</MenuItem>
-              <MenuItem value="take">Imported narration take</MenuItem>
-            </TextField>
+            <FormControl component="fieldset" disabled={disabled}>
+              <FormLabel component="legend" id="lecture-export-audio-label">Audio for export</FormLabel>
+              <RadioGroup row aria-labelledby="lecture-export-audio-label" value={part.audioMode}
+                onChange={(_, mode) => {
+                  if (mode === "source" || mode === "take" || mode === "cues") {
+                    update((previous) => previous.audioMode === mode ? previous : { ...previous, audioMode: mode, output: undefined });
+                  }
+                }}>
+                <FormControlLabel value="source" control={<Radio size="small" />} label="Original audio" />
+                <FormControlLabel value="cues" control={<Radio size="small" />} label="Generated narration" />
+                <FormControlLabel value="take" control={<Radio size="small" />} label="Imported narration" />
+              </RadioGroup>
+            </FormControl>
+            <Stack component="nav" aria-label="Selected recording sections" direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: "wrap" }}>
+              {!originalAudioOnly && <Button size="small" aria-controls="lecture-narration" onClick={() => focusLectureSection("lecture-narration")}>Narration</Button>}
+              {!originalAudioOnly && <Button size="small" aria-controls="lecture-export" onClick={() => focusLectureSection("lecture-export")}>Export</Button>}
+              <Button size="small" aria-controls="lecture-captions" onClick={() => focusLectureSection("lecture-captions")}>Captions</Button>
+              <Button size="small" aria-controls="lecture-slides" onClick={() => focusLectureSection("lecture-slides")}>Slide deck</Button>
+              {downloads.length > 0 && <Button size="small" aria-controls="lecture-downloads" onClick={() => focusLectureSection("lecture-downloads")}>Downloads</Button>}
+            </Stack>
+            {originalDownload && <Stack direction="row">
+              <LectureDownloadButton file={originalDownload} label="Download original recording" disabled={disabled} />
+            </Stack>}
             <Box component="video" ref={videoRef} src={sourceUrl} controls muted={!originalAudioOnly} playsInline preload="metadata"
               aria-label={`Source recording for ${name}`} sx={{ width: "100%", maxHeight: 380, bgcolor: "common.black", borderRadius: 1 }}>
               {captionUrl && <track kind="captions" label="Captions" srcLang="en" src={captionUrl} />}
@@ -150,7 +172,7 @@ export default function LecturePartEditor({ part, project, index, disabled, upda
           </Section>
         </Box>
 
-        {part.audioMode === "cues" && <Section title="Narration cues">
+        {part.audioMode === "cues" && <Section title="Narration cues" id="lecture-narration">
           <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
             <Button variant="contained" disabled={disabled} onClick={(event) => part.cues.length
               ? confirm("Replace cue draft?", "Drafting again replaces this part's cues and their generated voice clips.", draft, event.currentTarget)
@@ -161,6 +183,9 @@ export default function LecturePartEditor({ part, project, index, disabled, upda
             })}>Copy cue script</Button>
             <Button variant="outlined" disabled={disabled || project.voiceSelectionRequired || !missingVoices.length} onClick={() => generate(missingVoices)}>
               Generate missing voices
+            </Button>
+            <Button onClick={openContext} aria-controls="lecture-context-details">
+              {project.voiceSelectionRequired ? "Choose replacement voice" : "Voice and guidance"}
             </Button>
           </Stack>
           {part.cues.length > 0 && <Typography variant="body2" color="text.secondary">{audioCount} of {part.cues.length} cues voiced</Typography>}
@@ -206,7 +231,7 @@ export default function LecturePartEditor({ part, project, index, disabled, upda
             );
           })}
         </Section>}
-        {part.audioMode === "take" && <Section title="Narration take">
+        {part.audioMode === "take" && <Section title="Narration take" id="lecture-narration">
           <UploadButton label={part.take ? "Replace full voice take" : "Import full voice take"}
             accept=".mp3,.m4a,.wav,.aac,.ogg,.opus,.webm,.flac,.mp4" disabled={disabled} onFiles={([file]) => importTake(file)} />
           {part.take && <>
@@ -219,42 +244,40 @@ export default function LecturePartEditor({ part, project, index, disabled, upda
         </Section>}
       </Box>
 
-      <LectureSlideDeckOutput part={part} project={project} index={index} disabled={disabled} update={update} run={run} />
-
-      <LectureCaptions part={part} disabled={disabled} update={update} run={run} confirm={confirm} />
-
-      <Section title="Export">
-        {!originalAudioOnly && <>
-          <FormControlLabel label="Mix recording audio with narration"
-            control={<Switch checked={part.mixSourceAudio ?? false} disabled={disabled}
-              onChange={(_, checked) => update((previous) => ({ ...previous, mixSourceAudio: checked, output: undefined }))} />} />
-          <Divider />
-          {part.audioMode === "cues" && !blocker && silentTail > 1 && (
-            <Alert severity="info">Narration ends {silentTail.toFixed(1)} s before the video ends.</Alert>
-          )}
-          <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
-            <Button variant="contained" onClick={render} disabled={disabled || Boolean(blocker)}>
-              {part.output ? "Render narration again" : "Render narration video"}
-            </Button>
-            {part.audioMode === "cues" && !part.narrationWav && <Button variant="outlined" onClick={prepareNarrationWav}
-              disabled={disabled || Boolean(wavBlocker)}>Prepare narration WAV</Button>}
-          </Stack>
-          <Typography variant="body2" color="text.secondary">Exports as MP4 when supported by this browser, or WebM otherwise.</Typography>
-          {blocker && <Typography variant="body2" color="text.secondary">{blocker}</Typography>}
-          {!blocker && wavBlocker && <Typography variant="body2" color="text.secondary">{wavBlocker}</Typography>}
-          {progress !== null && <LinearProgress variant="determinate" value={progress} aria-label="Rendering video" />}
-          {outputUrl && <>
-            <Box component="video" src={outputUrl} controls playsInline preload="metadata" aria-label={`Narrated preview for ${name}`}
-              sx={{ width: "100%", maxHeight: 380, bgcolor: "common.black", borderRadius: 1 }}>
-              {captionUrl && <track kind="captions" label="Captions" srcLang="en" src={captionUrl} />}
-            </Box>
-          </>}
+      {!originalAudioOnly && <Section title="Narration export" id="lecture-export">
+        <FormControlLabel label="Mix recording audio with narration"
+          control={<Switch checked={part.mixSourceAudio ?? false} disabled={disabled}
+            onChange={(_, checked) => update((previous) => ({ ...previous, mixSourceAudio: checked, output: undefined }))} />} />
+        <Divider />
+        {part.audioMode === "cues" && !blocker && silentTail > 1 && (
+          <Alert severity="info">Narration ends {silentTail.toFixed(1)} s before the video ends.</Alert>
+        )}
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+          <Button variant="contained" onClick={render} disabled={disabled || Boolean(blocker)}>
+            {part.output ? "Render narration again" : "Render narration video"}
+          </Button>
+          {part.audioMode === "cues" && !part.narrationWav && <Button variant="outlined" onClick={prepareNarrationWav}
+            disabled={disabled || Boolean(wavBlocker)}>Prepare narration WAV</Button>}
+          {audioDownload && <LectureDownloadButton file={audioDownload}
+            label={part.audioMode === "cues" ? "Download narration WAV" : "Download narration take"} disabled={disabled} />}
+          {narratedDownload && <LectureDownloadButton file={narratedDownload} label="Download narrated video" disabled={disabled} />}
+        </Stack>
+        <Typography variant="body2" color="text.secondary">Exports as MP4 when supported by this browser, or WebM otherwise.</Typography>
+        {blocker && <Typography variant="body2" color="text.secondary">{blocker}</Typography>}
+        {!blocker && wavBlocker && <Typography variant="body2" color="text.secondary">{wavBlocker}</Typography>}
+        {progress !== null && <LinearProgress variant="determinate" value={progress} aria-label="Rendering video" />}
+        {outputUrl && <>
+          <Box component="video" src={outputUrl} controls playsInline preload="metadata" aria-label={`Narrated preview for ${name}`}
+            sx={{ width: "100%", maxHeight: 380, bgcolor: "common.black", borderRadius: 1 }}>
+            {captionUrl && <track kind="captions" label="Captions" srcLang="en" src={captionUrl} />}
+          </Box>
         </>}
-        <Button href="#lecture-downloads" sx={{ alignSelf: "flex-start" }}>Open downloads</Button>
-        <TextField fullWidth label="Student watch link" placeholder="https://" value={part.watchUrl} disabled={disabled}
-          helperText="Paste the link after uploading the exported video to your hosting service."
-          onChange={(event) => update((previous) => ({ ...previous, watchUrl: event.target.value }))} />
-      </Section>
+      </Section>}
+
+      <LectureCaptions part={part} disabled={disabled} update={update} run={run} confirm={confirm} downloads={downloads} />
+
+      <LectureSlideDeckOutput part={part} project={project} index={index} disabled={disabled} update={update} run={run}
+        download={downloads.find((file) => file.kind === "slides")} />
     </Stack>
   );
 }

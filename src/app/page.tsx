@@ -718,7 +718,7 @@ export default function Home() {
                 )}
 
                 {manualView === "content" && (
-                  <TabShell>
+                  <TabShell eyebrow="Tools" title="LMS">
                     <ContentTab
                       view={contentView}
                       inbox={<CanvasTab view="inbox" />}
@@ -727,7 +727,7 @@ export default function Home() {
                 )}
 
                 {manualView === "version-control" && (
-                  <TabShell>
+                  <TabShell eyebrow="Tools" title="Version Control">
                     <VersionControlTab vcOrgView={nav.vcOrgView} />
                   </TabShell>
                 )}
@@ -800,7 +800,13 @@ export default function Home() {
 
         {discussionsVisited && (
           <div style={{ display: discussionsVisible ? undefined : "none" }}>
-            <TabShell><DiscussionsTool /></TabShell>
+            <TabShell
+              eyebrow="Tools"
+              title="Discussions"
+              subtitle="Make one generic reply for each student. The reply uses their name but does not assume what they posted."
+            >
+              <DiscussionsTool />
+            </TabShell>
           </div>
         )}
 

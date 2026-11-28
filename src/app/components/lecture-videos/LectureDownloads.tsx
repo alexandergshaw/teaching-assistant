@@ -15,16 +15,25 @@ type DownloadRowProps = {
   register: (id: string, anchor: HTMLAnchorElement | null) => void;
 };
 
-function DownloadRow({ file, partLabel, disabled, checked, select, register }: DownloadRowProps) {
+export function LectureDownloadButton({ file, label, disabled, register }: {
+  file: LectureDownload;
+  label: string;
+  disabled: boolean;
+  register?: DownloadRowProps["register"];
+}) {
   const url = useBlobUrl(file.blob);
+  return <Button component="a" href={url} download={file.fileName} disabled={disabled || !url}
+    ref={register && ((node: HTMLAnchorElement | null) => register(file.id, url ? node : null))}
+    aria-label={label} size="small">{register ? "Download" : label}</Button>;
+}
+
+function DownloadRow({ file, partLabel, disabled, checked, select, register }: DownloadRowProps) {
   return <Stack direction="row" spacing={1} sx={{ alignItems: "center", justifyContent: "space-between" }}>
     <FormControlLabel label={<>
       <Typography component="span" variant="body2" sx={{ display: "block" }}>{file.label}</Typography>
       <Typography component="span" variant="caption" color="text.secondary" sx={{ overflowWrap: "anywhere" }}>{file.fileName}</Typography>
-    </>} control={<Checkbox checked={checked} onChange={(_, next) => select(next)} disabled={disabled || !url} />} />
-    <Button component="a" href={url} download={file.fileName} disabled={disabled || !url}
-      ref={(node: HTMLAnchorElement | null) => register(file.id, url ? node : null)}
-      aria-label={`Download ${file.label} for ${partLabel}`} size="small">Download</Button>
+    </>} control={<Checkbox checked={checked} onChange={(_, next) => select(next)} disabled={disabled} />} />
+    <LectureDownloadButton file={file} disabled={disabled} register={register} label={`Download ${file.label} for ${partLabel}`} />
   </Stack>;
 }
 
@@ -54,8 +63,8 @@ export default function LectureDownloads({ parts, disabled }: { parts: LecturePa
   }
 
   if (!files.length) return null;
-  return <Box id="lecture-downloads" tabIndex={-1} sx={{ scrollMarginTop: 16 }}>
-    <Section title="Downloads">
+  return <Box>
+    <Section title="Downloads" id="lecture-downloads">
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ alignItems: { xs: "start", sm: "center" } }}>
         <FormControlLabel label="Select all ready files" control={<Checkbox disabled={disabled}
           checked={selected.length === files.length} indeterminate={selected.length > 0 && selected.length < files.length}

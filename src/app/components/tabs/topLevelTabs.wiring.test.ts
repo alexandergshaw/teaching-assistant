@@ -368,7 +368,7 @@ describe("the merged tabs are one navigation level deep", () => {
     expect(source).toMatch(/const \[discussionsVisited, setDiscussionsVisited\] = useState\(false\);/);
     expect(source).toMatch(/if \(discussionsVisible && !discussionsVisited\) setDiscussionsVisited\(true\);/);
     expect(branchSlice(source, "manual")).toMatch(
-      /\{discussionsVisited && \(\s*<div style=\{\{ display: discussionsVisible \? undefined : "none" \}\}>\s*<TabShell><DiscussionsTool\s*\/>/
+      /\{discussionsVisited && \(\s*<div style=\{\{ display: discussionsVisible \? undefined : "none" \}\}>\s*<TabShell\s+eyebrow="Tools"\s+title="Discussions"\s+subtitle="[^"]+"\s*>\s*<DiscussionsTool\s*\/>/
     );
     expect(source.match(/<DiscussionsTool[\s/>]/g)).toHaveLength(1);
   });
@@ -411,6 +411,43 @@ describe("the merged tabs are one navigation level deep", () => {
     // Discussions joined the eight views that remained after Workflows and
     // Automations moved into the Automate container.
     expect(TOOLS_RAIL_ITEMS).toHaveLength(9);
+  });
+});
+
+describe("shared Tools panel headings", () => {
+  it.each([
+    ["LMS", "ContentTab"],
+    ["Version Control", "VersionControlTab"],
+  ])("places the %s body in a headed TabShell", (title, component) => {
+    const tools = branchSlice(readWithoutComments(PAGE), "manual");
+    expect(tools).toMatch(new RegExp(`<TabShell eyebrow="Tools" title="${title}">\\s*<${component}\\b`));
+  });
+
+  it("uses the Discussions shell heading during loading and after the draft opens", () => {
+    const source = readWithoutComments(join(process.cwd(), "src/app/components/discussions/DiscussionsTool.tsx"));
+    expect(source).not.toMatch(/<TabHeader\b|<h1\b|component="h1"/);
+  });
+
+  it("keeps the PowerPoint Templates heading above the session and recovery states", () => {
+    const source = branchSlice(readWithoutComments(PAGE), "manual");
+    expect(source).toMatch(/\{pptTemplatesVisited && \(\s*<div style=\{\{ display: pptTemplatesVisible \? undefined : "none" \}\}>\s*<TabShell>\s*<PowerPointTemplates\b/);
+    const workspace = readWithoutComments(join(process.cwd(), "src/app/components/powerpoint-templates/index.tsx"));
+    expect(workspace).toMatch(/<TabHeader eyebrow="Presentations" title="PowerPoint Templates" subtitle="[^"]+"\s*\/>\s*\{loading \?/);
+    expect(workspace.match(/<TabHeader\b/g)).toHaveLength(1);
+  });
+
+  it("puts the Automations heading above the loading, error, and inventory states", () => {
+    const source = readWithoutComments(join(process.cwd(), "src/app/components/AutomationsTabView.tsx"));
+    expect(source).toMatch(/<TabShell eyebrow="Automate" title="Automations">\s*\{loading \?/);
+  });
+
+  it.each([
+    ["grading-chat/GradingChatPanel.tsx", "Grading", "Grading Chat"],
+    ["walkthrough-announcement/WalkthroughAnnouncementPanel.tsx", "Announcements", "Announcement from a walkthrough"],
+  ])("reuses TabHeader in the existing mounted card of %s", (file, eyebrow, title) => {
+    const source = readWithoutComments(join(process.cwd(), "src/app/components", file));
+    expect(source).toMatch(new RegExp(`<TabHeader\\s+eyebrow="${eyebrow}"\\s+title="${title}"`));
+    expect(source.match(/<TabHeader\b/g)).toHaveLength(1);
   });
 });
 

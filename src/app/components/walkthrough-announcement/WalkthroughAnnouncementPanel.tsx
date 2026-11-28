@@ -34,6 +34,7 @@ import { createScriptCopyController } from "./script-copy";
 // is safer than a whole screen.
 
 import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
+import TabHeader from "../TabHeader";
 import { slotsForBothTemplate } from "./pair-preferences";
 import { usePairPreferences } from "./usePairPreferences";
 import { useWalkthroughVideoUpload } from "./useWalkthroughVideoUpload";
@@ -470,12 +471,11 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
   return (
     <div className={`${styles.card} ${styles.form}`}>
       {promptReview.dialog}
-      <h2 className={annChat.title}>Announcement from a walkthrough</h2>
-      <p className={styles.fieldHint}>
-        Share your screen and click through a series of LMS pages - the app reads what is visible and drafts an
-        announcement matching a previous one&apos;s format, and/or a video script, covering the pages in the order
-        you walked them. Your screen recording stays in this browser until downloaded. Allow microphone access to include narration.
-      </p>
+      <TabHeader
+        eyebrow="Announcements"
+        title="Announcement from a walkthrough"
+        subtitle="Share your screen and click through a series of LMS pages - the app reads what is visible and drafts an announcement matching a previous one's format, and/or a video script, covering the pages in the order you walked them. Your screen recording stays in this browser until downloaded. Allow microphone access to include narration."
+      />
 
       {(startError || recordingError || droppedFrames > 0 || frameEncodeNotice || notices.length > 0) && (
         <div role="status" aria-live="polite" className={styles.field}>

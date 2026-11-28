@@ -23,6 +23,7 @@ import { Alert, Accordion, AccordionSummary, AccordionDetails, Table, TableHead,
 import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import GradingResults from "../GradingResults";
+import TabHeader from "../TabHeader";
 import RubricProvenance from "../grading-results/RubricProvenance";
 import GeneratedRubricCard from "../grading-results/GeneratedRubricCard";
 import SubmissionClassificationBadge from "../grading/SubmissionClassificationBadge";
@@ -755,6 +756,7 @@ function GradingChatPanelForAccount({ copiedKey, onCopy, onOpenPreview }: Gradin
           : undefined
       }
     >
+      <TabHeader eyebrow="Grading" title="Grading Chat" />
       <div ref={sessionActionsRef} className={chatStyles.sessionActions}>
         <Button variant="outlined" size="small" disabled={preparing && !directPreparing} onClick={handleNewSession}
           aria-describedby={preparing && !directPreparing ? "grading-chat-new-session-unavailable" : undefined}>

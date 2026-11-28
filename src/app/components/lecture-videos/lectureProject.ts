@@ -14,6 +14,8 @@ export type LectureCue = {
   audio?: LectureAudio;
 };
 
+export type LectureSlideDeck = { blob: Blob; title: string; warnings: string[] };
+
 export type LecturePart = {
   id: string;
   title: string;
@@ -28,6 +30,7 @@ export type LecturePart = {
   narrationWav?: Blob;
   captionedOriginal?: Blob;
   captionedNarrated?: Blob;
+  slideDeck?: LectureSlideDeck;
   watchUrl: string;
   mixSourceAudio?: boolean;
 };
@@ -169,6 +172,7 @@ export function keepCurrentLectureExports(previous: LecturePart, next: LecturePa
     narrationWav: sourceChanged || cuesChanged ? undefined : next.narrationWav,
     captionedOriginal: captionTrackChanged ? undefined : next.captionedOriginal,
     captionedNarrated: narratedInputsChanged ? undefined : next.captionedNarrated,
+    slideDeck: sourceChanged ? undefined : next.slideDeck,
   };
 }
 

@@ -1,10 +1,10 @@
 import { base64FromArrayBuffer, encodeWav, LIVE_SAMPLE_RATE } from "@/lib/live-class/wav";
 import { extractAudioOnly } from "@/lib/strip-audio";
-import { planTranscriptChunks, sliceMonoSamples } from "@/lib/take-transcript";
+import { planTranscriptChunks, sliceMonoSamples, TRANSCRIBE_CHUNK_SECONDS } from "@/lib/take-transcript";
 import { checkWireBudget } from "@/lib/upload-budget";
 import { decodeBlobToMono } from "../recording/takeAnnouncementTranscription";
 import { transcribeWalkthroughChunk } from "../walkthrough-announcement/walkthrough-transcription-transport";
-import { VIDEO_LOCAL_WAIT_MS, VIDEO_MAX_BYTES, VIDEO_MAX_SECONDS, VIDEO_PROVIDER_WAIT_MS, videoWait } from "../walkthrough-announcement/walkthrough-video-limits";
+import { VIDEO_LOCAL_WAIT_MS, VIDEO_MAX_BYTES, VIDEO_MAX_SECONDS, VIDEO_NARRATION_CHARS, VIDEO_PROVIDER_WAIT_MS, videoWait } from "../walkthrough-announcement/walkthrough-video-limits";
 import type { LecturePart } from "./lectureProject";
 import { MAX_CAPTION_CUES, MAX_CAPTION_TEXT, type LectureCaptionDraft } from "./lecture-captions";
 
@@ -47,7 +47,18 @@ const browserAudio = {
   transcribe: transcribeWalkthroughChunk,
 };
 
-export async function transcribeLectureCaptions(source: CaptionAudioSource, signal: AbortSignal, progress: (value: string) => void, audio = browserAudio): Promise<LectureCaptionDraft[]> {
+const recordingDeckAudio = {
+  ...browserAudio,
+  // The fallback plays the video in real time. Bound it so a silent video
+  // can continue to the visual evidence instead of waiting its full runtime.
+  extract: (blob: Blob, progress?: (percent: number) => void, signal?: AbortSignal) =>
+    extractAudioOnly(blob, progress, AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(30_000)])),
+};
+
+async function readLectureSpeech(
+  source: CaptionAudioSource, signal: AbortSignal, progress: (value: string) => void, audio: typeof browserAudio,
+  chunkSeconds: number, onSpeech: (text: string, start: number, end: number) => void,
+): Promise<void> {
   if (!source.blob.size || source.blob.size > VIDEO_MAX_BYTES || !Number.isFinite(source.duration) || source.duration <= 0 || source.duration > VIDEO_MAX_SECONDS) {
     throw new Error("Automatic captions support up to 20 minutes and 250 MB. Import captions for longer or larger videos.");
   }
@@ -73,8 +84,7 @@ export async function transcribeLectureCaptions(source: CaptionAudioSource, sign
       }
     }
     if (!mono || !complete(mono)) throw new Error("The browser could not read the full audio track.");
-    const plans = planTranscriptChunks(Math.min(source.duration, mono.length / LIVE_SAMPLE_RATE), 15);
-    const drafts: LectureCaptionDraft[] = [];
+    const plans = planTranscriptChunks(Math.min(source.duration, mono.length / LIVE_SAMPLE_RATE), chunkSeconds);
     for (const plan of plans) {
       signal.throwIfAborted();
       progress(`Transcribing audio ${plan.index + 1} of ${plans.length}…`);
@@ -90,14 +100,36 @@ export async function transcribeLectureCaptions(source: CaptionAudioSource, sign
       }
       signal.throwIfAborted();
       if ("error" in result) throw new Error(result.error);
-      drafts.push(...captionDraftsFromTranscript(result.text, plan.startSec, plan.endSec));
-      if (drafts.length > MAX_CAPTION_CUES || drafts.some((draft) => draft.text.length > MAX_CAPTION_TEXT)) {
-        throw new Error("The transcript is too long for one caption track. Import a caption file or use a shorter video.");
-      }
+      if (result.text.trim()) onSpeech(result.text.trim(), plan.startSec, plan.endSec);
     }
-    if (!drafts.length) throw new Error("Gemini did not detect speech in the selected audio.");
-    return drafts;
   } finally {
     if (ctx.state !== "closed") void ctx.close().catch(() => undefined);
   }
+}
+
+export async function transcribeLectureCaptions(source: CaptionAudioSource, signal: AbortSignal, progress: (value: string) => void, audio = browserAudio): Promise<LectureCaptionDraft[]> {
+  const drafts: LectureCaptionDraft[] = [];
+  await readLectureSpeech(source, signal, progress, audio, 15, (text, start, end) => {
+    const newDrafts = captionDraftsFromTranscript(text, start, end);
+    if (drafts.length + newDrafts.length > MAX_CAPTION_CUES || newDrafts.some((draft) => draft.text.length > MAX_CAPTION_TEXT)) {
+      throw new Error("The transcript is too long for one caption track. Import a caption file or use a shorter video.");
+    }
+    drafts.push(...newDrafts);
+  });
+  if (!drafts.length) throw new Error("Gemini did not detect speech in the selected audio.");
+  return drafts;
+}
+
+export async function transcribeLectureRecordingSpeech(part: LecturePart, signal: AbortSignal, progress: (value: string) => void, audio = recordingDeckAudio) {
+  const lines: string[] = [];
+  let used = 0;
+  let truncated = false;
+  await readLectureSpeech({ blob: part.source, duration: part.duration, kind: "video" }, signal, progress, audio, TRANSCRIBE_CHUNK_SECONDS, (text, start, end) => {
+    const line = `[${Math.floor(start)}–${Math.ceil(end)} s] ${text}`;
+    const room = VIDEO_NARRATION_CHARS - used;
+    if (line.length > room) truncated = true;
+    if (room > 0) lines.push(line.slice(0, room));
+    used += Math.min(line.length + 1, room);
+  });
+  return { text: lines.join("\n"), truncated };
 }

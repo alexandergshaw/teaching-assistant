@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { Alert, Box, Button, Divider, FormControlLabel, LinearProgress, MenuItem, Paper, Stack, Switch, TextField, Typography } from "@mui/material";
 import { renderNarratedVideo, type NarrationClip } from "@/lib/narrate-video";
 import LectureCaptions from "./LectureCaptions";
+import LectureSlideDeckOutput from "./LectureSlideDeckOutput";
 import { narrationWavBlocker, prepareLectureNarrationWav } from "./lecture-export-audio";
 import { AudioPlayer, Section, UploadButton, useBlobUrl } from "./lectureControls";
 import { lectureCaptionBlob } from "./lecture-captions";
@@ -217,6 +218,8 @@ export default function LecturePartEditor({ part, project, index, disabled, upda
           </>}
         </Section>}
       </Box>
+
+      <LectureSlideDeckOutput part={part} project={project} index={index} disabled={disabled} update={update} run={run} />
 
       <LectureCaptions part={part} disabled={disabled} update={update} run={run} confirm={confirm} />
 

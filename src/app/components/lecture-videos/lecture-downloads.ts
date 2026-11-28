@@ -1,7 +1,7 @@
 import { lectureCaptionBlob, lectureCaptionCues, lectureCaptionMode } from "./lecture-captions";
 import { partName, type LecturePart } from "./lectureProject";
 
-type ArtifactKind = "original" | "narration" | "transcript" | "captions" | "narrated" | "captioned-original" | "captioned-narrated";
+type ArtifactKind = "original" | "narration" | "transcript" | "captions" | "narrated" | "captioned-original" | "captioned-narrated" | "slides";
 
 export type LectureDownload = {
   id: string;
@@ -62,6 +62,7 @@ export function lectureDownloads(part: LecturePart, index: number): LectureDownl
   if (cues.length && part.audioMode !== "source" && part.output?.size && part.captionedNarrated) {
     add("captioned-narrated", "Narrated video with burned-in captions", `${stem}-narrated-captioned.${videoExtension(part.captionedNarrated)}`, part.captionedNarrated);
   }
+  add("slides", "Editable slide deck (PPTX)", `${stem}-slides.pptx`, part.slideDeck?.blob);
   return files;
 }
 

@@ -63,9 +63,10 @@ describe("lecture export readiness", () => {
 });
 
 it("opens an existing lecture under the same account and storage key", async () => {
+  const slideDeck = { title: "Editable saved deck", blob: new Blob(["deck"]), warnings: [] };
   const project = {
     title: "Lecture 15",
-    parts: [part],
+    parts: [{ ...part, slideDeck }],
     selectedId: part.id,
     voice: { id: "saved-voice", name: "Saved voice" },
     announcementBody: "Watch both recordings.",
@@ -90,6 +91,7 @@ it("opens an existing lecture under the same account and storage key", async () 
     expect(saved.project).toMatchObject(project);
     expect(saved.project.parts[0].cues).toBe(part.cues);
     expect(saved.project.parts[0].output).toBe(part.output);
+    expect(saved.project.parts[0].slideDeck).toEqual(slideDeck);
     expect(saved.project.goal ?? "").toBe("");
   } finally {
     vi.unstubAllGlobals();

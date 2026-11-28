@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { LIVE_SAMPLE_RATE } from "@/lib/live-class/wav";
 import { lectureCaptionBlob, lectureCaptionCues, lectureCaptionError, lectureCaptionMode, parseLectureCaptionFile } from "./lecture-captions";
-import { captionDraftsFromTranscript, lectureCaptionAudioSource, transcribeLectureCaptions } from "./lecture-caption-transcription";
+import { captionDraftsFromTranscript, lectureCaptionAudioSource, transcribeLectureCaptions, transcribeLectureRecordingSpeech } from "./lecture-caption-transcription";
 import type { LecturePart } from "./lectureProject";
 
 const source = new File(["video"], "part.mp4", { type: "video/mp4" });
@@ -84,5 +84,20 @@ describe("Narrated Videos caption transcription", () => {
     expect(transcribe).toHaveBeenCalledExactlyOnceWith(expect.any(String), { provider: "gemini" }, expect.any(AbortSignal));
     expect(extract).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("transcribes the original recording for decks even with a separate take and captions off", async () => {
+    const samples = new Float32Array(61 * LIVE_SAMPLE_RATE);
+    samples.fill(0.2, 60 * LIVE_SAMPLE_RATE);
+    const decode = vi.fn(async () => samples);
+    const transcribe = vi.fn(async () => ({ text: "Original spoken words." }));
+    const signal = new AbortController().signal;
+    const result = await transcribeLectureRecordingSpeech({ ...part, duration: 61, audioMode: "take", take, output: outgoing, captions: { mode: "off" } }, signal, vi.fn(), {
+      context: () => ({ state: "running", close: vi.fn(async () => {}) }) as unknown as AudioContext,
+      decode, extract: vi.fn(), transcribe,
+    });
+    expect(decode).toHaveBeenCalledExactlyOnceWith(expect.anything(), source);
+    expect(transcribe).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ text: "[60–61 s] Original spoken words.", truncated: false });
   });
 });

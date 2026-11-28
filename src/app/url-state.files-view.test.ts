@@ -1,6 +1,7 @@
 import { stripComments as sourceCode } from "@/app/components/ui/modalAdoptionSourceScan";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import { isPlainLeftClick } from "./components/tabs/tab-link";
 import {
   normalizeFilesView,
   parseFilesView,
@@ -74,12 +75,25 @@ describe("Files view deep links", () => {
     expect(resolveFilesViewFromUrl("", "other")).toBe("library");
   });
 
-  it.each(["library", "submissions"])("pins the %s anchor's own destination and guarded setter", (view) => {
-    const anchor = filesTab.match(new RegExp(`<a\\s+href=\\{filesViewHref\\("${view}"\\)\\}[\\s\\S]*?<\\/a>`))?.[0];
-    expect(anchor).toBeDefined();
-    expect(anchor).toContain('role="tab"');
-    expect(anchor).toContain(`aria-selected={filesView === "${view}"}`);
-    expect(anchor).toMatch(new RegExp(`onClick=\\{\\(event: ReactMouseEvent<HTMLAnchorElement>\\) => \\{\\s*if \\(!isPlainLeftClick\\(event\\)\\) return;\\s*event\\.preventDefault\\(\\);\\s*setFilesView\\("${view}"\\);\\s*\\}\\}`));
+  it.each(["library", "submissions"])("pins the %s MUI tab's own anchor destination, associated panel, and guarded setter", (view) => {
+    const strip = between(filesTab, '<Tabs value={filesView} aria-label="Files"', "</Tabs>");
+    expect(filesTab).toContain(`[["library", "Library"], ["submissions", "Submissions"]] as const`);
+    expect(strip).toContain("FILE_VIEWS.map(([key, label])");
+    expect(strip).toContain('<Tab key={key} component="a" href={filesViewHref(key)} value={key} label={label}');
+    expect(strip).toContain('id={`files-tab-${key}`} aria-controls={`files-panel-${key}`}');
+    expect(filesTab).toContain(`role="tabpanel" id="files-panel-${view}" aria-labelledby="files-tab-${view}" hidden={filesView !== "${view}"}`);
+    expect(strip).toContain('if (event.key === " ") { event.preventDefault(); event.currentTarget.click(); }');
+    const expression = between(strip, "onClick={", "\n              }} />").slice("onClick={".length) + "}";
+    const setFilesView = vi.fn();
+    const click = new Function("isPlainLeftClick", "setFilesView", "key", `return (${expression});`)(isPlainLeftClick, setFilesView, view);
+    const preventDefault = vi.fn();
+    const baseEvent = { button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, defaultPrevented: false, preventDefault };
+    for (const modifier of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }, { defaultPrevented: true }]) click({ ...baseEvent, ...modifier });
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(setFilesView).not.toHaveBeenCalled();
+    click(baseEvent);
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(setFilesView).toHaveBeenCalledExactlyOnceWith(view);
   });
 
   it("builds each href with the Files parent and the requested view", () => {

@@ -1,12 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import dynamic from "next/dynamic";
 import { Button, MenuItem, TextField } from "@mui/material";
+import Tab from "@mui/material/Tab";
+import Tabs from "@mui/material/Tabs";
 import { openScopedRecording } from "./recording/open-scoped-recording";
 import { REC_VIEWS, type RecView } from "./recording/rec-views";
 import { DEFAULT_REC_VIEW, REC_VIEW_CHANGE_EVENT, normalizeRecordingEntry, normalizeRecView, resolveRecViewFromUrl, parseUrlState } from "../url-state";
 import { buildTabHref, isPlainLeftClick } from "./tabs/tab-link";
+import { subtabSx } from "./tabs/subtab-style";
 import TabShell from "./TabShell";
 import CaptionStudio from "./CaptionStudio";
 import SlideStudio from "./SlideStudio";
@@ -108,7 +111,18 @@ export default function RecordingTab({
   // overrides the strip's selection WITHOUT touching or persisting it, so the
   // user's real Recording sub-view survives a visit to Announcements.
   const recView: typeof storedRecView | "announcement" = announcementsActive ? "announcement" : storedRecView;
-  const focusableRecView = REC_VIEWS.some(([key]) => key === recView) ? recView : DEFAULT_REC_VIEW;
+  const selectedRecTab = REC_VIEWS.some(([key]) => key === recView) ? recView : false;
+  const selectFocusedRecTab = (event: KeyboardEvent<HTMLDivElement>) => {
+    // The MUI list handler runs after roving focus has moved.
+    if (!event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey
+      || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const list = event.currentTarget;
+    const focused = list.ownerDocument.activeElement;
+    if (!focused || !list.contains(focused)) return;
+    const focusedView = focused.getAttribute("data-rec-view");
+    const view = REC_VIEWS.find(([key]) => key === focusedView)?.[0];
+    if (view && view !== recView) setRecView(view);
+  };
   const [lectureVideosOpened, setLectureVideosOpened] = useState(false);
   if (active && recView === "lecturevideos" && !lectureVideosOpened) {
     setLectureVideosOpened(true);
@@ -701,55 +715,23 @@ export default function RecordingTab({
           : "Recording, capture, and playback tools for this course. Some record and preview live; others read a shared screen, or work from a recording you already have."
       }
     >
-      {/* D6 (docs/aesthetics-pass-acceptance-criteria.md section 4b): this
-          strip rendered eight role="tab" buttons with aria-selected but no
-          roving tabindex or arrow-key handler, so all eight sat in the Tab
-          order at once - fixed here, confined to this block per this
-          agent's file scope ("ONLY the sub-tab strip's ARIA"). Roving
-          tabIndex (0 on the selected tab, -1 on the rest) plus ArrowLeft/
-          ArrowRight/Home/End, walking the DOM siblings within this tablist
-          rather than a second parallel array of keys, which the
-          inner-view-strip structure test's own single-line regex
-          (recording-split.structure.test.ts) would otherwise be a second
-          place to keep in sync with the literal below.
-          CC9 (docs/recording-controls-ux-acceptance-criteria.md): the strip
-          is now fully wired - each tab button below carries its own id and a
-          pointer to the content div it exposes, and each content div further
-          down carries a matching tabpanel role, id and a pointer back to the
-          tab(s) that name it, via the "rec-tab-<key>" / "rec-panel-<key>"
-          pair. W2: the announcement tab left the strip; its front door lives
-          under Tools > Announcements and reuses the record wrapper below
-          (the strip is hidden while that is showing). */}
-      <div className={styles.lessonInnerTabs} role="tablist" aria-label="Recording tools" style={announcementsActive ? { display: "none" } : undefined}>
+      {/* MUI owns roving focus. Keyboard movement selects a visible tab;
+          legacy routes can show their own panel without selecting a tab. */}
+      <Tabs value={selectedRecTab} aria-label="Recording tools" variant="scrollable" scrollButtons="auto"
+        sx={subtabSx} style={announcementsActive ? { display: "none" } : undefined}
+        slotProps={{ list: { onKeyDown: selectFocusedRecTab } }}>
         {REC_VIEWS.map(([key, label]) => (
-          <a key={key} href={recViewHref(key)} role="tab" aria-selected={recView === key}
+          <Tab key={key} component="a" href={recViewHref(key)} value={key} label={label} data-rec-view={key}
             id={`rec-tab-${key}`}
             aria-controls={`rec-panel-${key}`}
-            tabIndex={focusableRecView === key ? 0 : -1}
-            onKeyDown={(e) => {
-              const tabs = Array.from(e.currentTarget.parentElement?.querySelectorAll<HTMLAnchorElement>('[role="tab"]') ?? []);
-              const idx = tabs.indexOf(e.currentTarget);
-              if (idx === -1) return;
-              let nextIdx: number;
-              if (e.key === "ArrowRight") nextIdx = (idx + 1) % tabs.length;
-              else if (e.key === "ArrowLeft") nextIdx = (idx - 1 + tabs.length) % tabs.length;
-              else if (e.key === "Home") nextIdx = 0;
-              else if (e.key === "End") nextIdx = tabs.length - 1;
-              else return;
-              e.preventDefault();
-              tabs[nextIdx].focus();
-              tabs[nextIdx].click();
-            }}
-            className={`${styles.lessonInnerTab}${recView === key ? ` ${styles.lessonInnerTabActive}` : ""}`}
+            onKeyDown={(event) => { if (event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}
             onClick={(event) => {
               if (!isPlainLeftClick(event)) return;
               event.preventDefault();
               setRecView(key);
-            }}>
-            <span className={styles.tabLabelWrap}>{label}</span>
-          </a>
+            }} />
         ))}
-      </div>
+      </Tabs>
 
       {/* Shared by the direct Record route and Announcements > From a recording.
           The owner's

@@ -1,60 +1,32 @@
 "use client";
 
-import { Button } from "@mui/material";
-import styles from "../../page.module.css";
+import { Tab, Tabs } from "@mui/material";
+import { subtabSx } from "../tabs/subtab-style";
 import type { PreviewTab } from "./types";
 
-type LessonPlanPreviewTabsProps = {
-  previewTab: PreviewTab;
-  onTabChange: (tab: PreviewTab) => void;
-};
+export const lessonPlanPreviewTabs: readonly { id: PreviewTab; label: string }[] = [
+  { id: "intro", label: "Introduction" },
+  { id: "slides", label: "Slides" },
+  { id: "examples", label: "Examples" },
+  { id: "assignment", label: "Assignment" },
+  { id: "rubric", label: "Rubric" },
+];
 
 export default function LessonPlanPreviewTabs({
+  tabsId,
   previewTab,
   onTabChange,
-}: LessonPlanPreviewTabsProps) {
+}: {
+  tabsId: string;
+  previewTab: PreviewTab;
+  onTabChange: (tab: PreviewTab) => void;
+}) {
   return (
-    <div className={styles.lessonInnerTabs}>
-      <Button
-        variant={previewTab === "intro" ? "contained" : "outlined"}
-        size="small"
-        className={styles.lessonInnerTab}
-        onClick={() => onTabChange("intro")}
-      >
-        Introduction
-      </Button>
-      <Button
-        variant={previewTab === "slides" ? "contained" : "outlined"}
-        size="small"
-        className={styles.lessonInnerTab}
-        onClick={() => onTabChange("slides")}
-      >
-        Slides
-      </Button>
-      <Button
-        variant={previewTab === "examples" ? "contained" : "outlined"}
-        size="small"
-        className={styles.lessonInnerTab}
-        onClick={() => onTabChange("examples")}
-      >
-        Examples
-      </Button>
-      <Button
-        variant={previewTab === "assignment" ? "contained" : "outlined"}
-        size="small"
-        className={styles.lessonInnerTab}
-        onClick={() => onTabChange("assignment")}
-      >
-        Assignment
-      </Button>
-      <Button
-        variant={previewTab === "rubric" ? "contained" : "outlined"}
-        size="small"
-        className={styles.lessonInnerTab}
-        onClick={() => onTabChange("rubric")}
-      >
-        Rubric
-      </Button>
-    </div>
+    <Tabs value={previewTab} onChange={(_, tab: PreviewTab) => onTabChange(tab)} aria-label="Lesson plan sections"
+      variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile sx={subtabSx}>
+      {lessonPlanPreviewTabs.map(({ id, label }) => (
+        <Tab key={id} value={id} label={label} disableRipple id={`${tabsId}-tab-${id}`} aria-controls={`${tabsId}-panel-${id}`} />
+      ))}
+    </Tabs>
   );
 }

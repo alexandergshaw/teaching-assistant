@@ -1,17 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { ReactNode } from "react";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
+import { Box, Tab, Tabs } from "@mui/material";
 import type { AssignmentPlan, SlideData } from "../actions";
 import { reviseLecturePlanTextAction, reviseLectureSlidesAction } from "../actions";
 import type { LlmProvider } from "@/lib/llm";
 import { looksLikeAssignmentSlug, stripAssignmentSlugPrefix } from "@/lib/assignment-name";
 import SlideGraphicPreview from "./SlideGraphicPreview";
+import { subtabSx } from "./tabs/subtab-style";
 import styles from "../page.module.css";
 
-type Tab = "slides" | "intro" | "instructions";
+type PreviewTab = "slides" | "intro" | "instructions";
 
 type LecturePlanPreviewModalProps = {
   plans: AssignmentPlan[];
@@ -174,7 +176,8 @@ export default function LecturePlanPreviewModal({
   onClose,
 }: LecturePlanPreviewModalProps) {
   const plan = plans[index];
-  const [activeTab, setActiveTab] = useState<Tab>("slides");
+  const [activeTab, setActiveTab] = useState<PreviewTab>("slides");
+  const tabsId = useId();
   const [editing, setEditing] = useState(false);
   const [reviseInstr, setReviseInstr] = useState("");
   const [reviseBusy, setReviseBusy] = useState(false);
@@ -241,7 +244,7 @@ export default function LecturePlanPreviewModal({
     setReviseInstr("");
   };
 
-  const tabs: { id: Tab; label: string; hidden?: boolean }[] = [
+  const tabs: { id: PreviewTab; label: string }[] = [
     { id: "slides", label: `Slides (${plan.slides.length + 1})` },
     { id: "intro", label: "Module Intro" },
     { id: "instructions", label: "Assignment Instructions" },
@@ -296,18 +299,19 @@ export default function LecturePlanPreviewModal({
           </button>
         </div>
 
-        <div className={styles.lessonInnerTabs}>
+        <Tabs value={activeTab} onChange={(_, tab: PreviewTab) => setActiveTab(tab)} aria-label="Lecture plan sections"
+          variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile sx={subtabSx}>
           {tabs.map((tab) => (
-            <button
+            <Tab
               key={tab.id}
-              type="button"
-              className={`${styles.lessonInnerTab} ${activeTab === tab.id ? styles.lessonInnerTabActive : ""}`}
-              onClick={() => setActiveTab(tab.id)}
-            >
-              {tab.label}
-            </button>
+              value={tab.id}
+              label={tab.label}
+              id={`${tabsId}-tab-${tab.id}`}
+              aria-controls={`${tabsId}-panel-${tab.id}`}
+              disableRipple
+            />
           ))}
-        </div>
+        </Tabs>
 
         {/* Section toolbar: edit/preview (prose), revise with AI, reset, download */}
         <div className={styles.editorToolbar}>
@@ -359,6 +363,11 @@ export default function LecturePlanPreviewModal({
 
         {reviseError && <p className={styles.error}>{reviseError}</p>}
 
+        {tabs.filter((tab) => tab.id !== activeTab).map((tab) => (
+          <div key={tab.id} role="tabpanel" hidden id={`${tabsId}-panel-${tab.id}`} aria-labelledby={`${tabsId}-tab-${tab.id}`} />
+        ))}
+        <Box role="tabpanel" id={`${tabsId}-panel-${activeTab}`} aria-labelledby={`${tabsId}-tab-${activeTab}`} tabIndex={0}
+          sx={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
         {/* Slides: inline-editable cards */}
         {activeTab === "slides" && (
           <ul className={styles.lessonSlideList}>
@@ -444,6 +453,7 @@ export default function LecturePlanPreviewModal({
               )}
             </div>
           ))}
+        </Box>
       </section>
     </div>
   );

@@ -16,6 +16,8 @@ import type { GithubRepo } from "@/lib/github";
 import Typeahead from "./ui/Typeahead";
 import { submitOnEnter } from "./ui/submitOnEnter";
 import Button from "@mui/material/Button";
+import Tab from "@mui/material/Tab";
+import Tabs from "@mui/material/Tabs";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import Checkbox from "@mui/material/Checkbox";
@@ -23,6 +25,7 @@ import FormControlLabel from "@mui/material/FormControlLabel";
 import { type VcOrgView, VC_ORG_VIEW_CHANGE_EVENT, VC_ORG_VIEWS } from "./vc-views";
 import { resolveVcOrgViewFromUrl, isVersionControlUrl, normalizeVcSubTab, normalizeVcOrgView, parseUrlState } from "../url-state";
 import { buildTabHref, isPlainLeftClick } from "./tabs/tab-link";
+import { subtabSx } from "./tabs/subtab-style";
 import styles from "../page.module.css";
 
 type OrgMember = { login: string; role: "admin" | "member" };
@@ -355,22 +358,20 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
     <div style={{ marginTop: "var(--space-5)" }}>
       <h3 style={{ margin: "0 0 var(--space-1)" }}>Manage {org}</h3>
 
-      <div className={styles.lessonInnerTabs} role="tablist" aria-label="Organization management">
+      <Tabs value={orgView} aria-label="Organization management" variant="scrollable" scrollButtons="auto" sx={subtabSx}>
         {VC_ORG_VIEWS.map(([key, label]) => (
-          <a key={key} href={viewHref(key)} role="tab" aria-selected={orgView === key}
-            className={`${styles.lessonInnerTab}${orgView === key ? ` ${styles.lessonInnerTabActive}` : ""}`}
+          <Tab key={key} component="a" href={viewHref(key)} value={key} label={label}
+            id={`vc-org-tab-${key}`} aria-controls={`vc-org-panel-${key}`}
             onKeyDown={(event) => { if (event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}
             onClick={(event) => {
               if (!isPlainLeftClick(event)) return;
               event.preventDefault();
               setOrgView(key);
-            }}>
-            <span className={styles.tabLabelWrap}>{label}</span>
-          </a>
+            }} />
         ))}
-      </div>
+      </Tabs>
 
-      <div style={{ display: orgView === "students" ? undefined : "none" }}>
+      <div role="tabpanel" id="vc-org-panel-students" aria-labelledby="vc-org-tab-students" hidden={orgView !== "students"}>
         <details className={styles.adaptDisclosure} style={{ marginTop: "var(--space-3)" }}>
           <summary>Members</summary>
         <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
@@ -511,7 +512,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
       </details>
       </div>
 
-      <div style={{ display: orgView === "management" ? undefined : "none" }}>
+      <div role="tabpanel" id="vc-org-panel-management" aria-labelledby="vc-org-tab-management" hidden={orgView !== "management"}>
         <details className={styles.adaptDisclosure} style={{ marginTop: "var(--space-3)" }}>
           <summary>Create pull request</summary>
         <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>

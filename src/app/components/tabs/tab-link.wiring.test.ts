@@ -4,12 +4,12 @@ import { stripComments as sourceCode } from "@/app/components/ui/modalAdoptionSo
 // URL-wins-over-localStorage cold-load ordering are asserted by reading source.
 // The real new-tab behaviour is an owner walk (scope residual R2).
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 import ts from "typescript";
 import { normalizeRecordingEntry, parseUrlState, resolveRecViewFromUrl } from "../../url-state";
-import { buildTabHref } from "./tab-link";
+import { buildTabHref, isPlainLeftClick } from "./tab-link";
 import { toolsStateFromRailItem } from "./tab-rails";
 
 const root = process.cwd();
@@ -47,36 +47,84 @@ function initializer(source: string, name: string): ts.Expression {
   return found!;
 }
 
+function jsxHandler(source: string, tag: string, attribute: string, anchorOnly = false) {
+  const ast = ts.createSourceFile("subject.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const found: ts.Expression[] = [];
+  const visit = (node: ts.Node) => {
+    if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && node.tagName.getText() === tag) {
+      const attributes = node.attributes.properties.filter(ts.isJsxAttribute);
+      if (!anchorOnly || attributes.some((prop) => prop.name.getText() === "href")) {
+        const prop = attributes.find((item) => item.name.getText() === attribute);
+        if (prop?.initializer && ts.isJsxExpression(prop.initializer) && prop.initializer.expression) found.push(prop.initializer.expression);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(ast);
+  expect(found).toHaveLength(1);
+  return found[0].getText();
+}
+
 describe("AC1/AC2: TabRail renders an anchor with a guarded click when given an href", () => {
-  it("renders an <a> carrying href and role=tab", () => {
-    expect(TAB_RAIL).toContain("<a");
-    expect(TAB_RAIL).toContain("href={option.href}");
-    expect(TAB_RAIL.split('role="tab"').length - 1).toBe(2); // anchor + button fallback
+  it("renders a controlled MUI tablist with linked tabs and a button fallback", () => {
+    expect(TAB_RAIL).toContain("<Tabs");
+    expect(TAB_RAIL).toContain('aria-label={ariaLabel}');
+    expect(TAB_RAIL).toContain('data-rail-tab={option.id}');
+    expect(TAB_RAIL).toMatch(/<Tab\b[^>]*component="a"\s+href=\{option.href\}/);
+    expect(TAB_RAIL).toMatch(/option.href === undefined[\s\S]*?<Tab key=\{option.id\}/);
   });
 
   it("only switches in-app, and only prevents the native navigation, on a plain left click", () => {
-    const anchor = between(TAB_RAIL, "<a", "</a>");
-    const guard = anchor.indexOf("isPlainLeftClick(");
-    expect(guard, "anchor onClick does not consult isPlainLeftClick").toBeGreaterThan(-1);
-    expect(anchor.indexOf("preventDefault()")).toBeGreaterThan(guard);
-    expect(anchor.indexOf("onChange(option.id)")).toBeGreaterThan(guard);
+    const onChange = vi.fn();
+    const handler = evaluate(jsxHandler(TAB_RAIL, "Tab", "onClick", true), { isPlainLeftClick, onChange, option: { id: "tools" } });
+    const defaults = { button: 0, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, defaultPrevented: false };
+    const preventDefault = vi.fn();
+    for (const patch of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }, { defaultPrevented: true }]) {
+      handler({ ...defaults, ...patch, preventDefault });
+    }
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+    handler({ ...defaults, preventDefault });
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(onChange).toHaveBeenCalledExactlyOnceWith("tools");
   });
 
-  it("keeps the keyboard handler on the anchor", () => {
-    expect(between(TAB_RAIL, "<a", "</a>")).toContain("onKeyDown={handleKeyDown}");
+  it("selects the tab focused by MUI after an arrow, Home or End", () => {
+    const onChange = vi.fn();
+    const selectionKeys = evaluate(initializer(TAB_RAIL, "selectionKeys").getText(), {});
+    expect([...selectionKeys]).toEqual(["ArrowLeft", "ArrowRight", "Home", "End"]);
+    const options = [{ id: "courses" }, { id: "recording" }];
+    const slots = evaluate(jsxHandler(TAB_RAIL, "Tabs", "slotProps"), { selectionKeys, options, value: "courses", onChange });
+    const focused = (id: string, contained = true) => ({ ownerDocument: { activeElement: { getAttribute: () => id } }, contains: () => contained });
+    const select = slots.list.onKeyDown;
+    select({ key: "ArrowRight", defaultPrevented: false, currentTarget: focused("recording") });
+    select({ key: "ArrowRight", defaultPrevented: true, ctrlKey: true, currentTarget: focused("recording") });
+    select({ key: " ", defaultPrevented: true, currentTarget: focused("recording") });
+    select({ key: "Home", defaultPrevented: true, currentTarget: focused("recording", false) });
+    select({ key: "Home", defaultPrevented: true, currentTarget: focused("courses") });
+    expect(onChange).not.toHaveBeenCalled();
+    select({ key: "ArrowRight", defaultPrevented: true, currentTarget: focused("recording") });
+    expect(onChange).toHaveBeenCalledExactlyOnceWith("recording");
+  });
+
+  it("activates a focused linked tab with Space while leaving modified keys alone", () => {
+    const handler = evaluate(jsxHandler(TAB_RAIL, "Tab", "onKeyDown", true), {});
+    const preventDefault = vi.fn();
+    const click = vi.fn();
+    const event = { key: " ", preventDefault, currentTarget: { click } };
+    handler({ ...event, ctrlKey: true });
+    expect(click).not.toHaveBeenCalled();
+    handler(event);
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(click).toHaveBeenCalledOnce();
   });
 });
 
 describe("AC1/AC2: ManualRail renders an anchor per destination when the parent supplies hrefFor", () => {
-  it("renders an <a> carrying the parent's href, guarded", () => {
+  it("passes the parent's hrefs and destination handler into the shared linked tablist", () => {
+    expect(MANUAL_RAIL).toContain("<TabRail");
     expect(MANUAL_RAIL).toContain("hrefFor?.(dest.id)");
-    const anchor = between(MANUAL_RAIL, "<a", "</a>");
-    expect(anchor).toContain("href={href}");
-    expect(anchor).toContain('role="tab"');
-    const guard = anchor.indexOf("isPlainLeftClick(");
-    expect(guard).toBeGreaterThan(-1);
-    expect(anchor.indexOf("preventDefault()")).toBeGreaterThan(guard);
-    expect(anchor.indexOf("onDestinationClick(dest.id)")).toBeGreaterThan(guard);
+    expect(MANUAL_RAIL).toContain("onChange={onDestinationClick}");
   });
 });
 

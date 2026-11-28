@@ -11,8 +11,7 @@ import {
   type AnnouncementsView,
   type AutomateView,
 } from "./manual-rail";
-import styles from "../../page.module.css";
-import { isPlainLeftClick } from "../tabs/tab-link";
+import { TabRail } from "../tabs/TabRail";
 import type { ContentView } from "../content-tab/constants";
 
 /**
@@ -75,47 +74,11 @@ export function ManualRail({
   if (!innerDestinations || !ariaLabel) return null;
 
   return (
-    <div className={styles.manualSubnav}>
-      <div className={styles.lessonInnerTabs} role="tablist" aria-label={getInnerNavAriaLabel(manualView) ?? undefined}>
-        {innerDestinations.map((dest) => {
-          const className = `${styles.lessonInnerTab}${dest.id === activeId ? ` ${styles.lessonInnerTabActive}` : ""}`;
-          const href = hrefFor?.(dest.id);
-          // With an href the destination is a real anchor: ctrl/cmd/shift/middle
-          // click opens it in a new browser tab, a plain left click switches
-          // in-app as before.
-          if (href !== undefined) {
-            return (
-              <a
-                key={dest.id}
-                href={href}
-                role="tab"
-                aria-selected={dest.id === activeId}
-                className={className}
-                style={{ textDecoration: "none" }}
-                onClick={(e) => {
-                  if (!isPlainLeftClick(e)) return;
-                  e.preventDefault();
-                  onDestinationClick(dest.id);
-                }}
-              >
-                {dest.label}
-              </a>
-            );
-          }
-          return (
-            <button
-              key={dest.id}
-              type="button"
-              role="tab"
-              aria-selected={dest.id === activeId}
-              className={className}
-              onClick={() => onDestinationClick(dest.id)}
-            >
-              {dest.label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
+    <TabRail
+      ariaLabel={ariaLabel}
+      options={innerDestinations.map((dest) => ({ id: dest.id, label: dest.label, href: hrefFor?.(dest.id) }))}
+      value={activeId}
+      onChange={onDestinationClick}
+    />
   );
 }

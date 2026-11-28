@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Tab from "@mui/material/Tab";
+import Tabs from "@mui/material/Tabs";
 import {
   listMyOrgsAction,
   listOrgReposAction,
@@ -16,6 +18,7 @@ import { useVcCounts } from "./VcCounts";
 import { type VcSubTab, type VcOrgView, VC_SUB_TAB_CHANGE_EVENT, VC_SUB_TABS } from "./vc-views";
 import { resolveVcSubTabFromUrl, isVersionControlUrl, normalizeVcSubTab, parseUrlState } from "../url-state";
 import { buildTabHref, isPlainLeftClick } from "./tabs/tab-link";
+import { subtabSx } from "./tabs/subtab-style";
 import styles from "../page.module.css";
 
 const VC_ORG_KEY = "ta-vc-org";
@@ -133,22 +136,23 @@ export default function VersionControlTab({ vcOrgView }: { vcOrgView: VcOrgView 
 
   return (
     <div className={styles.form}>
-      <div className={styles.lessonInnerTabs} role="tablist" aria-label="Version control sections" style={{ marginBottom: "var(--space-1)" }}>
+      <Tabs value={subTab} aria-label="Version control sections" variant="scrollable" scrollButtons="auto" sx={{ ...subtabSx, mb: "var(--space-1)" }}>
         {VC_SUB_TABS.map(([key, label]) => (
-          <a key={key} href={viewHref(key)} role="tab" aria-selected={subTab === key}
-            className={`${styles.lessonInnerTab}${subTab === key ? ` ${styles.lessonInnerTabActive}` : ""}`}
+          <Tab key={key} component="a" href={viewHref(key)} value={key}
+            label={<span className={styles.tabLabelWrap}>{label}{key === "repos" && vcAttention > 0 && <span className={styles.navBadge}>{vcAttention}</span>}</span>}
+            id={`vc-tab-${key}`} aria-controls={`vc-panel-${key}`}
             onKeyDown={(event) => { if (event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}
             onClick={(event) => {
               if (!isPlainLeftClick(event)) return;
               event.preventDefault();
               setSubTab(key);
-            }}>
-            <span className={styles.tabLabelWrap}>{label}{key === "repos" && vcAttention > 0 && <span className={styles.navBadge}>{vcAttention}</span>}</span>
-          </a>
+            }} />
         ))}
-      </div>
+      </Tabs>
 
-      {subTab === "orgs" && (
+      <div role="tabpanel" id="vc-panel-orgs" aria-labelledby="vc-tab-orgs" hidden={subTab !== "orgs"}
+        className={subTab === "orgs" ? styles.form : undefined}>
+        {subTab === "orgs" && (
         <>
           <div className={styles.field}>
             <label>Organization</label>
@@ -170,12 +174,15 @@ export default function VersionControlTab({ vcOrgView }: { vcOrgView: VcOrgView 
           </div>
           {selectedOrg && <OrgManagementPanel org={selectedOrg} repos={repos} onReposChanged={() => setOrgReposNonce((n) => n + 1)} />}
         </>
-      )}
+        )}
+      </div>
 
-      {subTab === "repos" && <RepoDetail />}
+      <div role="tabpanel" id="vc-panel-repos" aria-labelledby="vc-tab-repos" hidden={subTab !== "repos"}>
+        {subTab === "repos" && <RepoDetail />}
+      </div>
 
       {/* Keep BulkRepoActionsPanel mounted to preserve state across tab switches */}
-      <div style={{ display: subTab === "bulk" ? undefined : "none" }}>
+      <div role="tabpanel" id="vc-panel-bulk" aria-labelledby="vc-tab-bulk" hidden={subTab !== "bulk"}>
         {/* Bulk actions must offer every repo the token can see - personal and
         collaborator repos included - not just the selected org + templates. */}
         <BulkRepoActionsPanel repos={[...new Set([...myRepos, ...mergedRepos].map((r) => r.fullName))].sort()} active={subTab === "bulk"} />

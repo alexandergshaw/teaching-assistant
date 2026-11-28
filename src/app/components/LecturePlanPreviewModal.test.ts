@@ -1,6 +1,35 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import { isValidElement } from "react";
 import { renderInline } from "./LecturePlanPreviewModal";
+
+describe("lesson plan preview tabs", () => {
+  const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
+
+  it("connects lecture plan tabs to the matching panel without replacing the editing controls", () => {
+    const modal = read("./LecturePlanPreviewModal.tsx");
+    expect(modal).toContain('<Tabs value={activeTab} onChange={(_, tab: PreviewTab) => setActiveTab(tab)}');
+    expect(modal).toContain('aria-controls={`${tabsId}-panel-${tab.id}`}');
+    expect(modal).toContain('id={`${tabsId}-tab-${tab.id}`}');
+    expect(modal).toContain('role="tabpanel" hidden id={`${tabsId}-panel-${tab.id}`} aria-labelledby={`${tabsId}-tab-${tab.id}`}');
+    expect(modal).toContain('role="tabpanel" id={`${tabsId}-panel-${activeTab}`} aria-labelledby={`${tabsId}-tab-${activeTab}`}');
+    expect(modal).toContain('onClick={activeTab === "slides" ? handleReviseSlides : handleReviseProse}');
+  });
+
+  it("uses the same tab IDs in the inline preview selector and its five content panels", () => {
+    const strip = read("./lesson-plan/LessonPlanPreviewTabs.tsx");
+    const preview = read("./lesson-plan/index.tsx");
+    expect(strip).toContain('<Tabs value={previewTab} onChange={(_, tab: PreviewTab) => onTabChange(tab)}');
+    expect(strip).toContain('id={`${tabsId}-tab-${id}`} aria-controls={`${tabsId}-panel-${id}`}');
+    expect(preview).toContain('tabsId={tabsId}');
+    expect(preview).toContain('role="tabpanel" hidden id={`${tabsId}-panel-${id}`} aria-labelledby={`${tabsId}-tab-${id}`}');
+    expect(preview).toContain('role="tabpanel" id={`${tabsId}-panel-${previewTab}`} aria-labelledby={`${tabsId}-tab-${previewTab}`}');
+    for (const tab of ["intro", "slides", "examples", "assignment", "rubric"]) {
+      expect(strip).toContain(`id: "${tab}"`);
+      expect(preview).toContain(`previewTab === "${tab}"`);
+    }
+  });
+});
 
 // Entry 159 AC1.1 / loose end: renderInline carried the SAME greedy bare-URL
 // regex docx-blocks.ts's INLINE_LINK_RE had before entry 159 AC1 fixed it -

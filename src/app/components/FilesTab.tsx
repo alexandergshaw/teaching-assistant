@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Tab from "@mui/material/Tab";
+import Tabs from "@mui/material/Tabs";
 import TabHeader from "./TabHeader";
 import { CourseCopyModal } from "./content-tab/CourseCopyModal";
 import CartridgeDropPanel from "./CartridgeDropPanel";
@@ -45,6 +47,7 @@ import { classifyUploadFile } from "./files/upload-classify";
 import { readDuration } from "./files/read-duration";
 import { addFileToModule } from "./files/add-to-module";
 import { isPlainLeftClick } from "./tabs/tab-link";
+import { subtabSx } from "./tabs/subtab-style";
 import {
   buildUrlSearch,
   FILES_VIEW_CHANGE_EVENT,
@@ -52,7 +55,8 @@ import {
   parseUrlState,
   resolveFilesViewFromUrl,
 } from "../url-state";
-import type { MouseEvent as ReactMouseEvent } from "react";
+
+const FILE_VIEWS = [["library", "Library"], ["submissions", "Submissions"]] as const;
 
 export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflowId: string) => void } = {}) {
   const { supabase, user } = useSupabase();
@@ -745,34 +749,18 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
         }}
         tabIndex={-1}
       >
-        <div className={styles.lessonInnerTabs} role="tablist" aria-label="Files">
-          <a
-            href={filesViewHref("library")}
-            role="tab"
-            aria-selected={filesView === "library"}
-            className={`${styles.lessonInnerTab}${filesView === "library" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-            onClick={(event: ReactMouseEvent<HTMLAnchorElement>) => {
-              if (!isPlainLeftClick(event)) return;
-              event.preventDefault();
-              setFilesView("library");
-            }}
-          >
-            Library
-          </a>
-          <a
-            href={filesViewHref("submissions")}
-            role="tab"
-            aria-selected={filesView === "submissions"}
-            className={`${styles.lessonInnerTab}${filesView === "submissions" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-            onClick={(event: ReactMouseEvent<HTMLAnchorElement>) => {
-              if (!isPlainLeftClick(event)) return;
-              event.preventDefault();
-              setFilesView("submissions");
-            }}
-          >
-            Submissions
-          </a>
-        </div>
+        <Tabs value={filesView} aria-label="Files" variant="scrollable" scrollButtons="auto" sx={subtabSx}>
+          {FILE_VIEWS.map(([key, label]) => (
+            <Tab key={key} component="a" href={filesViewHref(key)} value={key} label={label}
+              id={`files-tab-${key}`} aria-controls={`files-panel-${key}`}
+              onKeyDown={(event) => { if (event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}
+              onClick={(event) => {
+                if (!isPlainLeftClick(event)) return;
+                event.preventDefault();
+                setFilesView(key);
+              }} />
+          ))}
+        </Tabs>
       </div>
 
       {/* S1 (docs/ux-audit-files-content.md): sole reporting channel for
@@ -789,7 +777,9 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
         </div>
       )}
 
-      {filesView === "library" && (
+      <div role="tabpanel" id="files-panel-library" aria-labelledby="files-tab-library" hidden={filesView !== "library"}
+        style={filesView === "library" ? { display: "flex", flexDirection: "column", gap: "var(--space-6)" } : undefined}>
+        {filesView === "library" && (
         <>
           {status === "loading" && (
             <div className={styles.loadingState} role="status" aria-live="polite">
@@ -886,9 +876,12 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
             />
           )}
         </>
-      )}
+        )}
+      </div>
 
-      {filesView === "submissions" && <CartridgeDropPanel />}
+      <div role="tabpanel" id="files-panel-submissions" aria-labelledby="files-tab-submissions" hidden={filesView !== "submissions"}>
+        {filesView === "submissions" && <CartridgeDropPanel />}
+      </div>
 
       {filePreview.file && (
         <FilePreviewModal

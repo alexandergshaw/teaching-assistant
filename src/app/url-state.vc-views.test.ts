@@ -94,12 +94,17 @@ describe("Version Control native links", () => {
       }
     });
     it(`${c.field} anchors guard native clicks and preserve Space activation`, () => {
-      expect(component).toContain('<a key={key} href={viewHref(key)} role="tab"');
-      expect(component).toContain(`aria-selected={${c.state} === key}`);
+      const prefix = c.field === "vcSubTab" ? "vc" : "vc-org";
+      expect(component).toContain(`<Tabs value={${c.state}} aria-label=`);
+      expect(component).toContain('<Tab key={key} component="a" href={viewHref(key)} value={key}');
+      expect(component).toContain(`id={\`${prefix}-tab-\${key}\`} aria-controls={\`${prefix}-panel-\${key}\`}`);
+      for (const key of c.values) {
+        expect(component).toContain(`role="tabpanel" id="${prefix}-panel-${key}" aria-labelledby="${prefix}-tab-${key}" hidden={${c.state} !== "${key}"}`);
+      }
       expect(component).toContain('event.key === " "');
       expect(component).toContain('event.currentTarget.click();');
       const start = component.indexOf('onClick={(event) => {');
-      const end = component.indexOf('}}>', start);
+      const end = component.indexOf('}} />', start);
       const expr = component.slice(start + 'onClick={'.length, end + 1);
       const set = vi.fn(); const handler = execute(expr, { isPlainLeftClick, [c.setter]: set, key: c.values[1] });
       const plain = { button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, defaultPrevented: false };

@@ -142,18 +142,41 @@ describe("Recording URL contract", () => {
 });
 
 describe("Recording anchor and synchronization source contracts", () => {
-  const strip = between(component, '<div className={styles.lessonInnerTabs} role="tablist"', "        ))}");
+  const strip = between(component, "<Tabs value={selectedRecTab}", "</Tabs>");
   it("renders the mapped key's anchor and preserves tab semantics and keyboard activation", () => {
     expect(strip).toContain('aria-label="Recording tools"');
     expect(strip).toContain("REC_VIEWS.map(([key, label])");
-    expect(strip).toContain('<a key={key} href={recViewHref(key)} role="tab"');
-    for (const token of ['aria-selected={recView === key}', 'id={`rec-tab-${key}`}', 'aria-controls={`rec-panel-${key}`}', 'tabIndex={focusableRecView === key ? 0 : -1}', 'querySelectorAll<HTMLAnchorElement>', 'e.key === "ArrowRight"', 'e.key === "ArrowLeft"', 'e.key === "Home"', 'e.key === "End"', 'tabs[nextIdx].focus();', 'tabs[nextIdx].click();', 'className={`${styles.lessonInnerTab}']) expect(strip).toContain(token);
-    expect(strip).toContain('</a>');
+    expect(strip).toContain('<Tab key={key} component="a" href={recViewHref(key)} value={key} label={label}');
+    for (const token of ['data-rec-view={key}', 'id={`rec-tab-${key}`}', 'aria-controls={`rec-panel-${key}`}', 'slotProps={{ list: { onKeyDown: selectFocusedRecTab } }}', 'event.key === " "', 'event.currentTarget.click();']) expect(strip).toContain(token);
+    expect(strip).not.toMatch(/tabIndex=|querySelectorAll|selectionFollowsFocus/);
     expect(component).toContain('announcementsActive ? "announcement" : storedRecView');
     for (const view of [...expected, "announcement"]) {
-      expect(variableArrow(component, "focusableRecView", { REC_VIEWS, recView: view, DEFAULT_REC_VIEW }))
-        .toBe(expectedStrip.some(([visible]) => visible === view) ? view : "lecturevideos");
+      expect(variableArrow(component, "selectedRecTab", { REC_VIEWS, recView: view }))
+        .toBe(expectedStrip.some(([visible]) => visible === view) ? view : false);
     }
+  });
+  it("auto-activates the MUI-roved tab only after a handled keyboard event", () => {
+    const select = vi.fn();
+    const onKeyDown = variableArrow(component, "selectFocusedRecTab", { REC_VIEWS, recView: "lecturevideos", setRecView: select });
+    const focused = { getAttribute: vi.fn(() => "moduledeck") };
+    const list = { contains: vi.fn(() => true), ownerDocument: { activeElement: focused } };
+    for (const key of ["ArrowLeft", "ArrowRight", "Home", "End"]) {
+      onKeyDown({ key, defaultPrevented: true, currentTarget: list });
+      expect(select).toHaveBeenCalledExactlyOnceWith("moduledeck");
+      select.mockClear();
+    }
+    expect(focused.getAttribute).toHaveBeenCalledWith("data-rec-view");
+    onKeyDown({ key: "ArrowLeft", defaultPrevented: false, currentTarget: list });
+    for (const modification of [{ key: "Tab" }, { ctrlKey: true }, { altKey: true }, { metaKey: true }, { shiftKey: true }]) {
+      onKeyDown({ key: "ArrowLeft", defaultPrevented: true, currentTarget: list, ...modification });
+    }
+    list.contains.mockReturnValueOnce(false);
+    onKeyDown({ key: "Home", defaultPrevented: true, currentTarget: list });
+    for (const key of ["lecturevideos", "bogus"]) {
+      focused.getAttribute.mockReturnValueOnce(key);
+      onKeyDown({ key: "End", defaultPrevented: true, currentTarget: list });
+    }
+    expect(select).not.toHaveBeenCalled();
   });
   it("builds each mapped key's destination from an unrelated current parent", () => {
     const href = variableArrow(component, "recViewHref", { window: { location: { search: "?tab=courses" } }, parseUrlState, buildTabHref, storedRecView: "messages" });
@@ -162,7 +185,7 @@ describe("Recording anchor and synchronization source contracts", () => {
     }
   });
   it("guards before preventDefault and setter and executes the modifier matrix", () => {
-    const click = between(strip, "onClick={(event) => {", "            }}>");
+    const click = between(strip, "onClick={(event) => {", "\n            }} />") + "}";
     expect(click).toMatch(/onClick=\{\(event\) => \{\s*if \(!isPlainLeftClick\(event\)\) return;\s*event.preventDefault\(\);\s*setRecView\(key\);/);
     const select = vi.fn();
     const handler = execute(click.slice("onClick={".length), { isPlainLeftClick, setRecView: select, key: "moduledeck" });

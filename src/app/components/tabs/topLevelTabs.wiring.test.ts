@@ -303,7 +303,7 @@ describe("the merged tabs are one navigation level deep", () => {
     ).not.toContain("MANUAL_VIEW_ORDER");
     // Exactly one tablist left - the inner destinations row, which is the
     // level BELOW a rail item and was never in scope to remove.
-    expect(source.split('role="tablist"').length - 1).toBe(1);
+    expect(source.split("<TabRail").length - 1).toBe(1);
   });
 
   // I2 (docs/tools-grading-subtab-architecture.md section 6.1): the inner
@@ -320,7 +320,7 @@ describe("the merged tabs are one navigation level deep", () => {
       "ManualRail.tsx's aria-label is not fed from getInnerNavAriaLabel(...) - a hand-written " +
         "literal or ternary here is exactly how a new inner nav goes out announced under the " +
         "wrong name with every other gate green."
-    ).toContain("aria-label={getInnerNavAriaLabel(");
+    ).toMatch(/const ariaLabel = getInnerNavAriaLabel\(manualView\);[\s\S]*?ariaLabel=\{ariaLabel\}/);
     expect(
       source,
       'ManualRail.tsx still hard-codes "LMS views" - the label must come from getInnerNavAriaLabel'

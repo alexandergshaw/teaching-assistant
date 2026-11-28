@@ -1,8 +1,10 @@
 "use client";
 
+import { useId } from "react";
+import { Box } from "@mui/material";
 import styles from "../../page.module.css";
 import LessonPlanPreviewHeader from "./LessonPlanPreviewHeader";
-import LessonPlanPreviewTabs from "./LessonPlanPreviewTabs";
+import LessonPlanPreviewTabs, { lessonPlanPreviewTabs } from "./LessonPlanPreviewTabs";
 import LessonPlanPreviewIntroTab from "./LessonPlanPreviewIntroTab";
 import LessonPlanPreviewSlidesTab from "./LessonPlanPreviewSlidesTab";
 import LessonPlanPreviewAssignmentTab from "./LessonPlanPreviewAssignmentTab";
@@ -33,6 +35,7 @@ export default function LessonPlanPreview({
   onAttach,
   icons,
 }: LessonPlanPreviewProps) {
+  const tabsId = useId();
   const {
     previewTab,
     setPreviewTab,
@@ -75,10 +78,16 @@ export default function LessonPlanPreview({
         />
 
         <LessonPlanPreviewTabs
+          tabsId={tabsId}
           previewTab={previewTab}
           onTabChange={setPreviewTab}
         />
 
+        {lessonPlanPreviewTabs.filter(({ id }) => id !== previewTab).map(({ id }) => (
+          <div key={id} role="tabpanel" hidden id={`${tabsId}-panel-${id}`} aria-labelledby={`${tabsId}-tab-${id}`} />
+        ))}
+        <Box role="tabpanel" id={`${tabsId}-panel-${previewTab}`} aria-labelledby={`${tabsId}-tab-${previewTab}`} tabIndex={0}
+          sx={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
         {previewTab === "intro" && (
           <LessonPlanPreviewIntroTab
             introPreview={introPreview}
@@ -163,6 +172,8 @@ export default function LessonPlanPreview({
             icons={icons}
           />
         )}
+
+        </Box>
 
         <LessonPlanPreviewRevision
           revisionPrompt={revisionPrompt}

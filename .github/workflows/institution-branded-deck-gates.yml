@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 51085b162933e4defce49487ff81b90a0f8e393d
+          ref: 8c4153d85a04eadc7fa83a44c901a364dc6dc4e4
           fetch-depth: 0
           persist-credentials: false
       - name: Check out exact tab release candidate
@@ -252,7 +252,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 51085b162933e4defce49487ff81b90a0f8e393d
+          ref: 8c4153d85a04eadc7fa83a44c901a364dc6dc4e4
           fetch-depth: 0
       - name: Check out exact tab release candidate
         run: |

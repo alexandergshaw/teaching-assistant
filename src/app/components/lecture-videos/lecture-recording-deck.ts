@@ -4,6 +4,7 @@ import { VIDEO_MAX_BYTES, VIDEO_MAX_SECONDS } from "../walkthrough-announcement/
 import { transcribeLectureRecordingSpeech } from "./lecture-caption-transcription";
 import { withBlobUrl } from "./lectureMedia";
 import { materialContext, partName, type LecturePart, type LectureProject, type LectureSlideDeck } from "./lectureProject";
+import { openLectureDeckBrand } from "./lecture-deck-branding";
 
 const MAX_DECK_FRAMES = 18;
 const DECK_READ_TIMEOUT_MS = 240_000;
@@ -16,6 +17,7 @@ const browserDeck = {
   }),
   speech: transcribeLectureRecordingSpeech,
   slides: generateSlidesAction,
+  brand: openLectureDeckBrand,
   async pptx(slides: { presentationTitle: string; slides: { title: string; bullets: string[] }[] }) {
     const { buildSlidesPptx } = await import("@/lib/pptx");
     return buildSlidesPptx(slides);
@@ -31,10 +33,16 @@ export function lectureSlideDeckBlocker(part: LecturePart): string | undefined {
 
 export async function buildLectureRecordingDeck(
   part: LecturePart, index: number, project: LectureProject, signal: AbortSignal,
-  progress: (value: string) => void, runtime = browserDeck,
+  progress: (value: string) => void, runtime: Omit<typeof browserDeck, "brand"> & Partial<Pick<typeof browserDeck, "brand">> = browserDeck,
+  account?: string,
 ): Promise<LectureSlideDeck> {
   const blocker = lectureSlideDeckBlocker(part);
   if (blocker) throw new Error(blocker);
+  signal.throwIfAborted();
+  const template = project.slideDeckBranding;
+  if (template && !account) throw new Error("Sign in to use the selected institution template.");
+  if (template) progress("Checking the institution’s PowerPoint template…");
+  const brand = template && account ? await (runtime.brand ?? openLectureDeckBrand)(account, template, signal) : undefined;
   signal.throwIfAborted();
   const readSignal = AbortSignal.any([signal, AbortSignal.timeout(DECK_READ_TIMEOUT_MS)]);
   progress("Reading the original recording…");
@@ -65,11 +73,16 @@ export async function buildLectureRecordingDeck(
   ].filter(Boolean).join("\n\n");
 
   progress("Drafting editable slides…");
-  const draft = await runtime.slides(context, "gemini", { frames });
+  const draft = await runtime.slides(context, "gemini", { frames, ...(brand && { brandFit: brand.fit }) });
   signal.throwIfAborted();
   if ("error" in draft) throw new Error(draft.error);
 
   progress("Preparing the PowerPoint file…");
+  if (brand && template) {
+    const blob = await brand.fill(draft.slides);
+    signal.throwIfAborted();
+    return { blob, title: draft.presentationTitle, warnings, branding: template };
+  }
   const bytes = await runtime.pptx(draft);
   signal.throwIfAborted();
   if (!bytes.byteLength) throw new Error("The PowerPoint file could not be created.");

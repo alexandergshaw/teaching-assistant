@@ -21,6 +21,7 @@ import { partFromVideo, readBase64 } from "./lectureMedia";
 import { assignCues, changePartCue, materialContext, missingCueVoices, partName, removeProjectVoiceReference, type LecturePart, type LectureProject } from "./lectureProject";
 import { draftPartCues, synthesizeCue } from "./lectureWorkflow";
 import { useLectureProject } from "./useLectureProject";
+import { useLectureInstitutionDecks } from "./useLectureInstitutionDecks";
 
 type Confirmation = { title: string; message: string; action: () => void };
 type Voice = { voiceId: string; name: string; category: string };
@@ -83,6 +84,7 @@ function LectureWorkspace({ account, active, canManageVoices }: { account: strin
   }, [active]);
   const index = project.parts.findIndex((part) => part.id === project.selectedId);
   const selected = project.parts[index];
+  const institutionDecks = useLectureInstitutionDecks(account, active && !!selected);
   const disabled = Boolean(busy) || capturing;
 
   const run: RunLectureTask = (label, task) => {
@@ -392,7 +394,8 @@ function LectureWorkspace({ account, active, canManageVoices }: { account: strin
       </Section>
 
       {selected && <LecturePartEditor key={selected.id} part={selected} project={project} index={index} disabled={disabled}
-        update={(change) => updatePart(selected.id, change)} run={run} confirm={confirm} openContext={openContext} />}
+        update={(change) => updatePart(selected.id, change)} run={run} confirm={confirm} openContext={openContext} institutionDecks={institutionDecks}
+        onDeckBrandingChange={(value) => field("slideDeckBranding", value)} />}
 
       <LectureDownloads parts={project.parts} disabled={disabled} />
 

@@ -1,4 +1,5 @@
 import { lectureCaptionMode, type LectureCaptionSettings } from "./lecture-captions";
+import type { LectureDeckBranding } from "./lecture-deck-branding";
 
 export type LectureAudio = {
   blob: Blob;
@@ -14,7 +15,7 @@ export type LectureCue = {
   audio?: LectureAudio;
 };
 
-export type LectureSlideDeck = { blob: Blob; title: string; warnings: string[] };
+export type LectureSlideDeck = { blob: Blob; title: string; warnings: string[]; branding?: LectureDeckBranding };
 
 export type LecturePart = {
   id: string;
@@ -51,6 +52,7 @@ export type LectureProject = {
   sample: string;
   voice?: { id: string; name: string };
   voiceSelectionRequired?: boolean;
+  slideDeckBranding?: LectureDeckBranding;
   parts: LecturePart[];
   selectedId: string | null;
   announcementTitle: string;

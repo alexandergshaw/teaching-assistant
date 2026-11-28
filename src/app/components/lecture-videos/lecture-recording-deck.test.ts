@@ -26,6 +26,36 @@ function createBrowserMock() {
 }
 
 describe("recording PowerPoint workflow", () => {
+  it("fits drafts to the selected institution and passes only layout capacity to Gemini", async () => {
+    const runtime = createBrowserMock();
+    const branding = { acronym: "WNCC", fileId: "selected", fileName: "Private campus master.potx" };
+    const fit = { kind: "fixed" as const, bulletSlots: [1] };
+    const bytes = new Blob(["branded output"]);
+    const fill = vi.fn(async () => bytes);
+    const brand = vi.fn(async () => ({ fit, fill }));
+    const signal = new AbortController().signal;
+    const out = await buildLectureRecordingDeck(part, 0, { ...project, slideDeckBranding: branding }, signal, vi.fn(), { ...runtime, brand }, "account");
+    expect(brand).toHaveBeenCalledExactlyOnceWith("account", branding, signal);
+    expect(runtime.slides).toHaveBeenCalledExactlyOnceWith(expect.not.stringContaining(branding.fileName), "gemini", { frames, brandFit: fit });
+    expect(fill).toHaveBeenCalledExactlyOnceWith(draft.slides);
+    expect(runtime.pptx).not.toHaveBeenCalled();
+    expect(out).toMatchObject({ blob: bytes, branding });
+  });
+
+  it("does not substitute standard PowerPoint or begin paid work when the selected template is missing", async () => {
+    const runtime = createBrowserMock();
+    const brand = vi.fn(async () => { throw new Error("Template missing"); });
+    const branding = { acronym: "WNCC", fileId: "deleted", fileName: "Campus.pptx" };
+    const saved = { ...part, slideDeck: { title: "Earlier deck", blob: new Blob(["saved deck"]), warnings: [] } };
+    await expect(buildLectureRecordingDeck(saved, 0, { ...project, slideDeckBranding: branding }, new AbortController().signal, vi.fn(), { ...runtime, brand }, "account"))
+      .rejects.toThrow("Template missing");
+    expect(runtime.frames).not.toHaveBeenCalled();
+    expect(runtime.speech).not.toHaveBeenCalled();
+    expect(runtime.slides).not.toHaveBeenCalled();
+    expect(runtime.pptx).not.toHaveBeenCalled();
+    expect(saved.slideDeck.title).toBe("Earlier deck");
+  });
+
   it("combines original speech, visible evidence, and project context into an editable PPTX", async () => {
     const runtime = createBrowserMock();
     const slideDeck = await buildLectureRecordingDeck(part, 0, project, new AbortController().signal, vi.fn(), runtime);

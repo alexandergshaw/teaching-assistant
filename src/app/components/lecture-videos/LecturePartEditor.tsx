@@ -13,6 +13,8 @@ import { lectureDownloads } from "./lecture-downloads";
 import { audioFromBlob, readBase64 } from "./lectureMedia";
 import { assignCues, changePartCue, cueTimingError, missingCueVoices, partName, renderBlocker, type LectureCue, type LecturePart, type LectureProject } from "./lectureProject";
 import { draftPartCues, synthesizeCue } from "./lectureWorkflow";
+import type { LectureDeckBranding } from "./lecture-deck-branding";
+import type { LectureInstitutionDecks } from "./useLectureInstitutionDecks";
 
 export type RunLectureTask = (label: string, task: (signal: AbortSignal) => Promise<void>) => void;
 
@@ -25,9 +27,11 @@ type Props = {
   run: RunLectureTask;
   confirm: (title: string, message: string, action: () => void, trigger: HTMLElement | null) => void;
   openContext: () => void;
+  institutionDecks: LectureInstitutionDecks;
+  onDeckBrandingChange: (value: LectureDeckBranding | undefined) => void;
 };
 
-export default function LecturePartEditor({ part, project, index, disabled, update, run, confirm, openContext }: Props) {
+export default function LecturePartEditor({ part, project, index, disabled, update, run, confirm, openContext, institutionDecks, onDeckBrandingChange }: Props) {
   const sourceUrl = useBlobUrl(part.source);
   const outputUrl = useBlobUrl(part.output);
   const captionFile = useMemo(() => lectureCaptionBlob(part), [part]);
@@ -277,7 +281,7 @@ export default function LecturePartEditor({ part, project, index, disabled, upda
       <LectureCaptions part={part} disabled={disabled} update={update} run={run} confirm={confirm} downloads={downloads} />
 
       <LectureSlideDeckOutput part={part} project={project} index={index} disabled={disabled} update={update} run={run}
-        download={downloads.find((file) => file.kind === "slides")} />
+        download={downloads.find((file) => file.kind === "slides")} institutionDecks={institutionDecks} onBrandingChange={onDeckBrandingChange} />
     </Stack>
   );
 }

@@ -657,7 +657,10 @@ export interface Database {
         Relationships: [];
       };
       repo_grade_automatic_runs: {
-        Row: { id: string; user_id: string; created_at: string; phase: string };
+        Row: {
+          id: string; user_id: string; created_at: string; phase: string;
+          lease: string | null; lease_until: string | null; targeted_paused: boolean;
+        };
         Insert: never;
         Update: never;
         Relationships: [];

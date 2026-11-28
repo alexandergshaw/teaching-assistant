@@ -155,7 +155,8 @@ describe("class repository results wiring", () => {
   });
 
   it("suppresses the idle browser grade status beside a saved attempt and leaves manual grading reachable", () => {
-    expect(grid).toContain('requests={findTargetRequests(targetRequests, targetCourseId, folder, repo.name)}');
+    expect(grid).toContain("const requests = findTargetRequests(targetRequests, targetCourseId, folder, repo.name);");
+    expect(grid).toContain("requests={requests} showRequestStatus={false}");
     expect(cellControl).toContain('(!hasSavedResult || status !== "not-started")');
     expect(cellControl).toContain('placeholder={hasSavedResult ? "Browser score" : "Score"}');
     expect(cellControl).toMatch(/status !== "not-started"[\s\S]*?<RepoGradeStatusChip[\s\S]*?<RepoGradeActionsMenu[\s\S]*?<MenuItem key="grade"[\s\S]*?else onGrade\(\);/);

@@ -8,6 +8,8 @@ import RepoGradeInstructorReview, { RepoGradeHistoricalReview } from "./RepoGrad
 import RepoGradeProfileSettings from "./RepoGradeProfileSettings";
 import RepoGradeRubricScores from "./RepoGradeRubricScores";
 import RepoGradeStatusChip from "./RepoGradeStatusChip";
+import RepoGradeCellProgress from "./RepoGradeCellProgress";
+import type { GradeCellProgress } from "./repoGradeProgress";
 import type { RepoGradeColumn } from "./repoGradesRows";
 import styles from "./repo-grades-dashboard.module.css";
 
@@ -54,12 +56,13 @@ export function RepoGradeAutomaticBlockNotice({ discoveryExplanation, pastRunSta
   );
 }
 
-export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrder = [], courseId }: {
+export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrder = [], courseId, progress }: {
   repo: RepoGradeMatrix["rows"][number]["repos"][number];
   folder: string;
   scanStatus?: "ungraded" | "missing-folder" | "scan-error";
   criterionOrder?: readonly string[];
   courseId?: string;
+  progress?: GradeCellProgress;
 }) {
   const cell = repo.cells.get(folder);
   const rawNoSubmission = cell?.automaticBlocks?.find((item) => item.noSubmission && !item.noSubmissionStale);
@@ -85,6 +88,7 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
   return <>
     <div className={styles.matrixScoreHead} data-rubric-head>
       <Box data-rubric-head-content className={styles.matrixScoreContent}>
+        {progress && <RepoGradeCellProgress state={progress} repo={repo.name} folder={folder} />}
         {cell?.saved && !provenNoSubmission && <SavedMatrixResult result={cell.saved} repo={repo.name} folder={folder} feedback={feedback} showSource={false} part="score" earlierPin={earlierScore || historicalEmpty} />}
         {provenNoSubmission && <RepoGradeStatusChip status="no-submission" />}
         {!cell?.saved && scanStatus && scanStatus !== "ungraded" && <RepoGradeStatusChip status={scanStatus} />}

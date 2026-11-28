@@ -77,13 +77,13 @@ export function multipleTargetRequestMenuItems(requests: TargetRequest[], availa
   });
 }
 
-export function RepoTargetGradeActions({ label, requests, available, pending, onStart, onControl, root, hasGradedResult = false }: {
+export function RepoTargetGradeActions({ label, requests, available, pending, onStart, onControl, root, hasGradedResult = false, showRequestStatus = true }: {
   label: string; requests: TargetRequest[]; available: boolean; pending: boolean;
-  onStart: () => void; onControl: (id: number, action: TargetCommand) => void; root: boolean; hasGradedResult?: boolean;
+  onStart: () => void; onControl: (id: number, action: TargetCommand) => void; root: boolean; hasGradedResult?: boolean; showRequestStatus?: boolean;
 }) {
   const active = activeTargetRequests(requests);
   return <>
-    {active.length > 1 ? <Chip size="small" label={`${active.length} requests`} color="info" variant="outlined" /> : <TargetRequestChip request={visibleTargetRequest(requests, hasGradedResult)} />}
+    {showRequestStatus && (active.length > 1 ? <Chip size="small" label={`${active.length} requests`} color="info" variant="outlined" /> : <TargetRequestChip request={visibleTargetRequest(requests, hasGradedResult)} />)}
     <RepoGradeActionsMenu label={label}>
       {(close) => multipleTargetRequestMenuItems(active, available, pending, root, onStart, onControl, close)}
     </RepoGradeActionsMenu>

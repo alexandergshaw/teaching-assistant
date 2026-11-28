@@ -100,7 +100,7 @@ export function RepoGradesGithubQuotaReport({ accountId }: { accountId: string }
   const remaining = snapshot?.remaining?.toLocaleString() ?? "unknown";
   const limit = snapshot?.limit?.toLocaleString() ?? "unknown";
   return (
-    <Box component="section" aria-label="GitHub API quota" sx={{
+    <Box component="section" aria-label="GitHub API quota" data-repo-grades-quota sx={{
       position: "sticky",
       // Match the Courses table's offset below the top bar, banner, and 45px tab strip.
       top: "calc(var(--topbar-height, 58px) + var(--in-session-banner-height, 0px) + 45px)",

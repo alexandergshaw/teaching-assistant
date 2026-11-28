@@ -342,6 +342,8 @@ const FROZEN_REPO_GRADES_ROOTS = [
   "RepoGradesFolderPicker.tsx",
   "RepoGradesGithubQuota.tsx",
   "RepoGradesLoadingStatus.tsx",
+  "RepoGradesRunProgress.tsx",
+  "RepoGradeCellProgress.tsx",
   "RepoGradesStatusBanners.tsx",
   // RG-SEARCH-STICKY Wave A: the sticky working-header shell (browser-safe only).
   "RepoGradesStickyHeader.tsx",
@@ -359,6 +361,7 @@ const FROZEN_REPO_GRADES_ROOTS = [
   "repoGradeCellStatus.ts",
   "repoGradeCopyAll.ts",
   "repoGradePostScore.ts",
+  "repoGradeProgress.ts",
   "repoGradeQueue.ts",
   "repoGradeScoreDisplay.ts",
   "repoGradeSelection.ts",

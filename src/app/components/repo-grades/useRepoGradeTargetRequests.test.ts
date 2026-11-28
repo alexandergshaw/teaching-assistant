@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { useRepoGradeTargetRequests, type TargetRequest } from "./useRepoGradeTargetRequests";
+import { useRepoGradeTargetRequests, type ActiveGradeCell, type TargetRequest } from "./useRepoGradeTargetRequests";
 
 const mock = vi.hoisted(() => {
   const slots: unknown[] = [];
@@ -55,10 +55,10 @@ const sampleRequest: TargetRequest = {
   inFlight: false, bulk: false, folders: null, repos: null,
 };
 
-function render(accountId: string | null) {
+function render(accountId: string | null, courseId?: string) {
   mock.render();
   // eslint-disable-next-line react-hooks/rules-of-hooks -- Node harness supplies the hook storage and effect lifecycle.
-  return useRepoGradeTargetRequests(accountId);
+  return useRepoGradeTargetRequests(accountId, courseId);
 }
 
 function loaded(requests: TargetRequest[]) { return { status: "loaded", requests } as const; }
@@ -121,4 +121,51 @@ it("does not refresh an old account after its queue control finishes", async () 
   await vi.advanceTimersByTimeAsync(0);
   expect(render("owner-2").ready).toBe(true);
   expect(mock.read.mock.calls).toEqual([["owner-1"], ["owner-2"]]);
+});
+
+it("discards prior course progress when changing classes or losing the progress read", async () => {
+  vi.useFakeTimers();
+  const progress = (courseId: string) => ({
+    ...loaded([sampleRequest]),
+    activeCells: [{ courseId, repo: "org/student", folder: "Lab", runId: "run", state: "running" }] satisfies ActiveGradeCell[],
+  });
+  const prior = Promise.withResolvers<ReturnType<typeof progress>>();
+  mock.read.mockResolvedValueOnce(progress("course-1")).mockReturnValueOnce(prior.promise)
+    .mockResolvedValueOnce(progress("course-2"))
+    .mockResolvedValue({ ...loaded([sampleRequest]), activeCells: [], activeCellsUnavailable: true });
+  render("owner", "course-1");
+  await vi.advanceTimersByTimeAsync(0);
+  const first = render("owner", "course-1");
+  expect(first.activeCells).toMatchObject([{ courseId: "course-1", state: "running" }]);
+  const refreshing = first.refresh();
+  expect(render("owner", "course-2").activeCells).toEqual([]);
+  await vi.advanceTimersByTimeAsync(0);
+  const second = render("owner", "course-2");
+  await first.refresh();
+  expect(await first.control(1, "pause")).toBe(false);
+  expect(mock.read.mock.calls).toEqual([["owner", "course-1"], ["owner", "course-1"], ["owner", "course-2"]]);
+  expect(mock.control).not.toHaveBeenCalled();
+  prior.resolve(progress("course-1"));
+  await refreshing;
+  expect(render("owner", "course-2").activeCells).toMatchObject([{ courseId: "course-2" }]);
+  await second.refresh();
+  expect(render("owner", "course-2")).toMatchObject({
+    ready: true, requests: [sampleRequest], activeCells: [], activeCellsUnavailable: true,
+  });
+});
+
+it("polls active class progress faster and returns to the idle interval after a failed read", async () => {
+  vi.useFakeTimers();
+  const runner = { ...sampleRequest, state: "running" as const };
+  mock.read.mockResolvedValueOnce(loaded([runner]))
+    .mockResolvedValue({ ...loaded([runner]), activeCells: [], activeCellsUnavailable: true });
+  render("owner", "course");
+  await vi.advanceTimersByTimeAsync(1_999);
+  expect(mock.read).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(mock.read).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(4_999);
+  expect(mock.read).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(mock.read).toHaveBeenCalledTimes(3);
 });

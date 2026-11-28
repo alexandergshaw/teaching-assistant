@@ -27,6 +27,7 @@ export interface RepoGradesStickyHeaderProps {
   folderControl?: ReactNode;
   // Grading progress stays in view for the active folder.
   statusBanner?: ReactNode;
+  progressControl?: ReactNode;
   // REPO-PAGE-OVERHAUL W3: the re-scan (Refresh) button, promoted out of the
   // setup stack; index.tsx wires it to the same reloadScan + scanLoading.
   rescanControl?: ReactNode;
@@ -36,7 +37,7 @@ export interface RepoGradesStickyHeaderProps {
   children: ReactNode;
 }
 
-export default function RepoGradesStickyHeader({ searchQuery, onSearchChange, gradeSetControl, folderControl, statusBanner, rescanControl, targetBranchControl, children }: RepoGradesStickyHeaderProps) {
+export default function RepoGradesStickyHeader({ searchQuery, onSearchChange, gradeSetControl, folderControl, statusBanner, progressControl, rescanControl, targetBranchControl, children }: RepoGradesStickyHeaderProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
   const hasHeader = typeof onSearchChange === "function";
@@ -74,6 +75,7 @@ export default function RepoGradesStickyHeader({ searchQuery, onSearchChange, gr
               {rescanControl}
             </div>
           )}
+          {progressControl && <div className={styles.headerAction}>{progressControl}</div>}
           {gradeSetControl}
           {targetBranchControl}
           <label className={styles.headerField}>

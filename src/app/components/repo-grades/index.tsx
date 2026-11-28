@@ -67,6 +67,7 @@ import RepoGradeCourseFilters from "./RepoGradeCourseFilters";
 import { courseIdToAutoSelect, effectiveOpen } from "./repoGradesCoursePicker";
 import RepoGradesStatusBanners, { RepoGradesFolderHint } from "./RepoGradesStatusBanners";
 import { RepoGradesColumnProgress, RepoGradesLoadingStatus } from "./RepoGradesLoadingStatus";
+import { REPO_GRADES_PROGRESS_ID, RepoGradesRunProgress, focusRepoGradesRunProgress } from "./RepoGradesRunProgress";
 import {
   buildRepoGradeGridModel,
   sortRepoGradeRows,
@@ -185,7 +186,7 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
   const ownerId = selectedCourseId && isOwnerDecision(accessDecision) ? accountId : null;
   const historyRevision = useRepoGradesStartupHistoryRevision(ownerId ?? "", selectedCourseId ?? "");
   const targetedGrading = useRepoGradesTargetedGrading();
-  const targetRequests = useRepoGradeTargetRequests(ownerId || null);
+  const targetRequests = useRepoGradeTargetRequests(ownerId || null, selectedCourseId);
   const automaticBlocks = useRepoGradesAutomaticBlocks(ownerId, selectedCourseId);
   const saved = useRepoGradeMatrixResults(selectedCourseId ?? "", ownerId, historyRevision);
   const draftSnapshot = useSyncExternalStore(drafts.subscribe, drafts.getSnapshot, () => null);
@@ -525,7 +526,7 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
     const result = await targetedGrading.startTargeted(selectedCourseId, folder, repo);
     await targetRequests.refresh();
     setPostSummary(result.status === "started"
-      ? "Saved repository grading queued for the background worker. Progress is shown in Startup repository checks; saved results refresh as grading finishes. Previously completed or uncertain attempts are not automatically regraded."
+      ? "Saved repository grading queued for the background worker. Follow the request in Grading progress. Previously completed or uncertain attempts are not automatically regraded."
       : result.status === "busy"
         ? "This assignment or repository is already queued for grading."
         : "Saved repository grading could not be started.");
@@ -659,6 +660,11 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         courseId={uiState.courseId}
         onCourseIdChange={handleCourseIdChange}
       />
+      {course && ownerId && targetedGrading && <RepoGradesRunProgress
+        key={JSON.stringify([ownerId, course.id, currentSelectedFolder])} courseId={course.id} courseName={course.name}
+        folder={currentSelectedFolder === ALL_FOLDERS ? null : currentSelectedFolder}
+        requests={targetRequests.requests} ready={targetRequests.ready} unavailable={targetRequests.unavailable}
+        automaticStatus={targetedGrading.status} automaticStale={targetedGrading.stale} refresh={targetRequests.refresh} />}
       <RepoGradesLoadingStatus label={coursesLoading ? "Loading classes…"
         : course && scanLoading ? `Scanning ${course.githubOrg?.trim()} on GitHub for ${course.name}…` : null} />
       {changedSubmissions.count > 0 && <Button size="small" disabled={changedSubmissions.pending}
@@ -716,6 +722,9 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
           (the column header below it owns Grade/Post) and the grid. */}
       <RepoGradesStickyHeader
         searchQuery={uiState.searchQuery}
+        progressControl={course && ownerId && targetedGrading ? (
+          <Button size="small" aria-controls={REPO_GRADES_PROGRESS_ID} onClick={focusRepoGradesRunProgress}>View grading progress</Button>
+        ) : null}
         rescanControl={course && (!missingOrg || ownerId) ? (
           <Button type="button" size="small" aria-disabled={scanLoading || saved.pending}
             startIcon={scanLoading || saved.pending ? <CircularProgress size={16} color="inherit" aria-hidden="true" /> : undefined}
@@ -756,10 +765,13 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         reloading={automaticBlocks.reloading} reloadReasons={automaticBlocks.reloadReasons} />
       {course && cellDraft && (
         <>
-        {targetRequests.unavailable && <Alert severity="warning" action={<Button size="small" onClick={() => { void targetRequests.refresh(); }}>Retry</Button>}>
+        {!targetedGrading && targetRequests.unavailable && <Alert severity="warning" action={<Button size="small" onClick={() => { void targetRequests.refresh(); }}>Retry</Button>}>
           Grading queue status is unavailable. Displayed request statuses may be out of date; grading controls are disabled until status is restored.
         </Alert>}
-        {ownerId && !targetRequests.ready && !targetRequests.unavailable && <Typography variant="caption" role="status">Loading grading queue…</Typography>}
+        {!targetedGrading && ownerId && !targetRequests.ready && !targetRequests.unavailable && <Typography variant="caption" role="status">Loading grading queue…</Typography>}
+        {targetRequests.ready && targetRequests.activeCellsUnavailable && <Typography variant="caption" color="warning.main">
+          Per-cell progress is unavailable. Request totals are still available in Grading progress.
+        </Typography>}
         <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }} role="toolbar" aria-label="Gradebook bulk actions">
           <FormControlLabel label="Select all visible cells" control={<Checkbox size="small"
             checked={visibleGradeCells.length > 0 && selectedVisibleCells.length === visibleGradeCells.length}
@@ -798,6 +810,9 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
           durableGradeAvailable={!!targetedGrading && !!ownerId && !!selectedCourseId && targetRequests.ready}
           durableGradePending={!!targetedGrading?.pending || !targetRequests.ready}
           targetRequests={targetRequests.requests}
+          targetRequestsUnavailable={targetRequests.unavailable}
+          activeGradeCells={targetRequests.activeCells}
+          activeCellsUnavailable={targetRequests.activeCellsUnavailable}
           targetCourseId={selectedCourseId ?? ""}
           onControlTarget={(id, command) => { void controlTargetGrade(id, command); }}
           selectedGradeCells={selectedGradeCells}

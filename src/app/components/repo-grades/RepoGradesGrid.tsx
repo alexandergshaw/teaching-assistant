@@ -34,13 +34,14 @@
 // network) and hands the resulting STRING to `ColumnHeaderControls`, which
 // never calls it itself. Same "render what a pure function decided, resolve
 // nothing here" posture as the rest of this file.
-import { useId, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Autocomplete, Checkbox, Collapse, Link, ListItemText, MenuItem, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel, TextField, createFilterOptions } from "@mui/material";
 import { collectRubricOrder, rubricSlotHeight } from "./rubricAlignment";
 import { RepoGradeResultDetails } from "./RepoGradesDashboard";
 import RepoGradeActionsMenu from "./RepoGradeActionsMenu";
 import { activeTargetRequests, findTargetRequests, latestTargetRequest, RepoTargetGradeActions, TargetRequestChip, multipleTargetRequestMenuItems } from "./RepoTargetGradeActions";
-import type { TargetCommand, TargetRequest } from "./useRepoGradeTargetRequests";
+import type { ActiveGradeCell, TargetCommand, TargetRequest } from "./useRepoGradeTargetRequests";
+import { activeGradeCellsByKey, gradeCellProgress } from "./repoGradeProgress";
 import { gradeSelectionKey } from "./repoGradeSelection";
 import type { RepoGradeQueueCommand, RepoGradeQueueSnapshot } from "./repoGradeQueue";
 import type { RepoGradeColumn, RepoGradeRow, RepoGradeSortState, SortDirection } from "./repoGradesRows";
@@ -154,6 +155,9 @@ export interface RepoGradesGridProps {
   durableGradeAvailable: boolean;
   durableGradePending: boolean;
   targetRequests: TargetRequest[];
+  targetRequestsUnavailable: boolean;
+  activeGradeCells: readonly ActiveGradeCell[];
+  activeCellsUnavailable: boolean;
   targetCourseId: string;
   onControlTarget: (id: number, action: TargetCommand) => void;
   selectedGradeCells: ReadonlySet<string>;
@@ -444,6 +448,9 @@ export default function RepoGradesGrid({
   durableGradeAvailable,
   durableGradePending,
   targetRequests,
+  targetRequestsUnavailable,
+  activeGradeCells,
+  activeCellsUnavailable,
   targetCourseId,
   onControlTarget,
   selectedGradeCells,
@@ -459,6 +466,7 @@ export default function RepoGradesGrid({
   codeScoringDisclosure,
 }: RepoGradesGridProps) {
   const tableRef = useRef<HTMLTableElement>(null);
+  const activeCellsByKey = useMemo(() => activeGradeCellsByKey(activeGradeCells, targetCourseId), [activeGradeCells, targetCourseId]);
   useLayoutEffect(() => {
     const table = tableRef.current;
     if (!table) return;
@@ -626,6 +634,14 @@ export default function RepoGradesGrid({
                   {repos.map((repo) => {
                     const row = repo.active;
                     const cell = row?.cells[folder];
+                    const requests = findTargetRequests(targetRequests, targetCourseId, folder, repo.name);
+                    const hasGradedResult = repo.cells.get(folder)?.saved?.latest.status === "succeeded";
+                    const edit = getRepoGradeCellEdit(cellEdits, repo.name, folder);
+                    const localProgress = (bulkRunningFolder === folder ? bulkQueue?.cells.get(repo.name) : undefined)
+                      ?? (edit.grading ? "running" : edit.gradeRunStage ?? undefined);
+                    const progress = localProgress === "running" ? localProgress : gradeCellProgress(
+                      activeCellsByKey, targetCourseId, repo.name, folder, requests, targetRequestsUnavailable, activeCellsUnavailable, hasGradedResult,
+                    ) ?? localProgress;
                     return (
                       <div key={repo.name} className={`${dashboardStyles.matrixResult} ${hasMultipleRepos ? dashboardStyles.matrixResultWithRepoHead : ""}`}>
                         {hasMultipleRepos && <div className={dashboardStyles.matrixRepoHead} title={multipleRepos ? repo.name : undefined}>
@@ -633,8 +649,7 @@ export default function RepoGradesGrid({
                         </div>}
                         <div className={dashboardStyles.matrixActions}><RepoTargetGradeActions
                           label={`Grade actions: ${repo.name} / ${folder || "Repository root"}`}
-                          requests={findTargetRequests(targetRequests, targetCourseId, folder, repo.name)}
-                          hasGradedResult={repo.cells.get(folder)?.saved?.latest.status === "succeeded"}
+                          requests={requests} showRequestStatus={false}
                           available={durableGradeAvailable} pending={durableGradePending} root={!folder}
                           onStart={() => onGradeTarget(repo.name, folder)} onControl={onControlTarget} /></div>
                         <Checkbox size="small" disabled={!folder} className={`${dashboardStyles.matrixSelection} ${styles.selectionCheckbox}`}
@@ -642,7 +657,7 @@ export default function RepoGradesGrid({
                           onChange={() => onToggleGradeCells([{ repo: repo.name, folder }])}
                           slotProps={{ input: { "aria-label": `Select ${repo.name} for ${label}` } }} />
                         <RepoGradeResultDetails courseId={targetCourseId} repo={repo} folder={folder}
-                          scanStatus={cell?.status} criterionOrder={rubricOrders.get(folder) ?? []} />
+                          scanStatus={cell?.status} criterionOrder={rubricOrders.get(folder) ?? []} progress={progress} />
                       </div>
                     );
                   })}

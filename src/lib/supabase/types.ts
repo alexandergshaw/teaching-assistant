@@ -12,6 +12,9 @@ import type {
   InstitutionDirectoryValueRow,
   InstitutionDirectoryValueInsert,
   InstitutionDirectoryValueUpdate,
+  InstitutionDirectoryDeckRow,
+  InstitutionDirectoryDeckInsert,
+  InstitutionDirectoryDeckUpdate,
 } from "./types.institution-directory";
 import type {
   AccessibilityScansRow,
@@ -508,6 +511,12 @@ export interface Database {
         Update: Expand<InstitutionDirectoryValueUpdate>;
         Relationships: [];
       };
+      institution_directory_decks: {
+        Row: Expand<InstitutionDirectoryDeckRow>;
+        Insert: Expand<InstitutionDirectoryDeckInsert>;
+        Update: Expand<InstitutionDirectoryDeckUpdate>;
+        Relationships: [];
+      };
       institution_knowledge_questions: {
         Row: Expand<InstitutionKnowledgeQuestionsRow>;
         Insert: Expand<InstitutionKnowledgeQuestionsInsert>;
@@ -731,6 +740,10 @@ export interface Database {
     };
     Views: Record<string, { Row: Record<string, unknown>; Relationships: [] }>;
     Functions: Record<string, { Args: Record<string, unknown>; Returns: unknown }> & {
+      remove_institution_directory_profile_with_decks: {
+        Args: { p_user_id: string; p_acronym: string };
+        Returns: InstitutionDirectoryDeckRow[];
+      };
       update_announcement_library_entry: {
         Args: {
           p_id: string; p_user_id: string; p_course_id: string;

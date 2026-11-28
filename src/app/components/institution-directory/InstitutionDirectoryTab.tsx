@@ -10,6 +10,8 @@ import {
   saveInstitutionDirectoryProfileAction,
   saveInstitutionDirectoryValueAction,
 } from "@/app/actions/institution-directory";
+import { listInstitutionBrandedDecksAction } from "@/app/actions/institution-branded-decks";
+import { INSTITUTION_BRANDED_DECKS_LABEL, type InstitutionBrandedDeck } from "@/lib/institution-branded-decks";
 import {
   resolveInstitutionLmsAction,
   validateInstitutionDestination,
@@ -29,6 +31,7 @@ import {
   runInstitutionDirectoryUpdateProfile,
 } from "./institution-directory-handlers";
 import ProfileEditor, { type DirectoryProfileInput } from "./ProfileEditor";
+import InstitutionBrandedDeckCell from "./InstitutionBrandedDeckCell";
 import { DIRECTORY_LOAD_TIMEOUT_MS, directoryLoaderForAccount, selectDirectoryAccount } from "./directory-loader";
 import { createClient } from "@/lib/supabase/client";
 import { useDraftNavigation } from "./useDraftNavigation";
@@ -143,6 +146,11 @@ function InstitutionDirectoryPanel({ account, authFailed, retryAuth }: { account
   const [columnType, setColumnType] = useState<DirectoryColumnType>("text");
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameLabel, setRenameLabel] = useState("");
+  const [deckFiles, setDeckFiles] = useState<InstitutionBrandedDeck[]>([]);
+  const [decksStatus, setDecksStatus] = useState<"loading" | "ready" | "failed">("loading");
+  const [deckAttempt, setDeckAttempt] = useState(0);
+  const deckRevision = useRef(0);
+  const profileGenerations = useRef(new Map<string, number>());
 
   function openEditor(record: InstitutionDirectoryRecord | null) {
     draftNavigation.requestLeave(() => {
@@ -160,6 +168,50 @@ function InstitutionDirectoryPanel({ account, authFailed, retryAuth }: { account
     return () => { active = false; };
   }, [load]);
 
+  useEffect(() => {
+    if (!account || account === "signed-out") return;
+    let active = true;
+    const revision = deckRevision.current;
+    const timeout = setTimeout(() => {
+      active = false;
+      setDecksStatus("failed");
+    }, DIRECTORY_LOAD_TIMEOUT_MS);
+    void Promise.resolve().then(async () => {
+      if (!active) return;
+      const result = await listInstitutionBrandedDecksAction(account).catch(() => null);
+      if (!active) return;
+      clearTimeout(timeout);
+      if (deckRevision.current !== revision) {
+        setDeckAttempt((attempt) => attempt + 1);
+        return;
+      }
+      if (!result?.files) {
+        setDecksStatus("failed");
+        return;
+      }
+      setDeckFiles(result.files);
+      setDecksStatus("ready");
+    });
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+    };
+  }, [account, deckAttempt]);
+
+  function reloadDeckFiles() {
+    setDecksStatus("loading");
+    setDeckAttempt((attempt) => attempt + 1);
+  }
+
+  function addDeckFile(file: InstitutionBrandedDeck, generation: number) {
+    if ((profileGenerations.current.get(file.acronym) ?? 0) !== generation) {
+      reloadDeckFiles();
+      return;
+    }
+    deckRevision.current++;
+    setDeckFiles((files) => files.some((saved) => saved.id === file.id) ? files : [...files, file]);
+  }
+
   async function saveProfile(profile: DirectoryProfileInput) {
     const started = monotonicNow();
     setBusy(true); setError(null);
@@ -175,13 +227,20 @@ function InstitutionDirectoryPanel({ account, authFailed, retryAuth }: { account
   }
 
   async function removeProfile(record: InstitutionDirectoryRecord) {
-    if (!window.confirm(`Remove ${record.profile.acronym} from this directory? Courses and saved LMS settings will remain.`)) return;
+    if (!window.confirm(`Remove ${record.profile.acronym} and its uploaded slide decks from this directory? Courses and saved LMS settings will remain.`)) return;
     const started = monotonicNow();
     setBusy(true); setError(null);
     const request = await runInstitutionDirectoryRemoveProfile({ startedAt: started, request: () => removeInstitutionDirectoryProfileAction(record.profile.acronym), setError, setBusy });
     if (request.kind === "unavailable") return;
     const result = request.value;
-    if (!result.ok) { recordInstitutionDirectoryDiagnostic("remove-profile", "failure", "profile", institutionDirectoryDiagnosticReason(result.code), { durationMs: monotonicNow() - started }); setError(labelForError(result.code)); } else { recordInstitutionDirectoryDiagnostic("remove-profile", "success", "profile", undefined, { durationMs: monotonicNow() - started }); await load(true); }
+    if (!result.ok) { recordInstitutionDirectoryDiagnostic("remove-profile", "failure", "profile", institutionDirectoryDiagnosticReason(result.code), { durationMs: monotonicNow() - started }); setError(labelForError(result.code)); } else {
+      recordInstitutionDirectoryDiagnostic("remove-profile", "success", "profile", undefined, { durationMs: monotonicNow() - started });
+      deckRevision.current++;
+      const acronym = record.profile.acronym;
+      profileGenerations.current.set(acronym, (profileGenerations.current.get(acronym) ?? 0) + 1);
+      setDeckFiles((files) => files.filter((file) => file.acronym !== record.profile.acronym));
+      await load(true);
+    }
     setBusy(false);
   }
 
@@ -233,7 +292,7 @@ function InstitutionDirectoryPanel({ account, authFailed, retryAuth }: { account
       {!account && authFailed && <div><p role="alert">Checking your session took too long.</p><Button onClick={retryAuth}>Try again</Button></div>}
       {authenticated && (snapshot.loading || (!snapshot.data && !snapshot.error)) && <p role="status">{snapshot.data ? "Refreshing institutions; your last saved rows are shown." : "Loading institutions…"}</p>}
       {snapshot.error && <p role="alert">{snapshot.error}</p>}
-      {authenticated && <Button disabled={snapshot.loading} onClick={() => void load()}>{snapshot.error ? "Try again" : "Refresh"}</Button>}
+      {authenticated && <Button disabled={snapshot.loading} onClick={() => { reloadDeckFiles(); void load(); }}>{snapshot.error ? "Try again" : "Refresh"}</Button>}
       {editor !== undefined && <ProfileEditor key={`${editor?.profile.acronym ?? "new"}:${editorVersion}`} record={editor ?? undefined} onDirtyChange={draftNavigation.setDirty} onSave={(profile) => void saveProfile(profile)} onCancel={() => draftNavigation.requestLeave(() => setEditor(undefined))} busy={busy} error={error} />}
       <Dialog data-institution-draft-dialog open={draftNavigation.confirming} onClose={draftNavigation.stay} aria-labelledby="institution-unsaved-title">
         <DialogTitle id="institution-unsaved-title">Unsaved institution changes</DialogTitle>
@@ -260,6 +319,11 @@ function InstitutionDirectoryPanel({ account, authFailed, retryAuth }: { account
           <Table size="small" stickyHeader aria-label="Institution directory">
             <TableHead><TableRow>
               {["Institution", "Email", "Email client", "LMS", "Faculty portal", "Website", "Department"].map((label) => <TableCell key={label}>{label}</TableCell>)}
+              <TableCell>
+                {INSTITUTION_BRANDED_DECKS_LABEL}
+                {authenticated && decksStatus === "loading" && <div role="status">Loading slide decks…</div>}
+                {authenticated && decksStatus === "failed" && <div><span role="alert">Could not load slide decks.</span> <Button size="small" onClick={reloadDeckFiles}>Retry</Button></div>}
+              </TableCell>
               {state.columns.map((column) => <TableCell key={column.id}>
                 {renameId === column.id ? <span style={{ display: "flex", gap: 4 }}><TextField size="small" label={`Rename ${column.label}`} value={renameLabel} onChange={(e) => setRenameLabel(e.target.value)} /><Button onClick={() => void saveColumn(column.id)} disabled={busy}>Save</Button><Button onClick={() => setRenameId(null)} disabled={busy}>Cancel</Button></span> : <>{column.label} <Button size="small" onClick={() => { setRenameId(column.id); setRenameLabel(column.label); }}>Rename</Button><Button size="small" color="error" onClick={() => void removeColumn(column.id, column.label)} disabled={busy}>Remove</Button></>}
               </TableCell>)}
@@ -275,6 +339,12 @@ function InstitutionDirectoryPanel({ account, authFailed, retryAuth }: { account
                 <TableCell><Destination href={record.profile.facultyPortalUrl} label="Open faculty portal" target="faculty-portal" /></TableCell>
                 <TableCell><Destination href={record.profile.websiteUrl} label="Open website" target="institution-website" /></TableCell>
                 <TableCell>{record.profile.department || "Not set"}</TableCell>
+                <TableCell>{authenticated && <InstitutionBrandedDeckCell
+                  account={account} acronym={record.profile.acronym} disabled={busy || decksStatus !== "ready"}
+                  files={deckFiles.filter((file) => file.acronym === record.profile.acronym)}
+                  getProfileGeneration={() => profileGenerations.current.get(record.profile.acronym) ?? 0}
+                  onUploaded={addDeckFile}
+                />}</TableCell>
                 {state.columns.map((column) => <TableCell key={column.id}><CustomValue record={record} column={column} disabled={busy} onSave={saveValue} /></TableCell>)}
                 <TableCell><Button size="small" disabled={busy} onClick={() => openEditor(record)}>Edit profile</Button></TableCell>
               </TableRow>;

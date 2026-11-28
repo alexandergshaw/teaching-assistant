@@ -1,3 +1,5 @@
+import { INSTITUTION_BRANDED_DECKS_LABEL } from "./institution-branded-decks";
+
 export type DirectoryColumnType = "text" | "date" | "https";
 export type EmailClient = "" | "outlook" | "gmail" | "other";
 export type LmsType = "" | "canvas" | "blackboard" | "moodle" | "brightspace" | "other";
@@ -147,6 +149,7 @@ export function validateInstitutionDirectoryColumn(
     "institution", "institution acronym", "acronym", "institution name", "full name", "email",
     "email client", "email client name", "email url", "email web url", "lms", "lms type", "lms url",
     "faculty portal", "faculty portal url", "institution website", "institution website url", "website", "department",
+    labelKey(INSTITUTION_BRANDED_DECKS_LABEL),
   ]);
   if (builtIns.has(labelKey(label)) || existing.some((column) => labelKey(column.label) === labelKey(label))) {
     return { ok: false, reason: "duplicate-label" };

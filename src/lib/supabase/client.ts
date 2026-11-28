@@ -1,5 +1,6 @@
 import { createBrowserClient } from "@supabase/ssr";
 import type { Database } from "./types";
+import { INSTITUTION_BRANDED_DECKS_BUCKET } from "../institution-branded-decks";
 
 /**
  * BUG (rival model): this client passed no `global.fetch` at all, so a
@@ -25,6 +26,7 @@ import type { Database } from "./types";
  * (server-to-server) bound would have no trouble with.
  */
 const BROWSER_FETCH_TIMEOUT_MS = 18_000;
+const INSTITUTION_DECK_UPLOAD_TIMEOUT_MS = 5 * 60_000;
 
 /**
  * See PROFILE_LOOKUP_TIMEOUT_MS's own comment in ./proxy.ts for how this was
@@ -45,8 +47,15 @@ const BROWSER_FETCH_TIMEOUT_MS = 18_000;
  * handling on the caller's part is what surfaces it, not a thrown exception
  * or an unhandled rejection.
  */
-const boundedFetch: typeof fetch = (input, init) =>
-  fetch(input, { ...init, signal: AbortSignal.timeout(BROWSER_FETCH_TIMEOUT_MS) });
+const boundedFetch: typeof fetch = (input, init) => {
+  const requestUrl = input instanceof Request ? input.url : input.toString();
+  const method = init?.method ?? (input instanceof Request ? input.method : "GET");
+  const deckUpload = method.toUpperCase() === "PUT"
+    && new URL(requestUrl).pathname.startsWith(`/storage/v1/object/upload/sign/${INSTITUTION_BRANDED_DECKS_BUCKET}/staging/`);
+  // The up-to-25 MB transfer has a separate bound from ordinary application requests.
+  const timeout = AbortSignal.timeout(deckUpload ? INSTITUTION_DECK_UPLOAD_TIMEOUT_MS : BROWSER_FETCH_TIMEOUT_MS);
+  return fetch(input, { ...init, signal: timeout });
+};
 
 /**
  * Supabase client for use in Client Components ("use client").

@@ -39,6 +39,17 @@ describe("institution directory delivery seams", () => {
     expect(panel).toContain('aria-label="Institution directory"');
   });
 
+  it("wires the fixed PowerPoint column to files from the matching institution", () => {
+    const cell = readFileSync(new URL("./InstitutionBrandedDeckCell.tsx", import.meta.url), "utf8");
+    expect(panel.indexOf("{INSTITUTION_BRANDED_DECKS_LABEL}")).toBeLessThan(panel.indexOf("{state.columns.map"));
+    expect(panel).toContain("file.acronym === record.profile.acronym");
+    expect(panel).toContain("deckRevision.current !== revision");
+    expect(panel).toContain("(profileGenerations.current.get(file.acronym) ?? 0) !== generation");
+    expect(cell).toContain('accept=".pptx,.potx"');
+    expect(cell).toContain("downloadInstitutionDeckAction(account, acronym, file.id)");
+    expect(cell).toContain("finishInstitutionDeckUploadAction(account, acronym, upload.id");
+  });
+
   it("distinguishes unset and unsafe saved LMS destinations without an active link", () => {
     expect(panel).toContain("LMS link not set");
     expect(panel).toContain("LMS link unavailable");

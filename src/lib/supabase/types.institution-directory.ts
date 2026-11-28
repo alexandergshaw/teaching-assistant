@@ -22,3 +22,10 @@ export interface InstitutionDirectoryValueRow {
 }
 export type InstitutionDirectoryValueInsert = Omit<InstitutionDirectoryValueRow, "updated_at"> & { updated_at?: string };
 export type InstitutionDirectoryValueUpdate = Partial<InstitutionDirectoryValueInsert>;
+
+export interface InstitutionDirectoryDeckRow {
+  user_id: string; acronym: string; id: string; file_name: string;
+  extension: "pptx" | "potx"; size_bytes: number; created_at: string;
+}
+export type InstitutionDirectoryDeckInsert = Omit<InstitutionDirectoryDeckRow, "created_at"> & { created_at?: string };
+export type InstitutionDirectoryDeckUpdate = Partial<InstitutionDirectoryDeckInsert>;

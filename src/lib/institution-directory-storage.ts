@@ -2,6 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./supabase/types";
 import type { InstitutionDirectoryColumn, InstitutionDirectoryProfile, InstitutionDirectoryRecord, InstitutionDirectoryState, DirectoryColumnType } from "./institution-directory";
+import { removeInstitutionDeckObjects } from "./institution-branded-decks-storage";
 
 type Client = SupabaseClient<Database>;
 type ProfileRow = Database["public"]["Tables"]["institution_directory_profiles"]["Row"];
@@ -106,8 +107,12 @@ export async function saveInstitutionDirectoryProfile(
 }
 
 export async function removeInstitutionDirectoryProfile(supabase: Client, userId: string, acronym: string): Promise<void> {
-  const { error } = await supabase.from("institution_directory_profiles").delete().eq("user_id", userId).eq("acronym", acronym);
+  const { data, error } = await supabase.rpc("remove_institution_directory_profile_with_decks", { p_user_id: userId, p_acronym: acronym });
   if (error) throw new Error("directory-remove-failed");
+  // The cascade already revoked the ability to mint new download URLs.
+  await removeInstitutionDeckObjects(supabase, userId, data ?? []).catch(() => {
+    console.warn("Could not clean up storage after deleting an institution directory profile.");
+  });
 }
 
 export async function saveInstitutionDirectoryColumn(

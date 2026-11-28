@@ -14,6 +14,15 @@ import {
 // ── buildRepoGradeRubricOptions ─────────────────────────────────────────────
 
 describe("buildRepoGradeRubricOptions", () => {
+  it("keeps exported, manual, and generated rubrics when mapped Canvas rubrics are unavailable", () => {
+    const options = buildRepoGradeRubricOptions({
+      live: [],
+      export: [{ title: "Module 14" }],
+      omitAssignment: true,
+    });
+    expect(options.map((option) => option.source)).toEqual(["generate", "export", "manual"]);
+  });
+
   it("with no live/export input, returns only the three fixed slots in order", () => {
     const result = buildRepoGradeRubricOptions({ live: [], export: [] });
     expect(result).toEqual([

@@ -18,6 +18,22 @@
 // real test, so the merge/labelling/parsing decisions that matter for
 // correctness live in this module instead.
 
+import { isCanvasLms } from "@/lib/course-lms-options";
+
+export function repoGradeCanvasCourseId(
+  course: { lms?: string | null; canvasUrl?: string | null } | null | undefined,
+): string | null {
+  if (!isCanvasLms(course?.lms ?? "") || !course?.canvasUrl) return null;
+  try {
+    const url = new URL(course.canvasUrl);
+    if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password) return null;
+    if (/(^|\.)blackboard\.com$/i.test(url.hostname) || /^\/ultra\//i.test(url.pathname)) return null;
+    return url.pathname.match(/\/courses\/(\d+)(?:\/|$)/)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The subset of exportAssignmentOptions's ExportAssignmentOption
  * (src/lib/lms-export-source/export-assignments.ts) this module actually

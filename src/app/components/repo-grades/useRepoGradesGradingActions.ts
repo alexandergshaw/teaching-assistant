@@ -60,6 +60,7 @@ import {
   scopeRepoGradeRowsToSelection,
 } from "./repoGradesPosting";
 import { resolveGradeScope } from "./repoGradesGradeSet";
+import { repoGradeCanvasCourseId } from "./repoGradesAssignmentSources";
 import { buildBulkGradePlan, bulkGradeOutcomeFromRun, repoGradeAttemptErrorStatus, repoGradeTransportError } from "./repoGradesBulkGrade";
 import { useRepoGradesBulkGrade } from "./useRepoGradesBulkGrade";
 import { createRepoGradeQueue, recordRepoGradeQueueCommand, type RepoGradeQueueCommand, type RepoGradeQueueSnapshot } from "./repoGradeQueue";
@@ -513,6 +514,10 @@ export function useRepoGradesGradingActions(
   // disagree about which rows a selection scopes to.
   const handlePostColumn = async (column: RepoGradeColumn, pointsPossible: number | null) => {
     if (!course || !isCurrent()) return;
+    if (!course.institution?.trim() || !repoGradeCanvasCourseId(course)) {
+      setPostSummary(`${column.folder}: gradebook posting requires a connected Canvas course.`);
+      return;
+    }
     const scopedRows = scopeRepoGradeRowsToSelection(rows, selected);
     const candidates = repoGradePostCandidateRows(scopedRows, cellEdits, column.folder);
     const plan = buildRepoGradePostPlan(candidates, column.assignmentId, pointsPossible);
@@ -599,6 +604,10 @@ export function useRepoGradesGradingActions(
   // off - the failure mode docs/REGRESSION.md entry 211 records.
   const handlePostOneCell = async (row: RepoGradeRow, column: RepoGradeColumn, pointsPossible: number | null) => {
     if (!course || !isCurrent()) return;
+    if (!course.institution?.trim() || !repoGradeCanvasCourseId(course)) {
+      setPostSummary(`${column.folder}: gradebook posting requires a connected Canvas course.`);
+      return;
+    }
     const candidates = repoGradePostCandidateRows([row], cellEdits, column.folder);
     const plan = buildRepoGradePostPlan(candidates, column.assignmentId, pointsPossible);
     if (plan.postable.length === 0) {

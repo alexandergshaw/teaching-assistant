@@ -105,10 +105,7 @@ export async function resolveTileLms(
  * "canvas". False for any other recorded value (blackboard, brightspace,
  * moodle, ...).
  */
-export function isCanvasLms(lms: string): boolean {
-  const trimmed = lms.trim().toLowerCase();
-  return trimmed === "" || trimmed === "canvas";
-}
+export { isCanvasLms } from "@/lib/course-lms-options";
 
 /** Display label for a non-Canvas skip summary ("Blackboard",
  * "Brightspace", ...) - reuses course-lms-options.ts's single label mapping

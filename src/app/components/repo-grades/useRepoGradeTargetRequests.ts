@@ -16,27 +16,45 @@ export type TargetCommand = "pause" | "resume" | "stop";
 /** Requests are scoped by owner and polled independently of the automatic-run view. */
 export function useRepoGradeTargetRequests(accountId: string | null) {
   const [current, setCurrent] = useState<{ accountId: string; requests: TargetRequest[]; unavailable: boolean }>();
-  const revision = useRef(0);
+  const scope = useRef<{ accountId: string; revision: number; pending: boolean } | null>(null);
   const refresh = useCallback(async () => {
-    if (!accountId) return;
-    const attempt = ++revision.current;
-    const result = await readRepoGradeTargetRequestsAction(accountId).catch(() => ({ status: "unavailable" } as const));
-    if (revision.current !== attempt) return;
-    setCurrent((previous) => result.status === "loaded"
-      ? { accountId, requests: result.requests as TargetRequest[], unavailable: false }
-      : { accountId, requests: previous?.accountId === accountId ? previous.requests : [], unavailable: true });
+    const active = scope.current;
+    if (!accountId || active?.accountId !== accountId) return;
+    const attempt = ++active.revision;
+    active.pending = true;
+    try {
+      const result = await readRepoGradeTargetRequestsAction(accountId).catch(() => ({ status: "unavailable" } as const));
+      if (scope.current !== active || active.revision !== attempt) return;
+      setCurrent((previous) => result.status === "loaded"
+        ? { accountId, requests: result.requests as TargetRequest[], unavailable: false }
+        : { accountId, requests: previous?.accountId === accountId ? previous.requests : [], unavailable: true });
+    } finally {
+      if (active.revision === attempt) active.pending = false;
+    }
   }, [accountId]);
   useEffect(() => {
-    const requestsRevision = revision;
+    if (!accountId) return;
+    const active = { accountId, revision: 0, pending: false };
+    const activeScope = scope;
+    activeScope.current = active;
     void refresh();
-    const timer = setInterval(() => void refresh(), 5_000);
-    return () => { clearInterval(timer); requestsRevision.current++; };
-  }, [refresh]);
+    const timer = setInterval(() => {
+      // A status read can take longer than the polling cadence. Keep it
+      // current until it settles instead of repeatedly superseding it.
+      if (!active.pending) void refresh();
+    }, 5_000);
+    return () => {
+      clearInterval(timer);
+      if (activeScope.current === active) activeScope.current = null;
+    };
+  }, [accountId, refresh]);
   const control = useCallback(async (id: number, action: TargetCommand) => {
-    if (!accountId) return false;
+    const active = scope.current;
+    if (!accountId || active?.accountId !== accountId) return false;
     const result = await controlRepoGradeTargetRequestAction(accountId, id, action).catch(() => ({ status: "unavailable" } as const));
+    if (scope.current !== active) return false;
     await refresh();
-    return result.status === "loaded" && result.changed;
+    return scope.current === active && result.status === "loaded" && result.changed;
   }, [accountId, refresh]);
   return {
     requests: current?.accountId === accountId ? current.requests : [],

@@ -167,6 +167,7 @@ const EXPORT_GROUP_LABEL = "From your course export";
 export function buildRepoGradeRubricOptions(input: {
   live: readonly RepoGradeLiveRubricInput[];
   export: readonly RepoGradeExportRubricInput[];
+  omitAssignment?: boolean;
 }): RepoGradeRubricOption[] {
   const generateOption: RepoGradeRubricOption = {
     value: GENERATE_VALUE,
@@ -218,7 +219,7 @@ export function buildRepoGradeRubricOptions(input: {
       mayNotResolve: false,
     }));
 
-  return [generateOption, assignmentOption, ...liveOptions, ...exportOptions, manualOption];
+  return [generateOption, ...(input.omitAssignment ? [] : [assignmentOption]), ...liveOptions, ...exportOptions, manualOption];
 }
 
 /** The result of successfully parsing a `<select>`/persisted rubric-source

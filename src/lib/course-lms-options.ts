@@ -49,3 +49,9 @@ export function courseLmsLabel(raw: string | null | undefined): string {
   if (trimmed === "") return "";
   return LABEL_BY_VALUE.get(trimmed) ?? trimmed;
 }
+
+/** Courses created before the LMS field existed used Canvas by default. */
+export function isCanvasLms(lms: string): boolean {
+  const normalized = lms.trim().toLowerCase();
+  return normalized === "" || normalized === "canvas";
+}

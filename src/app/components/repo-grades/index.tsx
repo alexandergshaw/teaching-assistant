@@ -136,6 +136,7 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
     // U4.19d/19e: the one reason `assignments`/`roster` both stay empty with
     // no other signal - see useRepoGradesData.ts's doc comment on this field.
     canvasGateBlockedReason,
+    canvasAvailable,
     reloadScan,
     // Renamed from `linkBlockedReason` - it only ever blocked the LIVE
     // Canvas-submissions link below, never the course-table one.
@@ -473,7 +474,7 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
     exportAvailable: lmsSources.export,
     exportLoading: exportAssignmentsLoading,
     exportError: exportAssignmentsError,
-    liveAvailable: lmsSources.live,
+    liveAvailable: canvasAvailable,
     onAnnounce: setPostSummary,
   });
 
@@ -559,7 +560,7 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
   // U4.19d state (f): the assignments load succeeded, cleanly, with nothing
   // in it - distinct from still-loading, errored, or blocked-by-the-gate,
   // each of which RepoGradesStatusBanners already renders from its own prop.
-  const assignmentsEmpty = !canvasGateBlockedReason && !assignmentsLoading && !assignmentsError && assignments.length === 0;
+  const assignmentsEmpty = canvasAvailable && !assignmentsLoading && !assignmentsError && assignments.length === 0;
 
   return (
     // U0c/U6.26a: no nested container here. page.tsx:238 already wraps every

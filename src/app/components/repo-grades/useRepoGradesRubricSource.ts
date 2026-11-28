@@ -42,6 +42,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Course } from "@/lib/supabase/courses";
+import { courseLmsLabel, isCanvasLms } from "@/lib/course-lms-options";
 import type { CanvasRubric } from "@/lib/canvas-modules";
 import { fetchCanvasMetaAction, getRubricAction, listRubricsAction } from "@/app/actions";
 import { renderPickedRubricText, rubricHasUsablePoints, type RenderableRubric } from "@/lib/rubric-render";
@@ -240,6 +241,7 @@ export function useRepoGradesRubricSource(params: UseRepoGradesRubricSourceParam
   const courseCanvasUrl = course?.canvasUrl ?? null;
   const courseInstitution = course?.institution ?? null;
   const canFetchLive = liveAvailable && !!courseCanvasUrl && courseId !== "";
+  const liveRequestKey = canFetchLive ? JSON.stringify([courseId, courseCanvasUrl, courseInstitution]) : null;
   const [liveRubricsResult, setLiveRubricsResult] = useState<{
     key: string;
     rubrics: CanvasRubric[];
@@ -247,8 +249,8 @@ export function useRepoGradesRubricSource(params: UseRepoGradesRubricSourceParam
   } | null>(null);
 
   useEffect(() => {
-    if (!canFetchLive || !courseCanvasUrl) return;
-    const key = courseId;
+    if (!liveRequestKey || !courseCanvasUrl) return;
+    const key = liveRequestKey;
     let cancelled = false;
     (async () => {
       const result = await listRubricsAction(courseCanvasUrl, courseInstitution ?? undefined);
@@ -267,9 +269,9 @@ export function useRepoGradesRubricSource(params: UseRepoGradesRubricSourceParam
     return () => {
       cancelled = true;
     };
-  }, [canFetchLive, courseId, courseCanvasUrl, courseInstitution]);
+  }, [liveRequestKey, courseCanvasUrl, courseInstitution]);
 
-  const liveResultMatches = liveRubricsResult !== null && liveRubricsResult.key === courseId;
+  const liveResultMatches = liveRubricsResult !== null && liveRubricsResult.key === liveRequestKey;
   const liveItems: CanvasRubric[] = liveResultMatches ? liveRubricsResult!.rubrics : [];
   // "Settled" = either there is nothing to fetch (no live connection), or the
   // fetch for THIS course has landed. Gates the persisted-choice restore
@@ -287,6 +289,7 @@ export function useRepoGradesRubricSource(params: UseRepoGradesRubricSourceParam
   const options: RepoGradeRubricOption[] = buildRepoGradeRubricOptions({
     live: liveItems,
     export: exportRubrics.map((r) => ({ title: r.title })),
+    omitAssignment: !canFetchLive,
   });
 
   // ---------------------------------------------------------------------
@@ -295,16 +298,18 @@ export function useRepoGradesRubricSource(params: UseRepoGradesRubricSourceParam
   // a settled load); every other reason reuses those two Wave 1 functions
   // verbatim rather than re-deriving their wording (AC items 22/23/44/52).
   const liveLoading = canFetchLive && !liveResultMatches;
-  const liveRubricHint: RepoGradeRubricListHint | null = liveLoading
-    ? { tone: "hint", text: "Loading this course's Canvas rubrics..." }
-    : (() => {
-        const described = describeRepoGradeLiveRubricEmptiness({
-          hasConnection: liveAvailable,
-          error: liveResultMatches ? liveRubricsResult!.error : null,
-          items: liveItems,
-        });
-        return described ? { tone: described.reason === "load-failed" ? "error" : "hint", text: described.text } : null;
-      })();
+  const liveRubricHint: RepoGradeRubricListHint | null = !isCanvasLms(course?.lms ?? "")
+    ? { tone: "hint", text: `For this ${courseLmsLabel(course?.lms)} course, use an exported rubric, enter your own, or generate one from the instructions.` }
+    : liveLoading
+      ? { tone: "hint", text: "Loading this course's Canvas rubrics..." }
+      : (() => {
+          const described = describeRepoGradeLiveRubricEmptiness({
+            hasConnection: liveAvailable,
+            error: liveResultMatches ? liveRubricsResult!.error : null,
+            items: liveItems,
+          });
+          return described ? { tone: described.reason === "load-failed" ? "error" : "hint", text: described.text } : null;
+        })();
 
   const exportLoading = params.exportAvailable && params.exportLoading;
   const exportRubricHint: RepoGradeRubricListHint | null = exportLoading
@@ -324,7 +329,11 @@ export function useRepoGradesRubricSource(params: UseRepoGradesRubricSourceParam
   // typed rubric (AC item 73, RUBRIC_MANUAL_TEXT_KEY) - a SEPARATE piece of
   // state from `selectedValue` on purpose (AC item 51: the textarea is a
   // DERIVED value, never the thing switching sources overwrites).
-  const [selectedValue, setSelectedValue] = useState<string>(GENERATE_SELECT_VALUE);
+  const [rawSelectedValue, setSelectedValue] = useState<string>(GENERATE_SELECT_VALUE);
+  const rawSelection = parseRepoGradeRubricValue(rawSelectedValue);
+  const selectedValue = !canFetchLive && (rawSelection?.source === "live" || rawSelection?.source === "assignment")
+    ? GENERATE_SELECT_VALUE
+    : rawSelectedValue;
   const [manualText, setManualText] = useState<string>("");
   const [staleNote, setStaleNote] = useState<string | null>(null);
   // True once the instructor has made an explicit choice (select or typed
@@ -417,7 +426,11 @@ export function useRepoGradesRubricSource(params: UseRepoGradesRubricSourceParam
   if (liveSettled && !hasUserChosen && restoredForCourseId !== courseId) {
     setRestoredForCourseId(courseId);
     const stored = loadRepoGradeRubricChoice(courseId);
-    const resolvedChoice = resolveStoredRepoGradeRubricChoice(choiceToSelectValue(stored), options);
+    const storedValue = choiceToSelectValue(stored);
+    const resolvedChoice = resolveStoredRepoGradeRubricChoice(
+      !canFetchLive && (stored.source === "assignment" || stored.source === "live") ? GENERATE_SELECT_VALUE : storedValue,
+      options,
+    );
     setSelectedValue(resolvedChoice.value);
     setStaleNote(resolvedChoice.degradedReason);
     if (resolvedChoice.degradedReason) {
@@ -765,7 +778,7 @@ export function useRepoGradesRubricSource(params: UseRepoGradesRubricSourceParam
     // A real <select> only ever emits a value buildRepoGradeRubricOptions
     // produced, but never trust input regardless (RULE 5's posture, applied
     // at every boundary this hook touches).
-    if (!parsed) return;
+    if (!parsed || (!canFetchLive && (parsed.source === "live" || parsed.source === "assignment"))) return;
     setSelectedValue(value);
     setHasUserChosen(true);
     setStaleNote(null);

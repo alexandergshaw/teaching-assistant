@@ -3,8 +3,26 @@ import {
   buildRepoGradeAssignmentOptions,
   isPostableAssignmentOption,
   parseRepoGradeAssignmentValue,
+  repoGradeCanvasCourseId,
   type RepoGradeAssignmentOption,
 } from "./repoGradesAssignmentSources";
+
+describe("repoGradeCanvasCourseId", () => {
+  it.each([
+    { lms: "blackboard", canvasUrl: "https://wncc.blackboard.com/ultra/courses/_27684_1/cl/outline" },
+    { lms: "blackboard", canvasUrl: "https://school.example/courses/123" },
+    { lms: "brightspace", canvasUrl: "https://school.example/courses/123" },
+    { lms: "", canvasUrl: "https://wncc.blackboard.com/courses/123" },
+    { lms: "canvas", canvasUrl: "https://canvas.example/courses/123abc" },
+    { lms: "canvas", canvasUrl: "https://canvas.example/?next=/courses/123" },
+  ])("rejects unsupported routes: %o", (course) => {
+    expect(repoGradeCanvasCourseId(course)).toBeNull();
+  });
+
+  it.each(["canvas", "", " Canvas "])("accepts a Canvas course for LMS %j", (lms) => {
+    expect(repoGradeCanvasCourseId({ lms, canvasUrl: "https://canvas.example/courses/123/modules" })).toBe("123");
+  });
+});
 
 describe("buildRepoGradeAssignmentOptions", () => {
   it("returns an empty list when both sources are empty", () => {

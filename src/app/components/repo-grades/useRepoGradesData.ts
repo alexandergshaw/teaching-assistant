@@ -33,7 +33,7 @@ import {
 } from "@/app/actions";
 import type { Course, CourseStudentRepo } from "@/lib/supabase/courses";
 import { courseToInput } from "@/lib/courses-tab-helpers";
-import { parseCanvasCourseId } from "@/lib/canvas-url";
+import { courseLmsLabel, isCanvasLms } from "@/lib/course-lms-options";
 import type { OrgRepoTreesResult } from "@/lib/repo-grade-tree-scan";
 import type { RepoBindingRosterEntry } from "@/lib/repo-student-bindings";
 import { useSupabase } from "@/context/SupabaseProvider";
@@ -54,7 +54,7 @@ import { exportAssignmentOptions } from "@/lib/lms-export-source/export-assignme
 // assignment list with the export's flattened assignment items into one
 // picker-ready list (item 4 below).
 import { overlayRosterUsernames, type RosterUsernameOverlayResult } from "./rosterUsernameOverlay";
-import { buildRepoGradeAssignmentOptions, type RepoGradeAssignmentOption } from "./repoGradesAssignmentSources";
+import { buildRepoGradeAssignmentOptions, repoGradeCanvasCourseId, type RepoGradeAssignmentOption } from "./repoGradesAssignmentSources";
 // Type-only import (erased at build time - safe from a "use client" module
 // even though src/lib/canvas/listings.ts, where CanvasAssignmentBrief is
 // actually defined, is only ever reached at runtime through the "use server"
@@ -143,6 +143,7 @@ export interface UseRepoGradesDataResult {
    * documents for itself.
    */
   canvasGateBlockedReason: string | null;
+  canvasAvailable: boolean;
   /**
    * `overlayRosterUsernames(course.studentRepos, course.roster).rows` -
    * computed on every render (pure, cheap, no I/O) rather than stored, so it
@@ -321,7 +322,8 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
   // ---- roster (needed for binding suggestions) ---------------------------
   const institution = (course?.institution ?? "").trim();
   const canvasUrl = (course?.canvasUrl ?? "").trim();
-  const canvasCourseId = course?.canvasUrl ? parseCanvasCourseId(course.canvasUrl) : null;
+  const canvasLms = isCanvasLms(course?.lms ?? "");
+  const canvasCourseId = repoGradeCanvasCourseId(course);
   const rosterKey = course && institution && canvasCourseId ? `${course.id}:${institution}:${canvasCourseId}` : null;
   const [rosterResult, setRosterResult] = useState<KeyedResult<RepoBindingRosterEntry[]> | null>(null);
 
@@ -406,7 +408,7 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
   // in its own text instead of reporting one blended non-answer:
   //   (a) institution blank,
   //   (b) canvasUrl blank,
-  //   (c) canvasUrl set but parseCanvasCourseId (imported above) found no
+  //   (c) canvasUrl set but the Canvas URL resolver found no
   //       "/courses/<digits>" segment in it - the single most likely real
   //       cause, since pasting the institution's Canvas ROOT address (e.g.
   //       "https://school.instructure.com") instead of a specific course's
@@ -422,7 +424,7 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
   // `liveLinkBlockedReason` below is gated on this identical condition) -
   // rather than leaving the instructor to discover the same one cause
   // separately in three different places on this page.
-  const canvasGateBlockedReason: string | null = !course
+  const canvasGateBlockedReason: string | null = !course || !canvasLms
     ? null
     : !institution
       ? `"${course.name}" has no institution set, so neither its Canvas roster nor its Canvas assignments can be loaded - set one on the course tile first. Until then the assignment picker stays empty, each row's student picker reads "No roster loaded", and posting to the gradebook is unreachable.`
@@ -565,11 +567,13 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
   // UseRepoGradesDataResult.liveLinkBlockedReason above.
   const liveLinkBlockedReason: string | null = !course
     ? "Choose a course tile above first."
-    : !institution
-      ? `"${course.name}" has no institution set, so its Canvas assignment submissions cannot be read until one is set on the course tile.`
-      : !canvasCourseId
-        ? `"${course.name}"'s Canvas course URL has no course id, so its Canvas assignment submissions cannot be read until one is set on the course tile.`
-        : null;
+    : !canvasLms
+      ? `Live submission linking is available for Canvas courses. For ${courseLmsLabel(course.lms)}, enter GitHub usernames on the course roster or review inferred matches below.`
+      : !institution
+        ? `"${course.name}" has no institution set, so its Canvas assignment submissions cannot be read until one is set on the course tile.`
+        : !canvasCourseId
+          ? `"${course.name}"'s Canvas course URL has no course id, so its Canvas assignment submissions cannot be read until one is set on the course tile.`
+          : null;
 
   const linkGithubUsernames = async (
     assignmentId: string,
@@ -667,6 +671,7 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
     assignmentsLoading,
     assignmentsError,
     canvasGateBlockedReason,
+    canvasAvailable: Boolean(rosterKey),
     effectiveStudentRepos,
     rosterOverlay,
     linkFromCourseRoster,

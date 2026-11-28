@@ -192,6 +192,23 @@ describe("repository grading ledger RPC boundary", () => {
     await expect(settleRepoGrade({ mode: "automatic", generation: 42, token }, { outcome: "partial", inputsComplete: true, result: { ...result, unexaminedArtifacts: [{ ...result.unexaminedArtifacts[0], path: "../secret" }] } })).rejects.toThrow("Invalid unexamined artifact provenance");
     expect(rpc).not.toHaveBeenCalled();
   });
+  it("writes a Module 14 source-only draft through the ordinary partial RPC without a score or execution receipt", async () => {
+    rpc.mockResolvedValue({ data: true, error: null });
+    const result = {
+      score: null, reviewReason: "execution-unverified" as const,
+      feedback: "Review-only draft. Code execution and equivalence to the submitted binaries were not verified.",
+      sections: { strengths: "", improvements: "Instructor review is required.", resubmitNotice: "", rawScore: "Not calculated" },
+      rubric: ["Singleton Implementation", "Observer Pattern Logic", "Strategy Pattern Design", "Multi-language Implementation"]
+        .map((area) => ({ area, score: "Unverified", comment: "Instructor review is required." })),
+      unexaminedArtifacts: [{ path: "assignments/module_14/patterns.exe", reason: "optional-binary-unexamined" as const }],
+    };
+    await expect(settleRepoGrade({ mode: "retry", generation: 42, token }, { outcome: "partial", inputsComplete: true, result })).resolves.toBe(true);
+    expect(rpc).toHaveBeenCalledExactlyOnceWith("repo_grade_settle", {
+      p_user_id: "owner", p_generation: 42, p_token: token, p_outcome: "partial", p_inputs_complete: true, p_score: null,
+      p_feedback: result.feedback, p_feedback_sections: result.sections, p_rubric: result.rubric, p_feedback_retention: null,
+      p_unexamined_artifacts: result.unexaminedArtifacts, p_review_reason: result.reviewReason,
+    });
+  });
   it("refuses an oversized result before sending any content to storage", async () => {
     await expect(settleRepoGrade({ mode: "automatic", generation: 42, token }, {
       outcome: "succeeded", inputsComplete: true,

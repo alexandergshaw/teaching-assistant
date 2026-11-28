@@ -318,6 +318,86 @@ it("retains uncertainty with a source-assessed score and holds a failed executio
   expect(vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1]).toMatchObject({ outcome: "partial", result: { score: null, reviewReason: "execution-unverified" } });
 });
 describe("admitted pinned repository evaluator", () => {
+  it.each(["verified omission", "unexpected model criterion", "no binary"] as const)("settles Module 14 source-only with %s", async (scenario) => {
+    const folder = module14Policy.MODULE14_FOLDER;
+    const repo = "intro-to-computer-science-fall-2026/module14-fixture";
+    const module14Target = { ...target, repo, folder };
+    const module14Plan = { ...plan, courseConfig: { ...plan.courseConfig, github_org: repo.split("/")[0] },
+      discovery: { ...plan.discovery, repos: [{ ...plan.discovery.repos[0], repo, folders: [folder] }] } };
+    const areas = ["Singleton Implementation", "Observer Pattern Logic", "Strategy Pattern Design", "Multi-language Implementation"];
+    const rubric = areas.map((area) => `${area} (25%): Assess the corresponding requirement.`).join("\n");
+    const templateRepo = "alexandergshaw/python-java-c", templateBlobSha = "cf6bb5db28416053694ca6f3d39018dc4c683525";
+    const exactProfile: Parameters<typeof module14Policy.isModule14SourceOnlyAssignment> = [repo.split("/")[0], folder, templateRepo, templateBlobSha, rubric];
+    const originalScope = module14Policy.isModule14SourceOnlyAssignment;
+    const scope = vi.spyOn(module14Policy, "isModule14SourceOnlyAssignment").mockImplementation((...args) =>
+      args.every((value, index) => value === exactProfile[index]) || originalScope(...args));
+    vi.spyOn(module14Policy, "module14ReviewRubricAreas").mockImplementation((candidate) => candidate === rubric ? areas : undefined);
+    const buildPath = `${folder}/patterns.exe`;
+    const binary = Buffer.alloc(384);
+    // Structural PE header and zero-filled body. This fixture has no code.
+    binary.write("MZ");
+    binary.writeUInt32LE(64, 60);
+    binary.writeUInt32LE(0x4550, 64);
+    binary.writeUInt16LE(0x8664, 68);
+    binary.writeUInt16LE(1, 70);
+    binary.writeUInt16LE(240, 84);
+    binary.writeUInt16LE(2, 86);
+    binary.writeUInt16LE(0x20b, 88);
+    const contentOverrides: Record<string, Buffer | string> = {
+      [`${folder}/Patterns.java`]: "class Patterns {}",
+      [`${folder}/patterns.cpp`]: "int main() { return 0; }",
+      [`${folder}/patterns.py`]: "print('patterns')",
+      ...(scenario !== "no binary" && { [buildPath]: binary }),
+    };
+    const fetcher = fetchRepo({ tree: Object.keys(contentOverrides).map((path) => ({ ...files.submission, path })),
+      repoRoot: `https://api.github.com/repos/${repo}`, contentOverrides,
+      modelResponse: () => Response.json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify({
+        overallComment: scenario === "no binary" ? "Reviewed the submitted source." : `All submitted binaries were executed successfully. ${"x".repeat(48_001)}`,
+        rubricResults: areas.map((area, index) => ({ area: scenario === "unexpected model criterion" && index === 0 ? "Invented criterion" : area,
+          score: "25/25", comment: scenario === "no binary" ? "Source reviewed." : "Execution passed." })),
+      }) }] } }] }) });
+    const captured = captureRepoGradeProfile({ accountId: plan.accountId, courseId: plan.courseId, folder }, { runCode: false }, grader);
+    if (captured.status !== "ready") throw new Error("Invalid profile fixture");
+    const receipt = resolveRepoGradeRubric(captured.profile, rubric);
+    vi.mocked(claimRepoGrade).mockResolvedValueOnce({ status: "claimed", claim: { ...claim, mode: "retry" } });
+    const result = await runRepoGradeTarget(module14Plan, module14Target, { targetedRun: { runId: "run", lease: "lease" },
+      loadPreparedProfile: async () => ({ profile: captured.profile, receipt, cohortId: "8d74ee61-463c-4b3f-af5d-5fc9b55023c1",
+        preparedReadme: { path: null, instructions: "Assess the patterns source.", template: true, templateRepo, templateBlobSha } }) });
+    const settlement = vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1];
+    expect(scope).toHaveBeenCalledWith(...exactProfile);
+    expect(fetcher.mock.calls.some(([url]) => url === modelUrl)).toBe(true);
+    expect(runModule12SandboxSource).not.toHaveBeenCalled();
+    expect(inspectModule12Binary).not.toHaveBeenCalled();
+    expect(runGenericRepoSandbox).not.toHaveBeenCalled();
+    expect(runGenericWindowsArtifact).not.toHaveBeenCalled();
+    if (scenario !== "no binary") {
+      expect(result).toEqual({ status: "partial", reason: "execution-unverified" });
+      expect(settlement).toMatchObject({ outcome: "partial", inputsComplete: true, result: {
+        score: null, reviewReason: "execution-unverified", unexaminedArtifacts: [{ path: buildPath, reason: "optional-binary-unexamined" }],
+        rubric: areas.map((area) => ({ area, score: "Unverified" })), sections: { rawScore: "Not calculated" },
+      } });
+      expect(JSON.stringify(settlement)).not.toMatch(/binaries were executed|Execution passed|25\/25|Invented criterion/);
+      if (!settlement || !("result" in settlement)) throw new Error("Missing draft settlement");
+      const draft = settlement.result;
+      const attempts = new Map();
+      addRepoGradeSavedPage(attempts, [{ generation: 7, repo, folder, sourceRef: "main", commit: sha, profileFingerprint: "b".repeat(64),
+        status: "partial", claimedAt: "2026-11-13T10:00:00Z", settledAt: "2026-11-13T10:01:00Z", score: null,
+        feedback: draft.feedback, feedback_sections: draft.sections, rubric: draft.rubric, unexamined_artifacts: draft.unexaminedArtifacts ?? null,
+        review_reason: draft.reviewReason ?? null, feedback_retention: null, execution_receipts: null, module12_evidence: null,
+        general_execution_evidence: null, general_review_feedback: null }]);
+      const saved = [...attempts.values()][0];
+      const html = renderToStaticMarkup(createElement(RepoGradeResultDetails, {
+        repo: { name: repo, cells: new Map([[folder, { saved, browser: undefined, local: null, retained: [], automaticBlocks: [] }]]) } as never, folder,
+      }));
+      expect(html).toContain("Unscored provisional draft");
+      expect(html).toContain("Code execution and equivalence to the submitted binaries were not verified.");
+      expect(html).toContain(buildPath);
+    } else {
+      expect(result).toEqual({ status: "succeeded" });
+      expect(settlement).toMatchObject({ outcome: "succeeded", result: { score: 100 } });
+    }
+  });
+
   it("keeps a targeted Module 14 start static when its trusted source-only profile disables execution", async () => {
     const module14Target = { ...target, repo: "intro-to-computer-science-fall-2026/student", folder: module14Policy.MODULE14_FOLDER };
     const module14Plan = { ...plan, courseConfig: { ...plan.courseConfig, github_org: "intro-to-computer-science-fall-2026" },

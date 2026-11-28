@@ -2,18 +2,25 @@ import { createHash } from "node:crypto";
 
 export const MODULE14_FOLDER = "assignments/module_14";
 export const MODULE14_SOURCES = ["Patterns.java", "patterns.cpp", "patterns.py"] as const;
-const MODULE14_RUBRICS = new Set([
-  "38c1014ee1093dde59677835f9fd2f26866b9b4cec530ac2480ec6db3185d579",
-  "5a39d249f62501bbbefcd9d4d6f457dfb2f3ab2ad8bc55474cb725a9af9fe4a8",
-  "da259a765867e7080c1fbcddf53aae1ffc43b18c2e0565ed6dabadbd6719ff9a",
+const MODULE14_RUBRICS = new Map<string, readonly string[]>([
+  ["38c1014ee1093dde59677835f9fd2f26866b9b4cec530ac2480ec6db3185d579",
+    ["Singleton Implementation", "Observer Pattern Logic", "Strategy Pattern Design", "Multi-language Implementation"]],
+  ["5a39d249f62501bbbefcd9d4d6f457dfb2f3ab2ad8bc55474cb725a9af9fe4a8",
+    ["Singleton Pattern Implementation", "Observer Pattern Implementation", "Strategy Pattern Implementation", "Code Structure and Demonstration"]],
+  ["da259a765867e7080c1fbcddf53aae1ffc43b18c2e0565ed6dabadbd6719ff9a",
+    ["Singleton Implementation", "Observer Implementation", "Strategy Implementation", "Language Compliance and Output"]],
 ]);
+
+export function module14ReviewRubricAreas(rubric: string): readonly string[] | undefined {
+  return MODULE14_RUBRICS.get(createHash("sha256").update(rubric).digest("hex"));
+}
 
 export function isModule14SourceOnlyAssignment(owner: string, folder: string | undefined, templateRepo: string,
   templateBlobSha: string, rubric: string): boolean {
   return owner.toLowerCase() === "intro-to-computer-science-fall-2026" && folder === MODULE14_FOLDER
     && templateRepo.toLowerCase() === "alexandergshaw/python-java-c"
     && templateBlobSha === "cf6bb5db28416053694ca6f3d39018dc4c683525"
-    && MODULE14_RUBRICS.has(createHash("sha256").update(rubric).digest("hex"));
+    && module14ReviewRubricAreas(rubric) !== undefined;
 }
 
 export function module14BuildOutput(path: string): string | undefined {

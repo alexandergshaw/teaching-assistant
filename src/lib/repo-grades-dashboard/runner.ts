@@ -197,6 +197,7 @@ function classifyEvaluation(
   rubric: string,
   preparedReadme?: PreparedRepoGradeReadme,
   expectedGeneric = false,
+  expectedModule14SourceOnly = false,
 ): Exclude<RunResult, { status: "deferred-source-throttle" }> & { settlement: RepoGradeAutomaticSettlement } {
   if ("knownFailure" in response) return { status: "failed", settlement: { outcome: "failed" } };
   if ("error" in response) {
@@ -225,6 +226,11 @@ function classifyEvaluation(
   }
   if (response.rubric !== rubric) {
     return { status: "unknown", settlement: { outcome: "unknown" } };
+  }
+  if (expectedModule14SourceOnly && (response.reviewReason || response.unexaminedArtifacts?.length)
+    && (response.reviewReason !== "execution-unverified" || response.module12Evidence || response.generalExecutionEvidence
+      || response.sourceExecutionSummary || response.assessmentMode || response.generalAssessmentMode)) {
+    return { status: "partial", reason: "unsupported-submission", settlement: { outcome: "partial" } };
   }
   const general = response.generalExecutionEvidence;
   if (expectedGeneric && (!general || !validGeneralExecutionEvidence(general) || general.repoCommit !== sourceCommit)) {
@@ -311,6 +317,13 @@ function classifyEvaluation(
     },
     rubric: normalizedRubric,
   };
+  if (expectedModule14SourceOnly && result.reviewReason === "execution-unverified") {
+    const draft = buildUnverifiedExecutionDraft(result, rubric);
+    if (!draft || unretainedRepoGradeFeedbackField(draft.feedback, draft.sections, draft.rubric)) {
+      return { status: "partial", reason: "unsupported-submission", settlement: { outcome: "partial" } };
+    }
+    return { status: "partial", reason: "execution-unverified", settlement: { outcome: "partial", inputsComplete: true, result: draft } };
+  }
   const feedbackRetention = unretainedRepoGradeFeedbackField(result.feedback, result.sections, result.rubric);
   if (feedbackRetention) {
     return {
@@ -411,7 +424,7 @@ export async function runRepoGradeTarget(
       targetedModule12,
       targetedGeneric,
       ...(claim && runtime.fencedRun && { artifactExecutionContext: { claim, run: runtime.fencedRun, recovery: runtime.recoveryRun?.capability === "artifact-continuation-v1" && !runtime.targetedRun } }),
-    }), source.sourceCommit, source.repo, profile, receipt.rubric, prepared.preparedReadme, targetedGeneric);
+    }), source.sourceCommit, source.repo, profile, receipt.rubric, prepared.preparedReadme, targetedGeneric, scopedSourceOnly);
     const { settlement, ...value } = evaluation;
     // Settlement can fail after the evaluator has already returned. Keep the
     // exact payload for this caller even if durability cannot be confirmed.

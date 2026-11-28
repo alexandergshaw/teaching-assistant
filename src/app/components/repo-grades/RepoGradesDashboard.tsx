@@ -76,6 +76,7 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
   const generalAttempt = cell?.saved?.latest.general_execution_evidence ? cell.saved.latest : scored?.general_execution_evidence ? scored : null;
   const generalEvidence = generalAttempt?.general_execution_evidence;
   const draft = cell?.saved?.draft && cell.saved.draft.generation === cell.saved.latest.generation ? cell.saved.draft : null;
+  const reviewLimitation = draft?.feedback?.match(/^Review-only draft\. ([^.]+\.)/)?.[1];
   const sections = scored?.feedback_sections;
   const feedback = scored && {
     overall: scored.feedback ?? "", strengths: sections?.strengths ?? "",
@@ -90,7 +91,7 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
       </Box>
     </div>
     {draft && <Alert severity="warning" role="status">
-      Unscored provisional draft: test coverage was not verified. {draft.unexamined_artifacts?.length ? `Unexamined optional binary files: ${draft.unexamined_artifacts.map((item) => item.path).join(", ")}. These files were not assessed.` : "No optional files were excluded."}
+      Unscored provisional draft. {reviewLimitation ?? "Test coverage was not verified."} {draft.unexamined_artifacts?.length ? `Unexamined optional binary files: ${draft.unexamined_artifacts.map((item) => item.path).join(", ")}. These files were not assessed.` : "No optional files were excluded."}
       Instructor review is required.
     </Alert>}
     {draft && courseId && <RepoGradeInstructorReview key={draft.generation} courseId={courseId} generation={draft.generation} sourceSha={draft.commit} areas={(draft.rubric ?? []).map(item => item.area)} />}

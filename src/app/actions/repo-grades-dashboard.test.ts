@@ -16,7 +16,7 @@ import { readPinnedRepoGradeReadme } from "@/lib/repo-grades-dashboard/preparati
 import { captureRepoGradeProfile } from "@/lib/repo-grades-dashboard/profile";
 import { readCurrentRepoGradeProfilesForOwner } from "@/lib/repo-grades-dashboard/profile-store";
 import { evaluateRepoGrade } from "@/lib/repo-grade-evaluator";
-import { pinnedTemplate, templateRepo, templateSha } from "./repo-grades-dashboard.fixtures";
+import { pinnedTemplate, preparedTemplateReadme, templateRepo, templateSha } from "./repo-grades-dashboard.fixtures";
 import {
   closeRepoGradeStartupBatchAction, planRepoGradeCourseAction, readRepoGradeHistoryAction, readRepoGradeStartupBatchAction, readRepoGradeStartupCoursesAction,
   readRepoGradeStartupReadinessAction, retryRepoGradePreparationAction, runRepoGradeStartupTargetAction,
@@ -625,7 +625,7 @@ it.each(["saved", "lost"] as const)("grades only after a durably frozen Gemini r
   expect(evaluateRepoGrade).toHaveBeenCalledExactlyOnceWith(
     { owner: "School", repo: "Repo" }, profile.instructions, finishArgs.p_receipt.rubric, "gemini", undefined,
     "assignment", true, false, true, currentSha,
-    expect.objectContaining({ preparedReadme: { path: null, instructions: context.instructions, template: true } }),
+    expect.objectContaining({ preparedReadme: preparedTemplateReadme(context.instructions, context.source) }),
   );
   const [, request] = fetchModel.mock.calls[0];
   expect(JSON.parse(String(request.body))).toMatchObject({
@@ -836,7 +836,7 @@ it.each(["", "Correctness (100%): Check the loop."])("prepares one folder rubric
   expect(rpc.mock.invocationCallOrder[1]).toBeLessThan(vi.mocked(claimRepoGrade).mock.invocationCallOrder[0]);
   expect(evaluateRepoGrade).toHaveBeenCalledExactlyOnceWith(
     { owner: "School", repo: "Repo" }, profile.instructions, frozen.p_receipt.rubric, "embedded", undefined,
-    "assignment", true, false, true, currentSha, expect.objectContaining({ preparedReadme: { path: null, instructions, template: true } }),
+    "assignment", true, false, true, currentSha, expect.objectContaining({ preparedReadme: preparedTemplateReadme(instructions, template) }),
   );
   expect(callLlm).not.toHaveBeenCalled();
 

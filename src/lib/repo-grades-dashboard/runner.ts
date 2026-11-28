@@ -12,6 +12,7 @@ import { parseEarnedPossibleScore } from "@/lib/grade/parsing";
 import { matchesFrozenRubricScore } from "./frozen-rubric-score";
 import { isUngraded } from "@/lib/grade/types";
 import { validModule12Evidence } from "@/lib/grade/module12-evidence";
+import { isModule14SourceOnlyAssignment } from "@/lib/grade/module14-optional-artifact";
 import { validGeneralExecutionEvidence, generalEvidenceScorable, validGeneralSourceReview } from "@/lib/grade/general-execution-evidence";
 import { requireAppOwner } from "@/lib/supabase/auth";
 import { table } from "@/lib/supabase/courses.row";
@@ -378,7 +379,10 @@ export async function runRepoGradeTarget(
   if (profile.sourceRef !== plannedRef) return { status: "configuration-changed" };
   const receipt = restoreRepoGradeRubric(profile, prepared.receipt);
   if (!receipt) return { status: "profile-unavailable" };
-  const executionAuthorized = !!runtime.targetedRun || (!!runtime.fencedRun && profile.runCode === true);
+  const scopedSourceOnly = profile.runCode === false && prepared.preparedReadme?.template === true
+    && !!prepared.preparedReadme.templateRepo && !!prepared.preparedReadme.templateBlobSha
+    && isModule14SourceOnlyAssignment(repo.split("/")[0], folder, prepared.preparedReadme.templateRepo, prepared.preparedReadme.templateBlobSha, receipt.rubric);
+  const executionAuthorized = !scopedSourceOnly && (!!runtime.targetedRun || (!!runtime.fencedRun && profile.runCode === true));
   const targetedModule12 = executionAuthorized && folder === "assignments/module_12"
     && source.repo.toLowerCase().startsWith("intro-to-computer-science-fall-2026/") && profile.provider === "gemini";
   const targetedGeneric = executionAuthorized && !targetedModule12 && profile.provider === "gemini";

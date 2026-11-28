@@ -23,7 +23,13 @@ type Target = Pick<RepoGradeStartupTarget, "repo" | "sourceRef" | "sha">;
 type Inventory = RepoGradePreparationInput["inventory"];
 type Evidence = Extract<RepoGradePreparationCapture, { status: "ready" }>;
 
-export type PreparedRepoGradeReadme = Readonly<{ path: string | null; instructions: string; template?: boolean }>;
+export type PreparedRepoGradeReadme = Readonly<{
+  path: string | null;
+  instructions: string;
+  template?: boolean;
+  templateRepo?: string;
+  templateBlobSha?: string;
+}>;
 export type PreparedRepoGradeProfile = RepoGradeCohort & {
   profile: RepoGradeProfile;
   preparedReadme?: PreparedRepoGradeReadme;
@@ -249,7 +255,8 @@ async function prepareRepoGradeStartupRubric(
   if (!captured) return unavailable("pinned-target-missing");
 
   const preparedReadme: PreparedRepoGradeReadme | undefined = captured.source.kind === "template-readme"
-    ? { path: null, instructions: evidence.instructions, template: true }
+    ? { path: null, instructions: evidence.instructions, template: true, templateRepo: captured.source.repo,
+      ...(captured.source.blobSha && { templateBlobSha: captured.source.blobSha }) }
     : captured.source.kind === "saved" ? undefined : {
     path: captured.source.kind === "pinned-readme" ? captured.source.path : null,
     instructions: evidence.instructions,

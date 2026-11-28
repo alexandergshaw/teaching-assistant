@@ -16,6 +16,7 @@ import { runModule12SandboxSource } from "@/lib/grade/module12-vercel-sandbox";
 import { inspectModule12Binary } from "@/lib/grade/module12-binary-sandbox";
 import { runGenericRepoSandbox } from "@/lib/grade/generic-repo-sandbox";
 import { runGenericWindowsArtifact } from "@/lib/grade/generic-windows-sandbox";
+import * as module14Policy from "@/lib/grade/module14-optional-artifact";
 
 vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn() }));
 vi.mock("@vercel/sandbox", () => ({ Sandbox: { create: vi.fn() } }));
@@ -317,6 +318,32 @@ it("retains uncertainty with a source-assessed score and holds a failed executio
   expect(vi.mocked(settleRepoGrade).mock.calls.at(-1)?.[1]).toMatchObject({ outcome: "partial", result: { score: null, reviewReason: "execution-unverified" } });
 });
 describe("admitted pinned repository evaluator", () => {
+  it("keeps a targeted Module 14 start static when its trusted source-only profile disables execution", async () => {
+    const module14Target = { ...target, repo: "intro-to-computer-science-fall-2026/student", folder: module14Policy.MODULE14_FOLDER };
+    const module14Plan = { ...plan, courseConfig: { ...plan.courseConfig, github_org: "intro-to-computer-science-fall-2026" },
+      discovery: { ...plan.discovery, repos: [{ ...plan.discovery.repos[0], repo: module14Target.repo, folders: [module14Target.folder] }] } };
+    const captured = captureRepoGradeProfile({ accountId: plan.accountId, courseId: plan.courseId, folder: module14Target.folder }, { runCode: false }, grader);
+    if (captured.status !== "ready") throw new Error("Invalid profile fixture");
+    const receipt = resolveRepoGradeRubric(captured.profile, frozenRubric);
+    const templateRepo = "alexandergshaw/python-java-c", templateBlobSha = "cf6bb5db28416053694ca6f3d39018dc4c683525";
+    const policy = vi.spyOn(module14Policy, "isModule14SourceOnlyAssignment").mockReturnValueOnce(true);
+    const evaluatePinned = vi.fn(async () => ({ knownFailure: true as const }));
+    vi.mocked(claimRepoGrade).mockResolvedValueOnce({ status: "claimed", claim: { ...claim, mode: "retry" } });
+    try {
+      await expect(runRepoGradeTarget(module14Plan, module14Target, {
+        deadlineMs: Date.now() + 100_000, targetedRun: { runId: "run", lease: "lease" }, evaluatePinned,
+        loadPreparedProfile: async () => ({ profile: captured.profile, receipt, cohortId: "8d74ee61-463c-4b3f-af5d-5fc9b55023c1",
+          preparedReadme: { path: null, instructions: "Trusted template.", template: true, templateRepo, templateBlobSha } }),
+      })).resolves.toEqual({ status: "failed" });
+      expect(policy).toHaveBeenCalledWith("intro-to-computer-science-fall-2026", module14Target.folder, templateRepo, templateBlobSha, frozenRubric);
+      expect(evaluatePinned).toHaveBeenCalledWith(expect.objectContaining({
+        runCode: false, targetedGeneric: false, targetedModule12: false,
+      }));
+    } finally {
+      policy.mockRestore();
+    }
+  });
+
   it("labels a model grade provisional when execution coverage is unverified", async () => {
     const fetcher = fetchRepo({ tree: [files.submission], contentOverrides: { [files.submission.path]: `if __name__ == "__main__": print("hello")` } });
     const runtime = preparedRuntime({ instructions: "Assess the submitted program." });

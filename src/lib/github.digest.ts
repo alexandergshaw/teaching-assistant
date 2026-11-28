@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { classifyModule12Artifact } from "./grade/module12-optional-artifact";
+import { isModule14BuildOutput, isModule14SourceOnlyAssignment, MODULE14_FOLDER, MODULE14_SOURCES, module14BuildOutput, module14JavaDeclarations } from "./grade/module14-optional-artifact";
 import { genericArtifactInventory } from "./grade/generic-artifact-inventory";
 import { boundSubmissionInventory, type SubmissionFileInventory } from "./grade/submission-file-inventory";
 // Codebase digest for LLM analysis (course/rubric generation, grading).
@@ -313,6 +314,7 @@ export async function ingestRepo(
     pathPrefix?: string; sourceCommit?: string; signal?: AbortSignal; treeCacheAccountId?: string;
     excludeInstructionReadme?: boolean;
     module12OptionalArtifacts?: { trustedInstructions: string; trustedRubric: string; readBytes: (files: readonly RepoTreeEntry[], signal?: AbortSignal) => Promise<ReadonlyMap<string, Buffer>> };
+    module14OptionalArtifacts?: { templateRepo: string; templateBlobSha: string; trustedRubric: string; readBytes: (files: readonly RepoTreeEntry[], signal?: AbortSignal) => Promise<ReadonlyMap<string, Buffer>> };
     genericVerifiedArtifacts?: { readBytes: (files: readonly RepoTreeEntry[], signal?: AbortSignal) => Promise<ReadonlyMap<string, Buffer>> };
     readPinnedFiles?: (files: readonly RepoTreeEntry[], signal?: AbortSignal) => Promise<ReadonlyMap<string, string>>;
   } = {},
@@ -365,6 +367,32 @@ export async function ingestRepo(
         for (const entry of possible) {
           const body = bytes.get(entry.path);
           if (body && classifyModule12Artifact(entry.path, body, paths, opts.module12OptionalArtifacts.trustedInstructions)) optionalArtifacts.push(entry.path);
+        }
+      } catch (error) {
+        signal?.throwIfAborted();
+        if (error instanceof GithubGradeSourceRateLimitError) throw error;
+      }
+    }
+  }
+  const module14 = opts.module14OptionalArtifacts;
+  if (sourceCommit !== undefined && !treeTruncated && !treeResult.unenumerated && module14
+    && isModule14SourceOnlyAssignment(owner, folder, module14.templateRepo, module14.templateBlobSha, module14.trustedRubric)) {
+    const regular = scopedTree.filter((entry) => entry.type === "blob" && ["100644", "100755"].includes(entry.mode ?? ""));
+    const source = MODULE14_SOURCES.map((name) => regular.find((entry) => entry.path === `${MODULE14_FOLDER}/${name}`));
+    const candidates = regular.filter((entry) => module14BuildOutput(entry.path));
+    if (candidates.length && source.every((entry) => entry && entry.size > 0)) {
+      try {
+        const java = source[0]!;
+        const bytes = await module14.readBytes([java, ...candidates], signal);
+        const verifiedSource = bytes.get(java.path);
+        if (verifiedSource) {
+          const declarations = module14JavaDeclarations(verifiedSource);
+          if (declarations.has("Patterns")) {
+            for (const entry of candidates) {
+              const body = bytes.get(entry.path);
+              if (body && isModule14BuildOutput(entry.path, body, declarations)) optionalArtifacts.push(entry.path);
+            }
+          }
         }
       } catch (error) {
         signal?.throwIfAborted();

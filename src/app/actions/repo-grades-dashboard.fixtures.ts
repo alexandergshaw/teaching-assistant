@@ -24,3 +24,7 @@ export function pinnedTemplate(instructions: string) {
     },
   };
 }
+
+export function preparedTemplateReadme(instructions: string, source: ReturnType<typeof pinnedTemplate>["source"]) {
+  return { path: null, instructions, template: true, templateRepo: source.repo, templateBlobSha: source.blobSha };
+}

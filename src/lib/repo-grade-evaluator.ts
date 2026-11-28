@@ -122,6 +122,13 @@ export async function evaluateRepoGrade(
       ...(excludeInstructionReadme && { excludeInstructionReadme: true }),
       ...(automaticGrader && { treeCacheAccountId: automaticGrader.accountId, readPinnedFiles: makePinnedArchiveReader({ ...parsed, accountId: automaticGrader.accountId, sha: sourceCommit }) }),
       ...(automaticGrader && execution?.preparedReadme?.template === true && { module12OptionalArtifacts: { trustedInstructions: execution.preparedReadme.instructions, trustedRubric: rubric, readBytes: makePinnedArchiveBytesReader({ ...parsed, accountId: automaticGrader.accountId, sha: sourceCommit }) } }),
+      ...(automaticGrader && runCode === false && !execution?.targetedGeneric && execution?.preparedReadme?.template === true
+        && execution.preparedReadme.templateRepo && execution.preparedReadme.templateBlobSha && {
+        module14OptionalArtifacts: {
+          templateRepo: execution.preparedReadme.templateRepo, templateBlobSha: execution.preparedReadme.templateBlobSha,
+          trustedRubric: rubric, readBytes: makePinnedArchiveBytesReader({ ...parsed, accountId: automaticGrader.accountId, sha: sourceCommit }),
+        },
+      }),
       ...(automaticGrader && execution?.targetedGeneric && { genericVerifiedArtifacts: { readBytes: makePinnedArchiveBytesReader({ ...parsed, accountId: automaticGrader.accountId, sha: sourceCommit }) } }),
     })
     : await ingestRepo(parsed.owner, parsed.repo, { pathPrefix, ...(excludeInstructionReadme && { excludeInstructionReadme: true }) }, targetBranch);

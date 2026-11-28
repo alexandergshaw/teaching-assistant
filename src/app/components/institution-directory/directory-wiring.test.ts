@@ -47,6 +47,7 @@ describe("institution directory delivery seams", () => {
     expect(panel).toContain("(profileGenerations.current.get(file.acronym) ?? 0) !== generation");
     expect(cell).toContain('accept=".pptx,.potx"');
     expect(cell).toContain("downloadInstitutionDeckAction(account, acronym, file.id)");
+    expect(cell).toContain("downloadInstitutionDeckFile(result.url, file, signal)");
     expect(cell).toContain("finishInstitutionDeckUploadAction(account, acronym, upload.id");
   });
 

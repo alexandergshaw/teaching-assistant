@@ -5,6 +5,7 @@ import { Button, Stack, Typography } from "@mui/material";
 import { downloadInstitutionDeckAction, finishInstitutionDeckUploadAction, startInstitutionDeckUploadAction } from "@/app/actions/institution-branded-decks";
 import { INSTITUTION_BRANDED_DECKS_BUCKET, institutionDeckFile, type InstitutionBrandedDeck } from "@/lib/institution-branded-decks";
 import { createClient } from "@/lib/supabase/client";
+import { downloadInstitutionDeckFile } from "./download-institution-deck";
 
 type Props = {
   account: string;
@@ -79,13 +80,7 @@ export default function InstitutionBrandedDeckCell({ account, acronym, files, di
       const result = await downloadInstitutionDeckAction(account, acronym, file.id);
       if (signal.aborted) return;
       if ("error" in result) throw new Error(result.error);
-      const link = document.createElement("a");
-      link.href = result.url;
-      link.download = file.name;
-      link.rel = "noopener noreferrer";
-      document.body.append(link);
-      link.click();
-      link.remove();
+      await downloadInstitutionDeckFile(result.url, file, signal);
     } catch (error) {
       if (!signal.aborted) setErrors([error instanceof Error ? error.message : "Could not open that slide deck. Try again."]);
     } finally {
